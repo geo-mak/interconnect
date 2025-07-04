@@ -1,10 +1,10 @@
 [package]
-name = "autonomic_rpc"
+name = "autonomic_interconnect"
 version = "0.1.0"
 edition = "2024"
 license = "MIT"
 description = "High performance remote procedure call protocol"
-repository = "https://github.com/geo-mak/autonomic_rpc"
+repository = "https://github.com/geo-mak/autonomic_interconnect"
 keywords = ["rpc", "async", "networking", "tcp", "unix-socket"]
 categories = ["network-programming", "asynchronous"]
 

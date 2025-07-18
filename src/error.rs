@@ -22,76 +22,60 @@ pub enum RpcError {
     /// Timeout errors from tokio.
     Elapsed(Elapsed),
 
-    /// Connection errors.
+    /// General connection-related errors.
     Connection(String),
 
-    /// Protocol errors.
+    /// Errors that violates the protocol-specific invariants.
     Protocol(String),
 
-    /// Server errors.
+    /// Errors originated from the server implementation.
     Server(String),
 
-    /// Client errors.
+    /// Errors originated from the client implementation.
     Client(String),
 
-    /// Invalid request.
     InvalidRequest(String),
 
-    /// Timeout.
     Timeout,
 
-    /// Connection closed.
     ConnectionClosed,
 
     /// Method not implemented/not found.
     NotImplemented(String),
 
-    /// Method error with message.
+    /// Method-originated error.
     Method(String),
 }
 
 impl RpcError {
-    /// Create a new connection error.
+    /// Creates a new connection error.
     pub fn connection<S: Into<String>>(msg: S) -> Self {
         Self::Connection(msg.into())
     }
 
-    /// Create a new protocol error.
+    /// Creates a new protocol error.
     pub fn protocol<S: Into<String>>(msg: S) -> Self {
         Self::Protocol(msg.into())
     }
 
-    /// Create a new server error.
+    /// Creates a new server error.
     pub fn server<S: Into<String>>(msg: S) -> Self {
         Self::Server(msg.into())
     }
 
-    /// Create a new client error.
+    /// Creates a new client error.
     pub fn client<S: Into<String>>(msg: S) -> Self {
         Self::Client(msg.into())
     }
 
-    /// Create a method not implemented error.
+    /// Creates a method not implemented error.
     pub fn not_implemented<S: Into<String>>(method: S) -> Self {
         Self::NotImplemented(method.into())
     }
 
-    /// Create a new method error.
+    /// Creates a new method error.
     pub fn method<S: Into<String>>(msg: S) -> Self {
         Self::Method(msg.into())
-    }
-
-    /// Check if the error is recoverable.
-    pub fn is_recoverable(&self) -> bool {
-        matches!(self, RpcError::Timeout | RpcError::Connection(_))
-    }
-
-    /// Check if the error is a network-related error
-    pub fn is_network_error(&self) -> bool {
-        matches!(
-            self,
-            RpcError::Io(_) | RpcError::Connection(_) | RpcError::ConnectionClosed
-        )
     }
 }
 

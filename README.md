@@ -6,6 +6,7 @@ High performance remote procedure call protocol.
 
 ## Features
 
-- **Asynchronous RPC servers and clients** with bidirectional communication.
-- **Support for TCP and Unix domain sockets**.
-- **Lightweight message serialization**.
+- Asynchronous with bidirectional communication.
+- Layered extensible architecture with high efficiency abstractions and clear semantics.
+- Lightweight message format.
+- Out-of-the-box support for TCP and Unix domain sockets.

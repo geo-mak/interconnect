@@ -8,4 +8,16 @@ repository = "https://github.com/geo-mak/autonomic_interconnect"
 keywords = ["rpc", "async", "networking", "tcp", "unix-socket"]
 categories = ["network-programming", "asynchronous"]
 
+[dev-dependencies]
+env_logger = "0.11.8"
+
 [dependencies]
+tokio = { version = "1.39.3", features = ["full"]}
+futures = { version = "0.3.31"}
+async-trait = "0.1"
+
+bincode =  { version = "2.0.1", features = ["serde", "derive"] }
+serde = { version = "1.0.209", features = ["derive"] }
+
+uuid = { version = "1.17.0", features = ["v4", "serde"] }
+log = "0.4"

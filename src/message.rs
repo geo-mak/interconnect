@@ -48,9 +48,6 @@ pub struct Message {
     /// Serialized parameters/payload.
     pub data: Vec<u8>,
 
-    /// Optional correlation ID for request/response matching.
-    pub matching_id: Option<Uuid>,
-
     /// Message timestamp (Unix timestamp in milliseconds).
     // TODO: Rarely useful.
     pub timestamp: u64,
@@ -61,18 +58,12 @@ pub struct Message {
 
 impl Message {
     /// Creates a new message.
-    pub fn new(
-        message_type: MessageType,
-        method: String,
-        data: Vec<u8>,
-        matching_id: Option<Uuid>,
-    ) -> Self {
+    pub fn new(id: Uuid, message_type: MessageType, method: String, data: Vec<u8>) -> Self {
         Self {
-            id: Uuid::new_v4(),
+            id,
             kind: message_type,
             method,
             data,
-            matching_id,
             timestamp: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
@@ -81,50 +72,45 @@ impl Message {
         }
     }
 
+    /// Creates a new message with auto-generated id.
+    pub fn new_with_id(message_type: MessageType, method: String, data: Vec<u8>) -> Self {
+        Self::new(Uuid::new_v4(), message_type, method, data)
+    }
+
     /// Creates a request message.
     pub fn request(method: String, data: Vec<u8>) -> Self {
-        Self::new(MessageType::Request, method, data, None)
+        Self::new_with_id(MessageType::Request, method, data)
     }
 
     /// Creates a response message.
-    pub fn response(matching_id: Uuid, method: String, data: Vec<u8>) -> Self {
-        Self::new(MessageType::Response, method, data, Some(matching_id))
+    pub fn response(id: Uuid, method: String, data: Vec<u8>) -> Self {
+        Self::new(id, MessageType::Response, method, data)
     }
 
     /// Creates a notification message.
     pub fn notification(method: String, data: Vec<u8>) -> Self {
-        Self::new(MessageType::Notification, method, data, None)
+        Self::new_with_id(MessageType::Notification, method, data)
     }
 
     /// Creates a call message (bidirectional).
     pub fn call(method: String, data: Vec<u8>) -> Self {
-        Self::new(MessageType::Call, method, data, None)
+        Self::new_with_id(MessageType::Call, method, data)
     }
 
     /// Creates an error message.
-    pub fn error(matching_id: Uuid, error_msg: String) -> Self {
+    pub fn error(id: Uuid, error_msg: String) -> Self {
         let data = Message::encode_data(&error_msg).unwrap_or_default();
-        Self::new(
-            MessageType::Error,
-            "error".to_string(),
-            data,
-            Some(matching_id),
-        )
+        Self::new(id, MessageType::Error, "error".to_string(), data)
     }
 
     /// Creates a ping message.
     pub fn ping() -> Self {
-        Self::new(MessageType::Ping, "ping".to_string(), Vec::new(), None)
+        Self::new_with_id(MessageType::Ping, "ping".to_string(), Vec::new())
     }
 
     /// Creates a pong message.
-    pub fn pong(matching_id: Uuid) -> Self {
-        Self::new(
-            MessageType::Pong,
-            "pong".to_string(),
-            Vec::new(),
-            Some(matching_id),
-        )
+    pub fn pong(id: Uuid) -> Self {
+        Self::new(id, MessageType::Pong, "pong".to_string(), Vec::new())
     }
 
     /// Encodes the message into binary format.
@@ -166,12 +152,12 @@ impl Message {
 
     /// Creates a response message with typed result.
     pub fn response_with_result<R: Serialize>(
-        matching_id: Uuid,
+        id: Uuid,
         method: String,
         result: R,
     ) -> RpcResult<Self> {
         let data = Self::encode_data(&result)?;
-        Ok(Self::response(matching_id, method, data))
+        Ok(Self::response(id, method, data))
     }
 
     /// Creates a notification message with typed parameters.
@@ -187,14 +173,9 @@ impl Message {
     }
 
     /// Creates an error message with a typed error.
-    pub fn error_with_details<E: Serialize>(matching_id: Uuid, error: E) -> RpcResult<Self> {
+    pub fn error_with_details<E: Serialize>(id: Uuid, error: E) -> RpcResult<Self> {
         let data = Self::encode_data(&error)?;
-        Ok(Self::new(
-            MessageType::Error,
-            "error".to_string(),
-            data,
-            Some(matching_id),
-        ))
+        Ok(Self::new(id, MessageType::Error, "error".to_string(), data))
     }
 
     /// Checks if this message expects a response.
@@ -229,7 +210,6 @@ mod tests {
         assert_eq!(original_msg.method, deserialized_msg.method);
         assert_eq!(original_msg.kind, deserialized_msg.kind);
         assert_eq!(original_msg.data, deserialized_msg.data);
-        assert_eq!(original_msg.matching_id, deserialized_msg.matching_id);
         assert_eq!(original_msg.version, deserialized_msg.version);
     }
 
@@ -248,16 +228,15 @@ mod tests {
         let value: i32 = resp.decode_data().unwrap();
         assert_eq!(value, 8);
     }
-    
+
     #[test]
     fn test_error_with_details() {
-        let matching_id = Uuid::new_v4();
+        let id = Uuid::new_v4();
         let err_msg = "Division by zero";
-        let error_msg = Message::error_with_details(matching_id, err_msg);
+        let error_msg = Message::error_with_details(id, err_msg);
         assert!(error_msg.is_ok());
         let error_msg = error_msg.unwrap();
         assert_eq!(error_msg.kind, MessageType::Error);
-        assert!(error_msg.matching_id.is_some());
     }
 
     #[test]

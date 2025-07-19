@@ -7,14 +7,14 @@ use crate::{RpcError, error::RpcResult};
 
 const CONFIG: Configuration = config::standard();
 
-/// An RPC call message.
+/// RPC call message.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Call {
     pub method: String,
     pub data: Vec<u8>,
 }
 
-/// An RPC reply message.
+/// RPC reply message.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Reply {
     pub data: Vec<u8>,
@@ -121,7 +121,7 @@ impl Message {
         bincode::serde::encode_to_vec(value, CONFIG).map_err(Into::into)
     }
 
-    /// Decodes a data from bytes into a value.
+    /// Decodes data from bytes into a value.
     pub fn decode_as<T: for<'de> Deserialize<'de>>(data: &[u8]) -> RpcResult<T> {
         bincode::serde::borrow_decode_from_slice(data, CONFIG)
             .map(|(value, _)| value)

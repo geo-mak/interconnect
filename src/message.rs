@@ -3,27 +3,36 @@ use serde::{Deserialize, Serialize};
 
 use uuid::Uuid;
 
-use crate::error::RpcResult;
+use crate::{RpcError, error::RpcResult};
 
 const CONFIG: Configuration = config::standard();
 
-/// Message types in the RPC protocol.
+/// An RPC call message.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Call {
+    pub method: String,
+    pub data: Vec<u8>,
+}
+
+/// An RPC reply message.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Reply {
+    pub data: Vec<u8>,
+}
+
+/// Message types of the RPC protocol.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum MessageType {
-    /// A request message from client to server.
-    Request,
-
-    /// A response message from server to client.
-    Response,
-
     /// A bidirectional call (can be initiated by either side).
-    Call,
+    Call(Call),
+
+    /// A response message (can be returned by either side).
+    Reply(Reply),
+
+    Error(RpcError),
 
     /// A notification message (no response expected).
-    Notification,
-
-    /// An error response.
-    Error,
+    Notification(Call),
 
     /// A heartbeat/ping message.
     Ping,
@@ -35,82 +44,64 @@ pub enum MessageType {
 /// Core message structure for the RPC protocol.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Message {
+    /// Protocol version.
+    pub version: u8,
+
     /// A 128-bit (16 byte) unique identifier for the message.
     // TODO: Use integer with tracker later, to reduce message size.
     pub id: Uuid,
 
-    /// Type of the message.
+    /// The payload of the message.
     pub kind: MessageType,
-
-    /// Method name being called.
-    pub method: String,
-
-    /// Serialized parameters/payload.
-    pub data: Vec<u8>,
-
-    /// Message timestamp (Unix timestamp in milliseconds).
-    // TODO: Rarely useful.
-    pub timestamp: u64,
-
-    /// Protocol version.
-    pub version: u8,
 }
 
 impl Message {
     /// Creates a new message.
-    pub fn new(id: Uuid, message_type: MessageType, method: String, data: Vec<u8>) -> Self {
+    pub fn new(id: Uuid, kind: MessageType) -> Self {
         Self {
-            id,
-            kind: message_type,
-            method,
-            data,
-            timestamp: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_millis() as u64,
             version: 1,
+            id,
+            kind,
         }
     }
 
     /// Creates a new message with auto-generated id.
-    pub fn new_with_id(message_type: MessageType, method: String, data: Vec<u8>) -> Self {
-        Self::new(Uuid::new_v4(), message_type, method, data)
+    pub fn new_with_id(kind: MessageType) -> Self {
+        Self {
+            version: 1,
+            id: Uuid::new_v4(),
+            kind,
+        }
     }
 
-    /// Creates a request message.
-    pub fn request(method: String, data: Vec<u8>) -> Self {
-        Self::new_with_id(MessageType::Request, method, data)
+    /// Creates a call message (bidirectional) with auto-generated id.
+    pub fn call(method: String, data: Vec<u8>) -> Self {
+        Self::new_with_id(MessageType::Call(Call { method, data }))
     }
 
     /// Creates a response message.
-    pub fn response(id: Uuid, method: String, data: Vec<u8>) -> Self {
-        Self::new(id, MessageType::Response, method, data)
+    pub fn reply(id: Uuid, data: Vec<u8>) -> Self {
+        Self::new(id, MessageType::Reply(Reply { data }))
+    }
+
+    /// Creates an error message.
+    pub fn error(id: Uuid, err: RpcError) -> Self {
+        Self::new(id, MessageType::Error(err))
     }
 
     /// Creates a notification message.
     pub fn notification(method: String, data: Vec<u8>) -> Self {
-        Self::new_with_id(MessageType::Notification, method, data)
+        Self::new_with_id(MessageType::Notification(Call { method, data }))
     }
 
-    /// Creates a call message (bidirectional).
-    pub fn call(method: String, data: Vec<u8>) -> Self {
-        Self::new_with_id(MessageType::Call, method, data)
-    }
-
-    /// Creates an error message.
-    pub fn error(id: Uuid, error_msg: String) -> Self {
-        let data = Message::encode_data(&error_msg).unwrap_or_default();
-        Self::new(id, MessageType::Error, "error".to_string(), data)
-    }
-
-    /// Creates a ping message.
+    /// Creates a ping message with auto-generated id.
     pub fn ping() -> Self {
-        Self::new_with_id(MessageType::Ping, "ping".to_string(), Vec::new())
+        Self::new_with_id(MessageType::Ping)
     }
 
     /// Creates a pong message.
     pub fn pong(id: Uuid) -> Self {
-        Self::new(id, MessageType::Pong, "pong".to_string(), Vec::new())
+        Self::new(id, MessageType::Pong)
     }
 
     /// Encodes the message into binary format.
@@ -119,146 +110,161 @@ impl Message {
     }
 
     /// Decodes a message from binary format.
-    pub fn decode(data: &[u8]) -> crate::RpcResult<Self> {
-        bincode::serde::borrow_decode_from_slice(data, CONFIG)
+    pub fn decode(message: &[u8]) -> crate::RpcResult<Self> {
+        bincode::serde::borrow_decode_from_slice(message, CONFIG)
             .map(|(msg, _)| msg)
             .map_err(Into::into)
     }
 
-    /// Encodes a value into a data.
-    pub fn encode_data<T: Serialize>(value: &T) -> RpcResult<Vec<u8>> {
+    /// Encodes a value into binary format.
+    pub fn encode_to_bytes<T: Serialize>(value: &T) -> RpcResult<Vec<u8>> {
         bincode::serde::encode_to_vec(value, CONFIG).map_err(Into::into)
     }
 
-    /// Decodes the message data into a value.
-    pub fn decode_data<T: for<'de> Deserialize<'de>>(&self) -> RpcResult<T> {
-        bincode::serde::borrow_decode_from_slice(&self.data, CONFIG)
-            .map(|(value, _)| value)
-            .map_err(Into::into)
-    }
-
     /// Decodes a data from bytes into a value.
-    pub fn decode_data_from<T: for<'de> Deserialize<'de>>(data: &[u8]) -> RpcResult<T> {
+    pub fn decode_as<T: for<'de> Deserialize<'de>>(data: &[u8]) -> RpcResult<T> {
         bincode::serde::borrow_decode_from_slice(data, CONFIG)
             .map(|(value, _)| value)
             .map_err(Into::into)
     }
 
     /// Creates a request message with typed parameters.
-    pub fn request_with_params<P: Serialize>(method: String, params: P) -> RpcResult<Self> {
-        let data = Self::encode_data(&params)?;
-        Ok(Self::request(method, data))
-    }
-
-    /// Creates a response message with typed result.
-    pub fn response_with_result<R: Serialize>(
-        id: Uuid,
-        method: String,
-        result: R,
-    ) -> RpcResult<Self> {
-        let data = Self::encode_data(&result)?;
-        Ok(Self::response(id, method, data))
-    }
-
-    /// Creates a notification message with typed parameters.
-    pub fn notification_with_params<P: Serialize>(method: String, params: P) -> RpcResult<Self> {
-        let data = Self::encode_data(&params)?;
-        Ok(Self::notification(method, data))
-    }
-
-    /// Creates a call message with typed parameters.
-    pub fn call_with_params<P: Serialize>(method: String, params: P) -> RpcResult<Self> {
-        let data = Self::encode_data(&params)?;
+    pub fn call_with<P: Serialize>(method: String, params: P) -> RpcResult<Self> {
+        let data = Self::encode_to_bytes(&params)?;
         Ok(Self::call(method, data))
     }
 
-    /// Creates an error message with a typed error.
-    pub fn error_with_details<E: Serialize>(id: Uuid, error: E) -> RpcResult<Self> {
-        let data = Self::encode_data(&error)?;
-        Ok(Self::new(id, MessageType::Error, "error".to_string(), data))
+    /// Creates a response message with typed value.
+    pub fn reply_with<R: Serialize>(id: Uuid, value: R) -> RpcResult<Self> {
+        let data = Self::encode_to_bytes(&value)?;
+        Ok(Self::reply(id, data))
+    }
+
+    /// Creates a notification message with typed parameters.
+    pub fn notification_with<P: Serialize>(method: String, params: P) -> RpcResult<Self> {
+        let data = Self::encode_to_bytes(&params)?;
+        Ok(Self::notification(method, data))
     }
 
     /// Checks if this message expects a response.
     pub fn expects_response(&self) -> bool {
-        matches!(
-            self.kind,
-            MessageType::Request | MessageType::Call | MessageType::Ping
-        )
+        matches!(self.kind, MessageType::Call(_) | MessageType::Ping)
     }
 
     /// Checks if this message is a response.
     pub fn is_response(&self) -> bool {
         matches!(
             self.kind,
-            MessageType::Response | MessageType::Error | MessageType::Pong
+            MessageType::Reply(_) | MessageType::Error(_) | MessageType::Pong
         )
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use crate::error::ErrKind;
+
     use super::*;
 
     #[test]
     fn test_message_encoding_decoding() {
-        let original_msg = Message::notification("notify".to_string(), vec![10, 20, 30]);
-        let serialized = original_msg.encode().unwrap();
+        let original_msg = Message::call("test_method".to_string(), vec![10, 20, 30]);
 
+        let serialized = original_msg.encode().unwrap();
         let deserialized_msg = Message::decode(&serialized).unwrap();
 
-        assert_eq!(original_msg.id, deserialized_msg.id);
-        assert_eq!(original_msg.method, deserialized_msg.method);
-        assert_eq!(original_msg.kind, deserialized_msg.kind);
-        assert_eq!(original_msg.data, deserialized_msg.data);
         assert_eq!(original_msg.version, deserialized_msg.version);
+        assert_eq!(original_msg.id, original_msg.id);
+
+        match (&original_msg.kind, &deserialized_msg.kind) {
+            (MessageType::Call(orig_call), MessageType::Call(decoded_call)) => {
+                assert_eq!(orig_call.method, decoded_call.method);
+                assert_eq!(orig_call.data, decoded_call.data);
+            }
+            _ => panic!("Expected call"),
+        }
     }
 
     #[test]
-    fn test_request_response_and_params() {
-        // Test direct message creation with typed parameters for 'add'
-        let req_add = Message::request_with_params("add".to_string(), (5, 3)).unwrap();
-        assert_eq!(req_add.method, "add");
-        assert_eq!(req_add.kind, MessageType::Request);
-        assert!(req_add.expects_response());
-        let params_add: (i32, i32) = req_add.decode_data().unwrap();
-        assert_eq!(params_add, (5, 3));
-
-        let resp = Message::response_with_result(req_add.id, "add".to_string(), 8).unwrap();
-        assert_eq!(resp.kind, MessageType::Response);
-        let value: i32 = resp.decode_data().unwrap();
-        assert_eq!(value, 8);
+    fn test_call_with() {
+        let message = Message::call_with("add".to_string(), (5, 3)).unwrap();
+        match &message.kind {
+            MessageType::Call(call) => {
+                assert_eq!(call.method, "add");
+                let params_add: (i32, i32) = Message::decode_as(&call.data).unwrap();
+                assert_eq!(params_add, (5, 3));
+                assert!(message.expects_response());
+            }
+            _ => panic!("Expected call"),
+        }
     }
 
     #[test]
-    fn test_error_with_details() {
+    fn test_reply_with() {
         let id = Uuid::new_v4();
-        let err_msg = "Division by zero";
-        let error_msg = Message::error_with_details(id, err_msg);
-        assert!(error_msg.is_ok());
-        let error_msg = error_msg.unwrap();
-        assert_eq!(error_msg.kind, MessageType::Error);
+        let message = Message::reply_with(id, 8).unwrap();
+        match &message.kind {
+            MessageType::Reply(reply) => {
+                let value: i32 = Message::decode_as(&reply.data).unwrap();
+                assert_eq!(value, 8);
+                assert!(!message.expects_response());
+            }
+            _ => panic!("Expected reply"),
+        }
     }
 
     #[test]
-    fn test_request_response_semantics() {
-        // Request MUST have a response.
-        let request = Message::request("get_data".to_string(), vec![]);
-        assert!(request.expects_response());
-        assert_eq!(request.kind, MessageType::Request);
+    fn test_notification_with() {
+        let message =
+            Message::notification_with("notify".to_string(), (42, "hello".to_string())).unwrap();
+        match &message.kind {
+            MessageType::Notification(notify) => {
+                assert_eq!(notify.method, "notify");
+                let params: (i32, String) = Message::decode_as(&notify.data).unwrap();
+                assert_eq!(params, (42, "hello".to_string()));
+                assert!(!message.expects_response());
+            }
+            _ => panic!("Expected notification"),
+        }
+    }
 
-        // Response for successful request.
-        let response = Message::response(request.id, "get_data".to_string(), vec![1, 2, 3]);
-        assert!(response.is_response());
-        assert_eq!(response.kind, MessageType::Response);
+    #[test]
+    fn test_error() {
+        let id = Uuid::new_v4();
+        let err = RpcError::error(ErrKind::Timeout);
+        let message = Message::error(id, err);
+        match &message.kind {
+            MessageType::Error(e) => {
+                assert_eq!(e.kind, ErrKind::Timeout);
+                assert!(!message.expects_response());
+            }
+            _ => panic!("Expected error"),
+        }
+    }
 
-        // Error response for failed request.
-        let error = Message::error(request.id, "Database error".to_string());
-        assert!(error.is_response());
-        assert_eq!(error.kind, MessageType::Error);
+    #[test]
+    fn test_ping() {
+        let message = Message::ping();
+        match &message.kind {
+            MessageType::Ping => {
+                assert!(message.expects_response());
+                assert!(!message.is_response());
+            }
+            _ => panic!("Expected ping"),
+        }
+    }
 
-        // Notification expects NO response.
-        let notification = Message::notification("state_changed".to_string(), vec![]);
-        assert!(!notification.expects_response());
-        assert_eq!(notification.kind, MessageType::Notification);
+    #[test]
+    fn test_pong() {
+        let id = Uuid::new_v4();
+        let message = Message::pong(id);
+        match &message.kind {
+            MessageType::Pong => {
+                assert!(!message.expects_response());
+                assert!(message.is_response());
+                assert_eq!(message.id, id);
+            }
+            _ => panic!("Expected pong"),
+        }
     }
 }

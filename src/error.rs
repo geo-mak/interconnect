@@ -1,136 +1,156 @@
-use std::error::Error;
+use std::borrow::Cow;
 use std::fmt;
 use std::io;
 
+use serde::{Deserialize, Serialize};
 use tokio::time::error::Elapsed;
 
 /// Result type alias for RPC operations.
 pub type RpcResult<T> = Result<T, RpcError>;
 
-/// Error type of RPC operations.
-#[derive(Debug)]
-pub enum RpcError {
+/// RPC error variant.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+#[repr(u8)]
+pub enum ErrKind {
+    Undefined,
+
     /// IO errors (network, file system, etc.).
-    Io(io::Error),
+    IO,
 
-    /// Encoding errors.
-    Encoding(bincode::error::EncodeError),
-
-    /// Decoding errors.
-    Decoding(bincode::error::DecodeError),
-
-    /// Timeout errors from tokio.
-    Elapsed(Elapsed),
-
-    /// General connection-related errors.
-    Connection(String),
-
-    /// Errors that violates the protocol-specific invariants.
-    Protocol(String),
-
-    /// Errors originated from the server implementation.
-    Server(String),
-
-    /// Errors originated from the client implementation.
-    Client(String),
-
-    InvalidRequest(String),
-
-    Timeout,
+    ConnectionFailed,
 
     ConnectionClosed,
 
-    /// Method not implemented/not found.
-    NotImplemented(String),
+    Timeout,
 
-    /// Method-originated error.
-    Method(String),
+    /// Encoding errors.
+    Encoding,
+
+    /// Decoding errors.
+    Decoding,
+
+    /// Violation of the protocol-specific invariants.
+    Protocol,
+
+    /// Unexpected message has been received/sent.
+    UnexpectedMsg,
+
+    /// Message size exceeds the allowed size by the protocol.
+    LargeMessage,
+
+    /// Errors originated from the service implementation.
+    Service,
+
+    /// Method not implemented/not found.
+    NotImplemented,
+
+    /// Errors originated from the server implementation.
+    Server,
+
+    /// Errors originated from the client implementation.
+    Client,
+
+    /// Client was not found.
+    NoClient,
+}
+
+impl From<&'static str> for ErrCtx {
+    fn from(value: &'static str) -> Self {
+        Self::Str(Cow::Borrowed(value))
+    }
+}
+
+impl From<String> for ErrCtx {
+    fn from(value: String) -> Self {
+        Self::Str(Cow::Owned(value))
+    }
+}
+
+/// RPC error context.
+#[non_exhaustive]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum ErrCtx {
+    None,
+    Code(i32),
+    Str(Cow<'static, str>),
+}
+
+impl fmt::Display for ErrCtx {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ErrCtx::None => write!(f, ""),
+            ErrCtx::Code(code) => write!(f, "code={code}"),
+            ErrCtx::Str(s) => write!(f, "{s}"),
+        }
+    }
+}
+
+/// Error type of RPC operations.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RpcError {
+    pub kind: ErrKind,
+    pub ctx: ErrCtx,
 }
 
 impl RpcError {
-    /// Creates a new connection error.
-    pub fn connection<S: Into<String>>(msg: S) -> Self {
-        Self::Connection(msg.into())
-    }
-
-    /// Creates a new protocol error.
-    pub fn protocol<S: Into<String>>(msg: S) -> Self {
-        Self::Protocol(msg.into())
-    }
-
-    /// Creates a new server error.
-    pub fn server<S: Into<String>>(msg: S) -> Self {
-        Self::Server(msg.into())
-    }
-
-    /// Creates a new client error.
-    pub fn client<S: Into<String>>(msg: S) -> Self {
-        Self::Client(msg.into())
-    }
-
-    /// Creates a method not implemented error.
-    pub fn not_implemented<S: Into<String>>(method: S) -> Self {
-        Self::NotImplemented(method.into())
-    }
-
-    /// Creates a new method error.
-    pub fn method<S: Into<String>>(msg: S) -> Self {
-        Self::Method(msg.into())
+    #[inline(always)]
+    pub const fn error(kind: ErrKind) -> Self {
+        Self {
+            kind,
+            ctx: ErrCtx::None,
+        }
     }
 }
 
 impl fmt::Display for RpcError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            RpcError::Io(err) => write!(f, "IO error: {}", err),
-            RpcError::Encoding(err) => write!(f, "Encoding error: {}", err),
-            RpcError::Decoding(err) => write!(f, "Decoding error: {}", err),
-            RpcError::Elapsed(err) => write!(f, "Timeout elapsed: {}", err),
-            RpcError::Connection(msg) => write!(f, "Connection error: {}", msg),
-            RpcError::Protocol(msg) => write!(f, "Protocol error: {}", msg),
-            RpcError::Server(msg) => write!(f, "Server error: {}", msg),
-            RpcError::Client(msg) => write!(f, "Client error: {}", msg),
-            RpcError::InvalidRequest(msg) => write!(f, "Invalid request: {}", msg),
-            RpcError::Timeout => write!(f, "Timeout"),
-            RpcError::ConnectionClosed => write!(f, "Connection closed"),
-            RpcError::NotImplemented(msg) => write!(f, "Method not implemented: {}", msg),
-            RpcError::Method(msg) => write!(f, "Method error: {}", msg),
-        }
-    }
-}
-
-impl Error for RpcError {
-    fn source(&self) -> Option<&(dyn Error + 'static)> {
-        match self {
-            RpcError::Io(err) => Some(err),
-            RpcError::Encoding(err) => Some(err),
-            RpcError::Decoding(err) => Some(err),
-            RpcError::Elapsed(err) => Some(err),
-            _ => None,
-        }
+        write!(f, "Error: {:?}, Context: {}", self.kind, self.ctx)
     }
 }
 
 impl From<io::Error> for RpcError {
     fn from(err: io::Error) -> Self {
-        RpcError::Io(err)
+        RpcError {
+            kind: ErrKind::IO,
+            ctx: ErrCtx::Str(Cow::Owned(err.to_string())),
+        }
     }
 }
 
 impl From<bincode::error::EncodeError> for RpcError {
     fn from(err: bincode::error::EncodeError) -> Self {
-        RpcError::Encoding(err)
+        RpcError {
+            kind: ErrKind::Encoding,
+            ctx: ErrCtx::Str(Cow::Owned(err.to_string())),
+        }
     }
 }
 
 impl From<bincode::error::DecodeError> for RpcError {
     fn from(err: bincode::error::DecodeError) -> Self {
-        RpcError::Decoding(err)
+        RpcError {
+            kind: ErrKind::Decoding,
+            ctx: ErrCtx::Str(Cow::Owned(err.to_string())),
+        }
     }
 }
 
 impl From<Elapsed> for RpcError {
-    fn from(err: Elapsed) -> Self {
-        RpcError::Elapsed(err)
+    fn from(_: Elapsed) -> Self {
+        RpcError {
+            kind: ErrKind::Timeout,
+            ctx: ErrCtx::None,
+        }
+    }
+}
+
+impl Default for RpcError {
+    /// Creates undefined error without context.
+    fn default() -> Self {
+        Self {
+            kind: ErrKind::Undefined,
+            ctx: ErrCtx::None,
+        }
     }
 }

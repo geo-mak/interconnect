@@ -56,12 +56,14 @@ pub enum ErrKind {
 }
 
 impl From<&'static str> for ErrCtx {
+    #[inline]
     fn from(value: &'static str) -> Self {
         Self::Str(Cow::Borrowed(value))
     }
 }
 
 impl From<String> for ErrCtx {
+    #[inline]
     fn from(value: String) -> Self {
         Self::Str(Cow::Owned(value))
     }
@@ -110,6 +112,7 @@ impl fmt::Display for RpcError {
 }
 
 impl From<io::Error> for RpcError {
+    #[inline]
     fn from(err: io::Error) -> Self {
         RpcError {
             kind: ErrKind::IO,
@@ -128,6 +131,7 @@ impl From<bincode::error::EncodeError> for RpcError {
 }
 
 impl From<bincode::error::DecodeError> for RpcError {
+    #[inline]
     fn from(err: bincode::error::DecodeError) -> Self {
         RpcError {
             kind: ErrKind::Decoding,
@@ -137,6 +141,7 @@ impl From<bincode::error::DecodeError> for RpcError {
 }
 
 impl From<Elapsed> for RpcError {
+    #[inline]
     fn from(_: Elapsed) -> Self {
         RpcError {
             kind: ErrKind::Timeout,
@@ -146,6 +151,7 @@ impl From<Elapsed> for RpcError {
 }
 
 impl Default for RpcError {
+    #[inline]
     /// Creates undefined error without context.
     fn default() -> Self {
         Self {

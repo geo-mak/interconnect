@@ -1,11 +1,14 @@
-use bincode::config::{self, Configuration};
+use bincode::config::{Configuration, standard};
+use bincode::de::read::Reader;
+use bincode::enc::write::Writer;
+
 use serde::{Deserialize, Serialize};
 
 use uuid::Uuid;
 
-use crate::{RpcError, error::RpcResult};
+use crate::error::{RpcError, RpcResult};
 
-const CONFIG: Configuration = config::standard();
+const CONFIG: Configuration = standard();
 
 /// RPC call message.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -105,15 +108,25 @@ impl Message {
     }
 
     /// Encodes the message into binary format.
-    pub fn encode(&self) -> crate::RpcResult<Vec<u8>> {
+    pub fn encode(&self) -> RpcResult<Vec<u8>> {
         bincode::serde::encode_to_vec(self, CONFIG).map_err(Into::into)
     }
 
     /// Decodes a message from binary format.
-    pub fn decode(message: &[u8]) -> crate::RpcResult<Self> {
+    pub fn decode(message: &[u8]) -> RpcResult<Self> {
         bincode::serde::borrow_decode_from_slice(message, CONFIG)
             .map(|(msg, _)| msg)
             .map_err(Into::into)
+    }
+
+    /// Encodes and writes the message into a writer.
+    pub fn encode_into_writer<W: Writer>(&self, dst: &mut W) -> RpcResult<()> {
+        bincode::serde::encode_into_writer(self, dst, CONFIG).map_err(Into::into)
+    }
+
+    /// Decodes a message from the given reader.
+    pub fn decode_from_reader<R: Reader>(src: &mut R) -> RpcResult<Self> {
+        bincode::serde::decode_from_reader(src, CONFIG).map_err(Into::into)
     }
 
     /// Encodes a value into binary format.

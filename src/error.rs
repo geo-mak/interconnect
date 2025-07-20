@@ -9,12 +9,13 @@ use tokio::time::error::Elapsed;
 pub type RpcResult<T> = Result<T, RpcError>;
 
 /// RPC error variant.
-#[non_exhaustive]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+#[non_exhaustive]
 #[repr(u8)]
 pub enum ErrKind {
     Undefined,
 
+    // ================== Connection errors ==================
     /// IO errors (network, file system, etc.).
     IO,
 
@@ -24,14 +25,13 @@ pub enum ErrKind {
 
     Timeout,
 
-    /// Encoding errors.
-    Encoding,
-
-    /// Decoding errors.
-    Decoding,
-
+    // ================== Protocol errors ====================
     /// Violation of the protocol-specific invariants.
     Protocol,
+
+    Encoding,
+
+    Decoding,
 
     /// Unexpected message has been received/sent.
     UnexpectedMsg,
@@ -39,20 +39,15 @@ pub enum ErrKind {
     /// Message size exceeds the allowed size by the protocol.
     LargeMessage,
 
+    // ===================== Common ==========================
+    Unidentified,
+
+    // ================== Service errors =====================
     /// Errors originated from the service implementation.
     Service,
 
     /// Method not implemented/not found.
     NotImplemented,
-
-    /// Errors originated from the server implementation.
-    Server,
-
-    /// Errors originated from the client implementation.
-    Client,
-
-    /// Client was not found.
-    NoClient,
 }
 
 impl From<&'static str> for ErrCtx {
@@ -70,8 +65,8 @@ impl From<String> for ErrCtx {
 }
 
 /// RPC error context.
-#[non_exhaustive]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[non_exhaustive]
 pub enum ErrCtx {
     None,
     Code(i32),

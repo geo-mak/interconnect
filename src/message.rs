@@ -199,6 +199,18 @@ mod tests {
     }
 
     #[test]
+    fn test_message_version() {
+        let message = Message {
+            version: 255,
+            id: Uuid::new_v4(),
+            kind: MessageType::Ping,
+        };
+        // As received.
+        let bytes = message.encode().unwrap();
+        assert_eq!(bytes[0], 255)
+    }
+
+    #[test]
     fn test_call_with() {
         let message = Message::call_with("add".to_string(), (5, 3)).unwrap();
         match &message.kind {

@@ -47,9 +47,6 @@ pub enum MessageType {
 /// Core message structure for the RPC protocol.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Message {
-    /// Protocol version.
-    pub version: u8,
-
     /// A 128-bit (16 byte) unique identifier for the message.
     // TODO: Use integer with tracker later, to reduce message size.
     pub id: Uuid,
@@ -61,17 +58,12 @@ pub struct Message {
 impl Message {
     /// Creates a new message.
     pub fn new(id: Uuid, kind: MessageType) -> Self {
-        Self {
-            version: 1,
-            id,
-            kind,
-        }
+        Self { id, kind }
     }
 
     /// Creates a new message with auto-generated id.
     pub fn new_with_id(kind: MessageType) -> Self {
         Self {
-            version: 1,
             id: Uuid::new_v4(),
             kind,
         }
@@ -186,7 +178,6 @@ mod tests {
         let serialized = original_msg.encode().unwrap();
         let deserialized_msg = Message::decode(&serialized).unwrap();
 
-        assert_eq!(original_msg.version, deserialized_msg.version);
         assert_eq!(original_msg.id, original_msg.id);
 
         match (&original_msg.kind, &deserialized_msg.kind) {
@@ -196,18 +187,6 @@ mod tests {
             }
             _ => panic!("Expected call"),
         }
-    }
-
-    #[test]
-    fn test_message_version() {
-        let message = Message {
-            version: 255,
-            id: Uuid::new_v4(),
-            kind: MessageType::Ping,
-        };
-        // As received.
-        let bytes = message.encode().unwrap();
-        assert_eq!(bytes[0], 255)
     }
 
     #[test]

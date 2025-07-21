@@ -15,8 +15,10 @@ pub type RpcResult<T> = Result<T, RpcError>;
 pub enum ErrKind {
     Undefined,
 
-    // ================== Connection errors ==================
-    /// IO errors (network, file system, etc.).
+    // ================== Protocol errors ====================
+    /// Violation of the protocol-specific invariants.
+    Protocol,
+
     IO,
 
     ConnectionFailed,
@@ -24,10 +26,6 @@ pub enum ErrKind {
     ConnectionClosed,
 
     Timeout,
-
-    // ================== Protocol errors ====================
-    /// Violation of the protocol-specific invariants.
-    Protocol,
 
     Encoding,
 
@@ -53,14 +51,14 @@ pub enum ErrKind {
 impl From<&'static str> for ErrCtx {
     #[inline]
     fn from(value: &'static str) -> Self {
-        Self::Str(Cow::Borrowed(value))
+        Self::Msg(Cow::Borrowed(value))
     }
 }
 
 impl From<String> for ErrCtx {
     #[inline]
     fn from(value: String) -> Self {
-        Self::Str(Cow::Owned(value))
+        Self::Msg(Cow::Owned(value))
     }
 }
 
@@ -70,7 +68,7 @@ impl From<String> for ErrCtx {
 pub enum ErrCtx {
     None,
     Code(i32),
-    Str(Cow<'static, str>),
+    Msg(Cow<'static, str>),
 }
 
 impl fmt::Display for ErrCtx {
@@ -78,7 +76,7 @@ impl fmt::Display for ErrCtx {
         match self {
             ErrCtx::None => write!(f, ""),
             ErrCtx::Code(code) => write!(f, "code={code}"),
-            ErrCtx::Str(s) => write!(f, "{s}"),
+            ErrCtx::Msg(s) => write!(f, "{s}"),
         }
     }
 }
@@ -111,7 +109,7 @@ impl From<io::Error> for RpcError {
     fn from(err: io::Error) -> Self {
         RpcError {
             kind: ErrKind::IO,
-            ctx: ErrCtx::Str(Cow::Owned(err.to_string())),
+            ctx: ErrCtx::Msg(Cow::Owned(err.to_string())),
         }
     }
 }
@@ -120,7 +118,7 @@ impl From<bincode::error::EncodeError> for RpcError {
     fn from(err: bincode::error::EncodeError) -> Self {
         RpcError {
             kind: ErrKind::Encoding,
-            ctx: ErrCtx::Str(Cow::Owned(err.to_string())),
+            ctx: ErrCtx::Msg(Cow::Owned(err.to_string())),
         }
     }
 }
@@ -130,7 +128,7 @@ impl From<bincode::error::DecodeError> for RpcError {
     fn from(err: bincode::error::DecodeError) -> Self {
         RpcError {
             kind: ErrKind::Decoding,
-            ctx: ErrCtx::Str(Cow::Owned(err.to_string())),
+            ctx: ErrCtx::Msg(Cow::Owned(err.to_string())),
         }
     }
 }

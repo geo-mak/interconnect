@@ -48,7 +48,16 @@ pub enum ErrKind {
     NotImplemented,
 }
 
+impl From<i32> for ErrCtx {
+    /// Returns `Code` context variant.
+    #[inline]
+    fn from(value: i32) -> Self {
+        Self::Code(value)
+    }
+}
+
 impl From<&'static str> for ErrCtx {
+    /// Returns `Msg` context variant.
     #[inline]
     fn from(value: &'static str) -> Self {
         Self::Msg(Cow::Borrowed(value))
@@ -56,6 +65,7 @@ impl From<&'static str> for ErrCtx {
 }
 
 impl From<String> for ErrCtx {
+    /// Returns `Msg` context variant.
     #[inline]
     fn from(value: String) -> Self {
         Self::Msg(Cow::Owned(value))

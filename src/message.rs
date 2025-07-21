@@ -44,7 +44,7 @@ pub enum MessageType {
     Pong,
 }
 
-/// Core message structure for the RPC protocol.
+/// High-level message structure of the RPC protocol.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Message {
     /// A 128-bit (16 byte) unique identifier for the message.

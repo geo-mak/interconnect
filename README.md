@@ -14,16 +14,16 @@ High performance remote procedure call protocol.
 ## Architectural Overview.
 ```
 ┌─────────────────────────────────────────────┐
-│              Service Layer                  │
-│    (Method Handlers, Extensions, etc.)      │
+│               Service Layer                 │
+│     (Method Handlers, Extensions, etc.)     │
 ├─────────────────────────────────────────────┤
-│           Connection State Layer            │
-│             (Client / Server)               │
+│              Connection Layer               │
+│      (Listeners, Roles (Client / Server))   │
 ├─────────────────────────────────────────────┤
 │              RPC Stream Layer               │
 │         (Framing, Encoding/Decoding)        │
 ├─────────────────────────────────────────────┤
-│              I/O Stream Layer               │
-│            (TCP / Unix Sockets)             │
+│             Raw I/O Stream Layer            │
+│             (TCP / Unix Sockets)            │
 └─────────────────────────────────────────────┘
 ```

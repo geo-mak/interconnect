@@ -13,7 +13,7 @@ const CONFIG: Configuration = standard();
 /// RPC call message.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Call {
-    pub method: String,
+    pub method: u16,
     pub data: Vec<u8>,
 }
 
@@ -70,7 +70,7 @@ impl Message {
     }
 
     /// Creates a call message (bidirectional) with auto-generated id.
-    pub fn call(method: String, data: Vec<u8>) -> Self {
+    pub fn call(method: u16, data: Vec<u8>) -> Self {
         Self::new_with_id(MessageType::Call(Call { method, data }))
     }
 
@@ -85,7 +85,7 @@ impl Message {
     }
 
     /// Creates a notification message.
-    pub fn notification(method: String, data: Vec<u8>) -> Self {
+    pub fn notification(method: u16, data: Vec<u8>) -> Self {
         Self::new_with_id(MessageType::Notification(Call { method, data }))
     }
 
@@ -134,7 +134,7 @@ impl Message {
     }
 
     /// Creates a request message with typed parameters.
-    pub fn call_with<P: Serialize>(method: String, params: P) -> RpcResult<Self> {
+    pub fn call_with<P: Serialize>(method: u16, params: P) -> RpcResult<Self> {
         let data = Self::encode_to_bytes(&params)?;
         Ok(Self::call(method, data))
     }
@@ -146,7 +146,7 @@ impl Message {
     }
 
     /// Creates a notification message with typed parameters.
-    pub fn notification_with<P: Serialize>(method: String, params: P) -> RpcResult<Self> {
+    pub fn notification_with<P: Serialize>(method: u16, params: P) -> RpcResult<Self> {
         let data = Self::encode_to_bytes(&params)?;
         Ok(Self::notification(method, data))
     }
@@ -173,7 +173,7 @@ mod tests {
 
     #[test]
     fn test_message_encoding_decoding() {
-        let original_msg = Message::call("test_method".to_string(), vec![10, 20, 30]);
+        let original_msg = Message::call(1, vec![10, 20, 30]);
 
         let serialized = original_msg.encode().unwrap();
         let deserialized_msg = Message::decode(&serialized).unwrap();
@@ -191,12 +191,12 @@ mod tests {
 
     #[test]
     fn test_call_with() {
-        let message = Message::call_with("add".to_string(), (5, 3)).unwrap();
+        let message = Message::call_with(1, (5u8, 3u8)).unwrap();
         match &message.kind {
             MessageType::Call(call) => {
-                assert_eq!(call.method, "add");
-                let params_add: (i32, i32) = Message::decode_as(&call.data).unwrap();
-                assert_eq!(params_add, (5, 3));
+                assert_eq!(call.method, 1);
+                let params: (u8, u8) = Message::decode_as(&call.data).unwrap();
+                assert_eq!(params, (5, 3));
                 assert!(message.expects_response());
             }
             _ => panic!("Expected call"),
@@ -206,10 +206,10 @@ mod tests {
     #[test]
     fn test_reply_with() {
         let id = Uuid::new_v4();
-        let message = Message::reply_with(id, 8).unwrap();
+        let message = Message::reply_with(id, 8u8).unwrap();
         match &message.kind {
             MessageType::Reply(reply) => {
-                let value: i32 = Message::decode_as(&reply.data).unwrap();
+                let value: u8 = Message::decode_as(&reply.data).unwrap();
                 assert_eq!(value, 8);
                 assert!(!message.expects_response());
             }
@@ -219,13 +219,12 @@ mod tests {
 
     #[test]
     fn test_notification_with() {
-        let message =
-            Message::notification_with("notify".to_string(), (42, "hello".to_string())).unwrap();
+        let message = Message::notification_with(1, (22u8, 1u8)).unwrap();
         match &message.kind {
             MessageType::Notification(notify) => {
-                assert_eq!(notify.method, "notify");
-                let params: (i32, String) = Message::decode_as(&notify.data).unwrap();
-                assert_eq!(params, (42, "hello".to_string()));
+                assert_eq!(notify.method, 1);
+                let params: (u8, u8) = Message::decode_as(&notify.data).unwrap();
+                assert_eq!(params, (22, 1));
                 assert!(!message.expects_response());
             }
             _ => panic!("Expected notification"),

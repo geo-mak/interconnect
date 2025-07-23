@@ -117,9 +117,16 @@ impl fmt::Display for RpcError {
 impl From<io::Error> for RpcError {
     #[inline]
     fn from(err: io::Error) -> Self {
-        RpcError {
-            kind: ErrKind::IO,
-            ctx: ErrCtx::Msg(Cow::Owned(err.to_string())),
+        if err.kind() == std::io::ErrorKind::UnexpectedEof {
+            RpcError {
+                kind: ErrKind::ConnectionClosed,
+                ctx: ErrCtx::None,
+            }
+        } else {
+            RpcError {
+                kind: ErrKind::IO,
+                ctx: ErrCtx::Msg(Cow::Owned(err.to_string())),
+            }
         }
     }
 }

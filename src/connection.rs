@@ -1,0 +1,59 @@
+use std::net::SocketAddr;
+use std::path::Path;
+
+use tokio::io;
+use tokio::net::{TcpListener, TcpStream, UnixListener, UnixStream};
+use tokio::net::{ToSocketAddrs, unix};
+
+use crate::transport::AsyncIOStream;
+
+pub trait RpcListener<A>: Sized + Send {
+    type Address;
+    type Stream: AsyncIOStream + Send;
+
+    fn bind(addr: A) -> impl Future<Output = io::Result<Self>>;
+
+    fn accept(&self) -> impl Future<Output = io::Result<(Self::Stream, Self::Address)>> + Send;
+
+    fn local_addr(&self) -> io::Result<Self::Address>;
+}
+
+impl<A: ToSocketAddrs> RpcListener<A> for TcpListener {
+    type Address = SocketAddr;
+    type Stream = TcpStream;
+
+    #[inline(always)]
+    async fn bind(addr: A) -> io::Result<Self> {
+        TcpListener::bind(addr).await
+    }
+
+    #[inline(always)]
+    async fn accept(&self) -> io::Result<(Self::Stream, SocketAddr)> {
+        self.accept().await
+    }
+
+    #[inline(always)]
+    fn local_addr(&self) -> io::Result<Self::Address> {
+        TcpListener::local_addr(self)
+    }
+}
+
+impl<A: AsRef<Path>> RpcListener<A> for UnixListener {
+    type Address = unix::SocketAddr;
+    type Stream = UnixStream;
+
+    #[inline(always)]
+    async fn bind(addr: A) -> io::Result<Self> {
+        UnixListener::bind(addr)
+    }
+
+    #[inline(always)]
+    async fn accept(&self) -> io::Result<(UnixStream, Self::Address)> {
+        self.accept().await
+    }
+
+    #[inline(always)]
+    fn local_addr(&self) -> io::Result<Self::Address> {
+        UnixListener::local_addr(self)
+    }
+}

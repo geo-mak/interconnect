@@ -2,7 +2,7 @@
 
 High performance remote procedure call protocol.
 
-> **⚠️ This project is currently under construction.**
+> **⚠️ This project is in early development stage.**
 
 ## Features
 

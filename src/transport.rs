@@ -85,7 +85,7 @@ where
             return Err(RpcError::error(ErrKind::LargeMessage));
         }
 
-        // TODO: Write to stream directly. No new buffers.
+        // TODO: Decode from stream directly. No new buffers.
         let mut bytes = vec![0u8; len as usize];
 
         reader.read_exact(&mut bytes).await?;

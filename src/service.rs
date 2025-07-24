@@ -7,7 +7,7 @@ use crate::error::{ErrKind, RpcError, RpcResult};
 pub trait RpcService: Send + Sync {
     /// Handles a method call and returns the result.
     /// By default, it returns `NotImplemented` error.
-    fn handle_call(
+    fn call(
         &self,
         _method: u16,
         _data: &[u8],
@@ -17,7 +17,7 @@ pub trait RpcService: Send + Sync {
 
     /// Handles a notification message.
     /// By default, it returns `NotImplemented` error.
-    fn handle_notification(
+    fn notification(
         &self,
         _method: u16,
         _data: &[u8],

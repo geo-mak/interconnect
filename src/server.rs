@@ -86,14 +86,14 @@ where
 
     async fn process_incoming_message(message: Message, service: &H) -> Option<Message> {
         match message.kind {
-            MessageType::Call(call) => match service.handle_call(call.method, &call.data).await {
+            MessageType::Call(call) => match service.call(call.method, &call.data).await {
                 Ok(result) => Some(Message::reply(message.id, result)),
                 Err(err) => Some(Message::error(message.id, err)),
             },
             MessageType::Notification(notify) => {
                 // Notification, no reply.
                 let _ = service
-                    .handle_notification(notify.method, &notify.data)
+                    .notification(notify.method, &notify.data)
                     .await;
                 None
             }
@@ -126,7 +126,7 @@ mod tests {
     }
 
     impl RpcService for RpcTestService {
-        async fn handle_call(&self, _method: u16, data: &[u8]) -> RpcResult<Vec<u8>> {
+        async fn call(&self, _method: u16, data: &[u8]) -> RpcResult<Vec<u8>> {
             let count = self.counter.fetch_add(1, Ordering::SeqCst);
             let response = format!(
                 "Method called {} times. Data size: {}",

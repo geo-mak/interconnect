@@ -41,7 +41,7 @@ where
     S: AsyncIOStream + 'static,
     H: RpcService + 'static,
 {
-    /// Creates a new RPC client with the given RPC stream.
+    /// Creates a new RPC client with the given I/O stream.
     pub fn new(io_stream: S, call_handler: H) -> Self {
         let state = Arc::new(ClientState {
             stream: RpcStream::new(io_stream),
@@ -75,7 +75,6 @@ where
         }
     }
 
-    /// Process incoming messages.
     async fn process_incoming_message(message: Message, state: &ClientState<S, H>) {
         match message.kind {
             MessageType::Reply(_) | MessageType::Error(_) => {
@@ -87,7 +86,7 @@ where
             MessageType::Call(payload) => {
                 let reply_data = match state
                     .service
-                    .handle_call(payload.method, &payload.data)
+                    .call(payload.method, &payload.data)
                     .await
                 {
                     Ok(result) => result,
@@ -168,7 +167,7 @@ where
         }
     }
 
-    /// Sends a message and wait for response.
+    /// Sends a message and waits for response.
     async fn send_message(
         &self,
         message: Message,
@@ -372,7 +371,7 @@ mod tests {
     }
 
     impl RpcService for ClientHandler {
-        async fn handle_call(&self, method: u16, _data: &[u8]) -> RpcResult<Vec<u8>> {
+        async fn call(&self, method: u16, _data: &[u8]) -> RpcResult<Vec<u8>> {
             match method {
                 1 => {
                     let current = self.counter.fetch_add(1, Ordering::SeqCst);

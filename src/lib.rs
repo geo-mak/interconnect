@@ -10,4 +10,4 @@ pub use client::RpcClient;
 pub use error::{RpcError, RpcResult};
 pub use message::{Message, MessageType};
 pub use server::RpcServer;
-pub use transport::RpcStream;
+pub use transport::{RpcStreamReader, RpcStreamWriter, SplitOwnedStream};

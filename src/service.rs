@@ -7,11 +7,7 @@ use crate::error::{ErrKind, RpcError, RpcResult};
 pub trait RpcService: Send + Sync {
     /// Handles a method call and returns the result.
     /// By default, it returns `NotImplemented` error.
-    fn call(
-        &self,
-        _method: u16,
-        _data: &[u8],
-    ) -> impl Future<Output = RpcResult<Vec<u8>>> + Send {
+    fn call(&self, _method: u16, _data: &[u8]) -> impl Future<Output = RpcResult<Vec<u8>>> + Send {
         std::future::ready(Err(RpcError::error(ErrKind::NotImplemented)))
     }
 

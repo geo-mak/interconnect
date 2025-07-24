@@ -5,11 +5,11 @@ use tokio::io;
 use tokio::net::{TcpListener, TcpStream, UnixListener, UnixStream};
 use tokio::net::{ToSocketAddrs, unix};
 
-use crate::transport::AsyncIOStream;
+use crate::transport::SplitOwnedStream;
 
 pub trait RpcListener<A>: Sized + Send {
     type Address;
-    type Stream: AsyncIOStream + Send;
+    type Stream: SplitOwnedStream + Send;
 
     fn bind(addr: A) -> impl Future<Output = io::Result<Self>>;
 

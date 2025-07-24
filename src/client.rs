@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use tokio::sync::RwLock;
+use tokio::sync::Mutex;
 use tokio::sync::oneshot;
 use tokio::sync::oneshot::Sender;
 use tokio::time::timeout;
@@ -11,25 +11,25 @@ use uuid::Uuid;
 
 use serde::{Deserialize, Serialize};
 
-use crate::error::ErrKind;
+use crate::error::{ErrKind, RpcError, RpcResult};
+use crate::message::{Message, MessageType};
 use crate::service::RpcService;
-use crate::transport::AsyncIOStream;
-use crate::{Message, MessageType, RpcError, RpcResult, RpcStream};
+use crate::transport::{RpcStreamWriter, SplitOwnedStream};
 
 struct ClientState<S, H>
 where
-    S: AsyncIOStream,
+    S: SplitOwnedStream,
     H: RpcService,
 {
     service: H,
-    stream: RpcStream<S>,
-    pending: RwLock<HashMap<Uuid, Sender<RpcResult<MessageType>>>>,
+    stream: Mutex<RpcStreamWriter<S::OwnedWriteHalf>>,
+    pending: Mutex<HashMap<Uuid, Sender<RpcResult<MessageType>>>>,
 }
 
 /// RPC Client implementation.
 pub struct RpcClient<S, H>
 where
-    S: AsyncIOStream,
+    S: SplitOwnedStream,
     H: RpcService,
 {
     state: Arc<ClientState<S, H>>,
@@ -38,23 +38,26 @@ where
 
 impl<S, H> RpcClient<S, H>
 where
-    S: AsyncIOStream + 'static,
+    S: SplitOwnedStream + 'static,
     H: RpcService + 'static,
 {
     /// Creates a new RPC client with the given I/O stream.
     pub fn new(io_stream: S, call_handler: H) -> Self {
+        let (mut reader, writer) = io_stream.split_owned();
+
         let state = Arc::new(ClientState {
-            stream: RpcStream::new(io_stream),
             service: call_handler,
-            pending: RwLock::new(HashMap::new()),
+            stream: Mutex::new(writer),
+            pending: Mutex::new(HashMap::new()),
         });
 
         let cloned_state = Arc::clone(&state);
 
         // Processing incoming messages.
-        let handle = tokio::spawn(async move {
+        let task = tokio::spawn(async move {
             loop {
-                match cloned_state.stream.read().await {
+                // Stream is only being read here.
+                match reader.read().await {
                     Ok(message) => {
                         Self::process_incoming_message(message, &cloned_state).await;
                     }
@@ -69,42 +72,35 @@ where
             }
         });
 
-        Self {
-            state,
-            task: handle,
-        }
+        Self { state, task }
     }
 
     async fn process_incoming_message(message: Message, state: &ClientState<S, H>) {
         match message.kind {
             MessageType::Reply(_) | MessageType::Error(_) => {
-                let mut pending = state.pending.write().await;
+                let mut pending = state.pending.lock().await;
                 if let Some(sender) = pending.remove(&message.id) {
                     let _ = sender.send(Ok(message.kind));
                 }
             }
             MessageType::Call(payload) => {
-                let reply_data = match state
-                    .service
-                    .call(payload.method, &payload.data)
-                    .await
-                {
+                let reply_data = match state.service.call(payload.method, &payload.data).await {
                     Ok(result) => result,
                     Err(e) => {
                         let error_msg = Message::error(message.id, e);
-                        let _ = state.stream.write(&error_msg).await;
+                        let _ = state.stream.lock().await.write(&error_msg).await;
                         return;
                     }
                 };
-                let reply = Message::reply(message.id, reply_data);
-                let _ = state.stream.write(&reply).await;
+                let reply_msg = Message::reply(message.id, reply_data);
+                let _ = state.stream.lock().await.write(&reply_msg).await;
             }
             MessageType::Ping => {
                 let pong = Message::pong(message.id);
-                let _ = state.stream.write(&pong).await;
+                let _ = state.stream.lock().await.write(&pong).await;
             }
             MessageType::Pong => {
-                let mut pending = state.pending.write().await;
+                let mut pending = state.pending.lock().await;
                 if let Some(sender) = pending.remove(&message.id) {
                     let _ = sender.send(Ok(message.kind));
                 }
@@ -128,7 +124,7 @@ where
     {
         let message = Message::notification_with(method, params)?;
         // Use transport directly.
-        self.state.stream.write(&message).await
+        self.state.stream.lock().await.write(&message).await
     }
 
     /// Makes a remote procedure call.
@@ -179,13 +175,13 @@ where
 
         // Store pending request.
         {
-            let mut pending = self.state.pending.write().await;
+            let mut pending = self.state.pending.lock().await;
             pending.insert(id, sender);
         }
 
         // Send the message.
-        if let Err(e) = self.state.stream.write(&message).await {
-            let mut pending = self.state.pending.write().await;
+        if let Err(e) = self.state.stream.lock().await.write(&message).await {
+            let mut pending = self.state.pending.lock().await;
             pending.remove(&id);
             return Err(e);
         }
@@ -195,13 +191,13 @@ where
             Ok(Ok(result)) => result,
             Ok(Err(_)) => {
                 // Channel was closed without response.
-                let mut pending = self.state.pending.write().await;
+                let mut pending = self.state.pending.lock().await;
                 pending.remove(&id);
                 Err(RpcError::error(ErrKind::ConnectionClosed))
             }
             Err(_) => {
                 // Timeout occurred.
-                let mut pending = self.state.pending.write().await;
+                let mut pending = self.state.pending.lock().await;
                 pending.remove(&id);
                 Err(RpcError::error(ErrKind::Timeout))
             }
@@ -212,7 +208,7 @@ where
     /// Pending requests will be dropped.
     pub async fn shutdown(self) -> RpcResult<()> {
         self.task.abort();
-        self.state.stream.shutdown().await
+        self.state.stream.lock().await.shutdown().await
     }
 }
 
@@ -228,11 +224,11 @@ mod tests {
         let addr = listener.local_addr().unwrap();
 
         let server_task = tokio::spawn(async move {
-            let (stream, _) = listener.accept().await.unwrap();
-            let rpc_stream = RpcStream::new(stream);
+            let (io_stream, _) = listener.accept().await.unwrap();
+            let (mut rpc_reader, mut rpc_writer) = io_stream.split_owned();
 
             loop {
-                match rpc_stream.read().await {
+                match rpc_reader.read().await {
                     Ok(message) => {
                         match &message.kind {
                             MessageType::Call(call) => {
@@ -242,7 +238,7 @@ mod tests {
                                 // Send a response.
                                 let response =
                                     Message::reply_with(message.id, "reply".to_string()).unwrap();
-                                let _ = rpc_stream.write(&response).await;
+                                let _ = rpc_writer.write(&response).await;
                             }
                             _ => panic!("Expected call"),
                         }
@@ -274,11 +270,11 @@ mod tests {
         let addr = listener.local_addr().unwrap();
 
         let server_task = tokio::spawn(async move {
-            let (stream, _) = listener.accept().await.unwrap();
-            let rpc_stream = RpcStream::new(stream);
+            let (io_stream, _) = listener.accept().await.unwrap();
+            let (mut rpc_reader, mut rpc_writer) = io_stream.split_owned();
 
             loop {
-                match rpc_stream.read().await {
+                match rpc_reader.read().await {
                     Ok(message) => {
                         match &message.kind {
                             MessageType::Call(call) => {
@@ -287,7 +283,7 @@ mod tests {
                                     message.id,
                                     RpcError::error(ErrKind::NotImplemented),
                                 );
-                                let _ = rpc_stream.write(&error).await;
+                                let _ = rpc_writer.write(&error).await;
                             }
                             _ => panic!("Expected call"),
                         }
@@ -328,11 +324,11 @@ mod tests {
         let received_clone = Arc::clone(&received_notification);
 
         let server_task = tokio::spawn(async move {
-            let (stream, _) = listener.accept().await.unwrap();
-            let rpc_stream = RpcStream::new(stream);
+            let (io_stream, _) = listener.accept().await.unwrap();
+            let (mut rpc_reader, _) = io_stream.split_owned();
 
             loop {
-                match rpc_stream.read().await {
+                match rpc_reader.read().await {
                     Ok(message) => {
                         match &message.kind {
                             MessageType::Notification(n) => {
@@ -388,14 +384,14 @@ mod tests {
         let addr = listener.local_addr().unwrap();
 
         let server_task = tokio::spawn(async move {
-            let (stream, _) = listener.accept().await.unwrap();
-            let rpc_stream = RpcStream::new(stream);
+            let (io_stream, _) = listener.accept().await.unwrap();
+            let (mut rpc_reader, mut rpc_writer) = io_stream.split_owned();
 
             let server_call = Message::call_with(1, ()).unwrap();
-            let _ = rpc_stream.write(&server_call).await;
+            let _ = rpc_writer.write(&server_call).await;
 
             loop {
-                match rpc_stream.read().await {
+                match rpc_reader.read().await {
                     Ok(message) => {
                         match &message.kind {
                             MessageType::Reply(reply) => {

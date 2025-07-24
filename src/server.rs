@@ -8,7 +8,7 @@ use crate::connection::RpcListener;
 use crate::error::{ErrKind, RpcResult};
 use crate::message::{Message, MessageType};
 use crate::service::RpcService;
-use crate::transport::RpcStream;
+use crate::transport::SplitOwnedStream;
 
 /// RPC Server implementation.
 pub struct RpcServer<L, A, H>
@@ -58,13 +58,13 @@ where
     // TODO: Safe abort, if requested.
     fn spawn_connection(io_stream: L::Stream, service: Arc<H>) -> tokio::task::JoinHandle<()> {
         tokio::spawn(async move {
-            let rpc_stream = RpcStream::new(io_stream);
+            let (mut rpc_reader, mut rpc_writer) = io_stream.split_owned();
             loop {
-                match rpc_stream.read().await {
+                match rpc_reader.read().await {
                     Ok(message) => {
                         let result = Self::process_incoming_message(message, &service).await;
                         if let Some(reply_msg) = result {
-                            if let Err(e) = rpc_stream.write(&reply_msg).await {
+                            if let Err(e) = rpc_writer.write(&reply_msg).await {
                                 log::error!("Failed to send response to client: {e}");
                                 break;
                             }
@@ -92,9 +92,7 @@ where
             },
             MessageType::Notification(notify) => {
                 // Notification, no reply.
-                let _ = service
-                    .notification(notify.method, &notify.data)
-                    .await;
+                let _ = service.notification(notify.method, &notify.data).await;
                 None
             }
             MessageType::Ping => Some(Message::pong(message.id)),
@@ -144,14 +142,14 @@ mod tests {
 
         let handle = server.start("127.0.0.1:8000").await.unwrap();
 
-        let stream = TcpStream::connect("127.0.0.1:8000").await.unwrap();
-        let client = RpcStream::new(stream);
+        let io_stream = TcpStream::connect("127.0.0.1:8000").await.unwrap();
+        let (mut rpc_reader, mut rpc_writer) = io_stream.split_owned();
 
         let payload = b"hi there".to_vec();
         let call_msg = Message::call(1, payload.clone());
-        client.write(&call_msg).await.unwrap();
+        rpc_writer.write(&call_msg).await.unwrap();
 
-        let reply_msg = client.read().await.unwrap();
+        let reply_msg = rpc_reader.read().await.unwrap();
         match reply_msg.kind {
             MessageType::Reply(reply) => {
                 let response: String = crate::message::Message::decode_as(&reply.data).unwrap();
@@ -173,16 +171,16 @@ mod tests {
 
         let handle = server.start(path).await.unwrap();
 
-        let stream = UnixStream::connect(path).await.unwrap();
-        let client = RpcStream::new(stream);
+        let io_stream = UnixStream::connect(path).await.unwrap();
+        let (mut rpc_reader, mut rpc_writer) = io_stream.split_owned();
 
         tokio::time::sleep(Duration::from_millis(10)).await;
 
         let payload = b"hi there".to_vec();
         let call_msg = Message::call(1, payload.clone());
-        client.write(&call_msg).await.unwrap();
+        rpc_writer.write(&call_msg).await.unwrap();
 
-        let reply_msg = client.read().await.unwrap();
+        let reply_msg = rpc_reader.read().await.unwrap();
         match reply_msg.kind {
             MessageType::Reply(reply) => {
                 let response: String = crate::message::Message::decode_as(&reply.data).unwrap();

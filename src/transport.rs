@@ -9,8 +9,6 @@ use crate::message::Message;
 
 const MAX_MESSAGE_SIZE: u32 = 16_777_216;
 
-pub trait SocketAddress {}
-
 pub trait AsyncIOStream: Sized + Send {
     type ReadingHalf: AsyncReadExt + Send + Sync + Unpin;
     type WritingHalf: AsyncWriteExt + Send + Sync + Unpin;

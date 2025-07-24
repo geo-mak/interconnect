@@ -92,7 +92,7 @@ where
             },
             MessageType::Notification(notify) => {
                 // Notification, no reply.
-                let _ = service.notification(notify.method, &notify.data).await;
+                let _ = service.notify(notify.method, &notify.data).await;
                 None
             }
             MessageType::Ping => Some(Message::pong(message.id)),

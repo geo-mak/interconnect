@@ -13,7 +13,7 @@ pub trait RpcService: Send + Sync {
 
     /// Handles a notification message.
     /// By default, it returns `NotImplemented` error.
-    fn notification(
+    fn notify(
         &self,
         _method: u16,
         _data: &[u8],

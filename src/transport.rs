@@ -1,21 +1,18 @@
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::tcp;
-use tokio::net::unix;
-use tokio::net::{TcpStream, UnixStream};
 
 use crate::error::{ErrKind, RpcError, RpcResult};
 use crate::message::Message;
 
 const MAX_MESSAGE_SIZE: u32 = 16_777_216;
 
-pub struct RpcStreamReader<T>
+pub struct AsyncRpcReceiver<T>
 where
     T: AsyncReadExt + Send + Sync + Unpin,
 {
     reader: T,
 }
 
-impl<T> RpcStreamReader<T>
+impl<T> AsyncRpcReceiver<T>
 where
     T: AsyncReadExt + Send + Sync + Unpin,
 {
@@ -24,8 +21,9 @@ where
         Self { reader }
     }
 
-    /// Reads and validates the raw message and decodes it as user-level message.
-    pub async fn read(&mut self) -> RpcResult<Message> {
+    /// Reads and validates the RPC frame and decodes its data as a message.
+    /// This method is not cancellation-safe, and it should not be awaited as part of selection race.
+    pub async fn receive(&mut self) -> RpcResult<Message> {
         // Read 4 bytes size-metadata.
         let len = self.reader.read_u32().await?;
 
@@ -33,7 +31,7 @@ where
             return Err(RpcError::error(ErrKind::LargeMessage));
         }
 
-        // TODO: Decode from stream directly. No new buffers.
+        // TODO: Decode from stream directly or use buffer. No new buffers.
         let mut bytes = vec![0u8; len as usize];
 
         self.reader.read_exact(&mut bytes).await?;
@@ -42,14 +40,14 @@ where
     }
 }
 
-pub struct RpcStreamWriter<T>
+pub struct AsyncRpcSender<T>
 where
     T: AsyncWriteExt + Send + Sync + Unpin,
 {
     writer: T,
 }
 
-impl<T> RpcStreamWriter<T>
+impl<T> AsyncRpcSender<T>
 where
     T: AsyncWriteExt + Send + Sync + Unpin,
 {
@@ -58,9 +56,9 @@ where
         Self { writer }
     }
 
-    /// Encodes the message and writes it into the I/O stream.
-    pub async fn write(&mut self, message: &Message) -> RpcResult<()> {
-        // TODO: Encode to stream directly. No new buffers.
+    /// Encodes a message as RPC frame and writes it into the I/O stream.
+    pub async fn send(&mut self, message: &Message) -> RpcResult<()> {
+        // TODO: Encode into stream directly or use buffer. No new buffers.
         let bytes = message.encode()?;
 
         // Write 4 bytes metadata for message size.
@@ -78,56 +76,13 @@ where
     }
 }
 
-pub trait SplitOwnedStream: Sized + Send {
-    type OwnedReadHalf: AsyncReadExt + Send + Sync + Unpin;
-    type OwnedWriteHalf: AsyncWriteExt + Send + Sync + Unpin;
-    fn split_owned(
-        self,
-    ) -> (
-        RpcStreamReader<Self::OwnedReadHalf>,
-        RpcStreamWriter<Self::OwnedWriteHalf>,
-    );
-}
-
-impl SplitOwnedStream for TcpStream {
-    type OwnedReadHalf = tcp::OwnedReadHalf;
-    type OwnedWriteHalf = tcp::OwnedWriteHalf;
-
-    #[inline(always)]
-    fn split_owned(
-        self,
-    ) -> (
-        RpcStreamReader<Self::OwnedReadHalf>,
-        RpcStreamWriter<Self::OwnedWriteHalf>,
-    ) {
-        let (reader, writer) = TcpStream::into_split(self);
-        (RpcStreamReader { reader }, RpcStreamWriter { writer })
-    }
-}
-
-impl SplitOwnedStream for UnixStream {
-    type OwnedReadHalf = unix::OwnedReadHalf;
-    type OwnedWriteHalf = unix::OwnedWriteHalf;
-
-    #[inline(always)]
-    fn split_owned(
-        self,
-    ) -> (
-        RpcStreamReader<Self::OwnedReadHalf>,
-        RpcStreamWriter<Self::OwnedWriteHalf>,
-    ) {
-        let (reader, writer) = UnixStream::into_split(self);
-        (RpcStreamReader { reader }, RpcStreamWriter { writer })
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::time::Duration;
 
     use super::*;
-    use crate::message::MessageType;
-    use tokio::net::UnixListener;
+    use crate::{SplitOwnedStream, message::MessageType};
+    use tokio::net::{TcpStream, UnixListener, UnixStream};
 
     #[tokio::test]
     async fn test_read_write_tcp_rpc() {
@@ -135,13 +90,16 @@ mod tests {
         let addr = listener.local_addr().unwrap();
 
         let handle = tokio::spawn(async move {
-            let (stream, _) = listener.accept().await.unwrap();
-            let (mut rpc_reader, mut rpc_writer) = stream.split_owned();
+            let (io_stream, _) = listener.accept().await.unwrap();
+
+            let (reader, writer) = io_stream.split_owned();
+            let mut rpc_reader = AsyncRpcReceiver::new(reader);
+            let mut rpc_writer = AsyncRpcSender::new(writer);
 
             loop {
-                match rpc_reader.read().await {
+                match rpc_reader.receive().await {
                     Ok(msg) => {
-                        if let Err(e) = rpc_writer.write(&msg).await {
+                        if let Err(e) = rpc_writer.send(&msg).await {
                             println!("Server error: {:?}", e);
                         }
                     }
@@ -156,12 +114,15 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(10)).await;
 
         let io_stream = TcpStream::connect(addr).await.unwrap();
-        let (mut rpc_reader, mut rpc_writer) = io_stream.split_owned();
+        let (io_reader, io_writer) = io_stream.split_owned();
+
+        let mut rpc_reader = AsyncRpcReceiver::new(io_reader);
+        let mut rpc_writer = AsyncRpcSender::new(io_writer);
 
         let call_msg = Message::call(1, b"hi there".to_vec());
-        rpc_writer.write(&call_msg).await.unwrap();
+        rpc_writer.send(&call_msg).await.unwrap();
 
-        let reply_msg = rpc_reader.read().await.unwrap();
+        let reply_msg = rpc_reader.receive().await.unwrap();
         match (&call_msg.kind, &reply_msg.kind) {
             (MessageType::Call(sent), MessageType::Call(got)) => {
                 assert_eq!(sent.method, got.method);
@@ -181,13 +142,16 @@ mod tests {
         let listener = UnixListener::bind(&path).unwrap();
 
         let handle = tokio::spawn(async move {
-            let (stream, _) = listener.accept().await.unwrap();
-            let (mut rpc_reader, mut rpc_writer) = stream.split_owned();
+            let (io_stream, _) = listener.accept().await.unwrap();
+            let (io_reader, io_writer) = io_stream.split_owned();
+
+            let mut rpc_reader = AsyncRpcReceiver::new(io_reader);
+            let mut rpc_writer = AsyncRpcSender::new(io_writer);
 
             loop {
-                match rpc_reader.read().await {
+                match rpc_reader.receive().await {
                     Ok(msg) => {
-                        if let Err(e) = rpc_writer.write(&msg).await {
+                        if let Err(e) = rpc_writer.send(&msg).await {
                             println!("Server error: {:?}", e);
                         }
                     }
@@ -203,12 +167,14 @@ mod tests {
 
         let io_stream = UnixStream::connect(&path).await.unwrap();
 
-        let (mut rpc_reader, mut rpc_writer) = io_stream.split_owned();
+        let (io_reader, io_writer) = io_stream.split_owned();
+        let mut rpc_reader = AsyncRpcReceiver::new(io_reader);
+        let mut rpc_writer = AsyncRpcSender::new(io_writer);
 
         let call_msg = Message::call(1, b"hi there".to_vec());
-        rpc_writer.write(&call_msg).await.unwrap();
+        rpc_writer.send(&call_msg).await.unwrap();
 
-        let reply_msg = rpc_reader.read().await.unwrap();
+        let reply_msg = rpc_reader.receive().await.unwrap();
         match (&call_msg.kind, &reply_msg.kind) {
             (MessageType::Call(sent), MessageType::Call(got)) => {
                 assert_eq!(sent.method, got.method);

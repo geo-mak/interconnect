@@ -11,10 +11,11 @@ use uuid::Uuid;
 
 use serde::{Deserialize, Serialize};
 
+use crate::connection::SplitOwnedStream;
 use crate::error::{ErrKind, RpcError, RpcResult};
 use crate::message::{Message, MessageType};
 use crate::service::RpcService;
-use crate::transport::{RpcStreamWriter, SplitOwnedStream};
+use crate::transport::{AsyncRpcReceiver, AsyncRpcSender};
 
 struct ClientState<S, H>
 where
@@ -22,7 +23,7 @@ where
     H: RpcService,
 {
     service: H,
-    stream: Mutex<RpcStreamWriter<S::OwnedWriteHalf>>,
+    stream: Mutex<AsyncRpcSender<S::OwnedWriteHalf>>,
     pending: Mutex<HashMap<Uuid, Sender<RpcResult<MessageType>>>>,
 }
 
@@ -43,11 +44,14 @@ where
 {
     /// Creates a new RPC client with the given I/O stream.
     pub fn new(io_stream: S, call_handler: H) -> Self {
-        let (mut reader, writer) = io_stream.split_owned();
+        let (io_reader, io_writer) = io_stream.split_owned();
+
+        let mut rpc_reader = AsyncRpcReceiver::new(io_reader);
+        let rpc_writer = AsyncRpcSender::new(io_writer);
 
         let state = Arc::new(ClientState {
             service: call_handler,
-            stream: Mutex::new(writer),
+            stream: Mutex::new(rpc_writer),
             pending: Mutex::new(HashMap::new()),
         });
 
@@ -57,7 +61,7 @@ where
         let task = tokio::spawn(async move {
             loop {
                 // Stream is only being read here.
-                match reader.read().await {
+                match rpc_reader.receive().await {
                     Ok(message) => {
                         Self::process_incoming_message(message, &cloned_state).await;
                     }
@@ -88,16 +92,16 @@ where
                     Ok(result) => result,
                     Err(e) => {
                         let error_msg = Message::error(message.id, e);
-                        let _ = state.stream.lock().await.write(&error_msg).await;
+                        let _ = state.stream.lock().await.send(&error_msg).await;
                         return;
                     }
                 };
                 let reply_msg = Message::reply(message.id, reply);
-                let _ = state.stream.lock().await.write(&reply_msg).await;
+                let _ = state.stream.lock().await.send(&reply_msg).await;
             }
             MessageType::Ping => {
                 let pong = Message::pong(message.id);
-                let _ = state.stream.lock().await.write(&pong).await;
+                let _ = state.stream.lock().await.send(&pong).await;
             }
             MessageType::Pong => {
                 let mut pending = state.pending.lock().await;
@@ -124,7 +128,7 @@ where
     {
         let message = Message::notification_with(method, params)?;
         // Use transport directly.
-        self.state.stream.lock().await.write(&message).await
+        self.state.stream.lock().await.send(&message).await
     }
 
     /// Makes a remote procedure call.
@@ -180,7 +184,7 @@ where
         }
 
         // Send the message.
-        if let Err(e) = self.state.stream.lock().await.write(&message).await {
+        if let Err(e) = self.state.stream.lock().await.send(&message).await {
             let mut pending = self.state.pending.lock().await;
             pending.remove(&id);
             return Err(e);
@@ -227,10 +231,13 @@ mod tests {
 
         let server_task = tokio::spawn(async move {
             let (io_stream, _) = listener.accept().await.unwrap();
-            let (mut rpc_reader, mut rpc_writer) = io_stream.split_owned();
+            let (reader, writer) = io_stream.split_owned();
+
+            let mut rpc_reader = AsyncRpcReceiver::new(reader);
+            let mut rpc_writer = AsyncRpcSender::new(writer);
 
             loop {
-                match rpc_reader.read().await {
+                match rpc_reader.receive().await {
                     Ok(message) => {
                         match &message.kind {
                             MessageType::Call(call) => {
@@ -240,7 +247,7 @@ mod tests {
                                 // Send a response.
                                 let response =
                                     Message::reply_with(message.id, "reply".to_string()).unwrap();
-                                let _ = rpc_writer.write(&response).await;
+                                let _ = rpc_writer.send(&response).await;
                             }
                             _ => panic!("Expected call"),
                         }
@@ -273,10 +280,13 @@ mod tests {
 
         let server_task = tokio::spawn(async move {
             let (io_stream, _) = listener.accept().await.unwrap();
-            let (mut rpc_reader, mut rpc_writer) = io_stream.split_owned();
+            let (reader, writer) = io_stream.split_owned();
+
+            let mut rpc_reader = AsyncRpcReceiver::new(reader);
+            let mut rpc_writer = AsyncRpcSender::new(writer);
 
             loop {
-                match rpc_reader.read().await {
+                match rpc_reader.receive().await {
                     Ok(message) => {
                         match &message.kind {
                             MessageType::Call(call) => {
@@ -285,7 +295,7 @@ mod tests {
                                     message.id,
                                     RpcError::error(ErrKind::NotImplemented),
                                 );
-                                let _ = rpc_writer.write(&error).await;
+                                let _ = rpc_writer.send(&error).await;
                             }
                             _ => panic!("Expected call"),
                         }
@@ -327,10 +337,10 @@ mod tests {
 
         let server_task = tokio::spawn(async move {
             let (io_stream, _) = listener.accept().await.unwrap();
-            let (mut rpc_reader, _) = io_stream.split_owned();
-
+            let (reader, _) = io_stream.split_owned();
+            let mut rpc_reader = AsyncRpcReceiver::new(reader);
             loop {
-                match rpc_reader.read().await {
+                match rpc_reader.receive().await {
                     Ok(message) => {
                         match &message.kind {
                             MessageType::Notification(n) => {
@@ -387,13 +397,16 @@ mod tests {
 
         let server_task = tokio::spawn(async move {
             let (io_stream, _) = listener.accept().await.unwrap();
-            let (mut rpc_reader, mut rpc_writer) = io_stream.split_owned();
+            let (reader, writer) = io_stream.split_owned();
+
+            let mut rpc_reader = AsyncRpcReceiver::new(reader);
+            let mut rpc_writer = AsyncRpcSender::new(writer);
 
             let server_call = Message::call_with(1, ()).unwrap();
-            let _ = rpc_writer.write(&server_call).await;
+            let _ = rpc_writer.send(&server_call).await;
 
             loop {
-                match rpc_reader.read().await {
+                match rpc_reader.receive().await {
                     Ok(message) => {
                         match &message.kind {
                             MessageType::Reply(reply) => {

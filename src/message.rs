@@ -17,10 +17,30 @@ pub struct Call {
     pub data: Vec<u8>,
 }
 
+impl Call {
+    #[inline(always)]
+    pub fn decode_as<T: for<'de> Deserialize<'de>>(&self) -> RpcResult<T> {
+        Message::decode_as(&self.data)
+    }
+}
+
+/// RPC notification message.
+pub type Notification = Call;
+
 /// RPC reply message.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Reply {
     pub data: Vec<u8>,
+}
+
+impl Reply {
+    #[inline(always)]
+    pub fn with<T: Serialize>(value: &T) -> RpcResult<Self> {
+        let instance = Self {
+            data: Message::encode_to_bytes(value)?,
+        };
+        Ok(instance)
+    }
 }
 
 /// Message types of the RPC protocol.
@@ -35,7 +55,7 @@ pub enum MessageType {
     Error(RpcError),
 
     /// A notification message (no response expected).
-    Notification(Call),
+    Notification(Notification),
 
     /// A heartbeat/ping message.
     Ping,
@@ -75,8 +95,8 @@ impl Message {
     }
 
     /// Creates a response message.
-    pub fn reply(id: Uuid, data: Vec<u8>) -> Self {
-        Self::new(id, MessageType::Reply(Reply { data }))
+    pub fn reply(id: Uuid, reply: Reply) -> Self {
+        Self::new(id, MessageType::Reply(reply))
     }
 
     /// Creates an error message.
@@ -142,7 +162,7 @@ impl Message {
     /// Creates a response message with typed value.
     pub fn reply_with<R: Serialize>(id: Uuid, value: R) -> RpcResult<Self> {
         let data = Self::encode_to_bytes(&value)?;
-        Ok(Self::reply(id, data))
+        Ok(Self::reply(id, Reply { data }))
     }
 
     /// Creates a notification message with typed parameters.

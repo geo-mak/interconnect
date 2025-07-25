@@ -83,8 +83,8 @@ where
                     let _ = sender.send(Ok(message.kind));
                 }
             }
-            MessageType::Call(payload) => {
-                let reply_data = match state.service.call(payload.method, &payload.data).await {
+            MessageType::Call(call) => {
+                let reply = match state.service.call(&call).await {
                     Ok(result) => result,
                     Err(e) => {
                         let error_msg = Message::error(message.id, e);
@@ -92,7 +92,7 @@ where
                         return;
                     }
                 };
-                let reply_msg = Message::reply(message.id, reply_data);
+                let reply_msg = Message::reply(message.id, reply);
                 let _ = state.stream.lock().await.write(&reply_msg).await;
             }
             MessageType::Ping => {
@@ -214,6 +214,8 @@ where
 
 #[cfg(test)]
 mod tests {
+    use crate::message::{Call, Reply};
+
     use super::*;
     use std::sync::atomic::{AtomicU32, Ordering};
     use tokio::net::TcpStream;
@@ -367,11 +369,11 @@ mod tests {
     }
 
     impl RpcService for ClientHandler {
-        async fn call(&self, method: u16, _data: &[u8]) -> RpcResult<Vec<u8>> {
-            match method {
+        async fn call(&self, call: &Call) -> RpcResult<Reply> {
+            match call.method {
                 1 => {
                     let current = self.counter.fetch_add(1, Ordering::SeqCst);
-                    Ok(Message::encode_to_bytes(&(current + 1)).unwrap())
+                    Ok(Reply::with(&(current + 1)).unwrap())
                 }
                 _ => Err(RpcError::error(ErrKind::NotImplemented)),
             }

@@ -86,13 +86,13 @@ where
 
     async fn process_incoming_message(message: Message, service: &H) -> Option<Message> {
         match message.kind {
-            MessageType::Call(call) => match service.call(call.method, &call.data).await {
+            MessageType::Call(call) => match service.call(&call).await {
                 Ok(result) => Some(Message::reply(message.id, result)),
                 Err(err) => Some(Message::error(message.id, err)),
             },
             MessageType::Notification(notify) => {
                 // Notification, no reply.
-                let _ = service.notify(notify.method, &notify.data).await;
+                let _ = service.notify(&notify).await;
                 None
             }
             MessageType::Ping => Some(Message::pong(message.id)),
@@ -106,6 +106,8 @@ where
 
 #[cfg(test)]
 mod tests {
+    use crate::message::{Call, Reply};
+
     use super::*;
     use std::sync::atomic::{AtomicU32, Ordering};
     use std::time::Duration;
@@ -124,14 +126,14 @@ mod tests {
     }
 
     impl RpcService for RpcTestService {
-        async fn call(&self, _method: u16, data: &[u8]) -> RpcResult<Vec<u8>> {
+        async fn call(&self, call: &Call) -> RpcResult<Reply> {
             let count = self.counter.fetch_add(1, Ordering::SeqCst);
             let response = format!(
                 "Method called {} times. Data size: {}",
                 count + 1,
-                data.len()
+                call.data.len()
             );
-            Ok(Message::encode_to_bytes(&response)?)
+            Ok(Reply::with(&response)?)
         }
     }
 

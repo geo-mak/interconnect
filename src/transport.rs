@@ -1,15 +1,19 @@
+use bincode::enc::write::Writer;
+use bincode::error::EncodeError;
+use bytes::BufMut;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use crate::error::{ErrKind, RpcError, RpcResult};
 use crate::message::Message;
 
-const MAX_MESSAGE_SIZE: u32 = 16_777_216;
+const MAX_DATA_SIZE: u32 = 16_777_216;
 
 pub struct AsyncRpcReceiver<T>
 where
     T: AsyncReadExt + Send + Sync + Unpin,
 {
     reader: T,
+    bytes: Vec<u8>,
 }
 
 impl<T> AsyncRpcReceiver<T>
@@ -17,8 +21,11 @@ where
     T: AsyncReadExt + Send + Sync + Unpin,
 {
     #[inline(always)]
-    pub const fn new(reader: T) -> Self {
-        Self { reader }
+    pub fn new(reader: T) -> Self {
+        Self {
+            reader,
+            bytes: Vec::new(),
+        }
     }
 
     /// Reads and validates the RPC frame and decodes its data as a message.
@@ -27,16 +34,31 @@ where
         // Read 4 bytes size-metadata.
         let len = self.reader.read_u32().await?;
 
-        if len > MAX_MESSAGE_SIZE {
+        if len > MAX_DATA_SIZE {
             return Err(RpcError::error(ErrKind::LargeMessage));
         }
 
-        // TODO: Decode from stream directly or use buffer. No new buffers.
-        let mut bytes = vec![0u8; len as usize];
+        self.bytes.reserve(len as usize);
 
-        self.reader.read_exact(&mut bytes).await?;
+        // Safety: This is safe.
+        // Len is within the allocated range and matches the decoding size.
+        unsafe { self.bytes.set_len(len as usize) }
 
-        Message::decode(&bytes)
+        self.reader.read_exact(&mut self.bytes).await?;
+
+        Message::decode(&self.bytes)
+    }
+}
+
+pub struct BytesWriter {
+    pub buf: Vec<u8>,
+}
+
+impl Writer for BytesWriter {
+    #[inline(always)]
+    fn write(&mut self, bytes: &[u8]) -> Result<(), EncodeError> {
+        self.buf.put(bytes);
+        Ok(())
     }
 }
 
@@ -45,6 +67,7 @@ where
     T: AsyncWriteExt + Send + Sync + Unpin,
 {
     writer: T,
+    bytes: BytesWriter,
 }
 
 impl<T> AsyncRpcSender<T>
@@ -52,20 +75,20 @@ where
     T: AsyncWriteExt + Send + Sync + Unpin,
 {
     #[inline(always)]
-    pub const fn new(writer: T) -> Self {
-        Self { writer }
+    pub fn new(writer: T) -> Self {
+        Self {
+            writer,
+            bytes: BytesWriter { buf: Vec::new() },
+        }
     }
 
     /// Encodes a message as RPC frame and writes it into the I/O stream.
     pub async fn send(&mut self, message: &Message) -> RpcResult<()> {
-        // TODO: Encode into stream directly or use buffer. No new buffers.
-        let bytes = message.encode()?;
-
-        // Write 4 bytes metadata for message size.
-        self.writer.write_u32(bytes.len() as u32).await?;
-
-        // Write data.
-        self.writer.write_all(&bytes).await?;
+        // Safety: This is safe. I named the buffer bytes for safety reasons.
+        unsafe { self.bytes.buf.set_len(0) }
+        message.encode_into_writer(&mut self.bytes)?;
+        self.writer.write_u32(self.bytes.buf.len() as u32).await?;
+        self.writer.write_all(&self.bytes.buf).await?;
         self.writer.flush().await?;
         Ok(())
     }

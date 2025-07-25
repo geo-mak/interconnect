@@ -1,6 +1,5 @@
 use bincode::enc::write::Writer;
 use bincode::error::EncodeError;
-use bytes::BufMut;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use crate::error::{ErrKind, RpcError, RpcResult};
@@ -57,7 +56,7 @@ pub struct BytesWriter {
 impl Writer for BytesWriter {
     #[inline(always)]
     fn write(&mut self, bytes: &[u8]) -> Result<(), EncodeError> {
-        self.buf.put(bytes);
+        self.buf.extend_from_slice(bytes);
         Ok(())
     }
 }

@@ -11,7 +11,7 @@ use uuid::Uuid;
 
 use serde::{Deserialize, Serialize};
 
-use crate::connection::SplitOwnedStream;
+use crate::connection::OwnedSplitStream;
 use crate::error::{ErrKind, RpcError, RpcResult};
 use crate::message::{Message, MessageType};
 use crate::service::RpcService;
@@ -19,7 +19,7 @@ use crate::transport::{AsyncRpcReceiver, AsyncRpcSender};
 
 struct ClientState<S, H>
 where
-    S: SplitOwnedStream,
+    S: OwnedSplitStream,
     H: RpcService,
 {
     service: H,
@@ -30,7 +30,7 @@ where
 /// RPC Client implementation.
 pub struct RpcClient<S, H>
 where
-    S: SplitOwnedStream,
+    S: OwnedSplitStream,
     H: RpcService,
 {
     state: Arc<ClientState<S, H>>,
@@ -39,12 +39,12 @@ where
 
 impl<S, H> RpcClient<S, H>
 where
-    S: SplitOwnedStream + 'static,
+    S: OwnedSplitStream + 'static,
     H: RpcService + 'static,
 {
     /// Creates a new RPC client with the given I/O stream.
     pub fn new(io_stream: S, call_handler: H) -> Self {
-        let (io_reader, io_writer) = io_stream.split_owned();
+        let (io_reader, io_writer) = io_stream.owned_split();
 
         let mut rpc_reader = AsyncRpcReceiver::new(io_reader);
         let rpc_writer = AsyncRpcSender::new(io_writer);
@@ -212,7 +212,7 @@ where
     /// Pending requests will be dropped.
     pub async fn shutdown(self) -> RpcResult<()> {
         self.task.abort();
-        self.state.stream.lock().await.shutdown().await
+        self.state.stream.lock().await.close().await
     }
 }
 
@@ -231,7 +231,7 @@ mod tests {
 
         let server_task = tokio::spawn(async move {
             let (io_stream, _) = listener.accept().await.unwrap();
-            let (reader, writer) = io_stream.split_owned();
+            let (reader, writer) = io_stream.owned_split();
 
             let mut rpc_reader = AsyncRpcReceiver::new(reader);
             let mut rpc_writer = AsyncRpcSender::new(writer);
@@ -280,7 +280,7 @@ mod tests {
 
         let server_task = tokio::spawn(async move {
             let (io_stream, _) = listener.accept().await.unwrap();
-            let (reader, writer) = io_stream.split_owned();
+            let (reader, writer) = io_stream.owned_split();
 
             let mut rpc_reader = AsyncRpcReceiver::new(reader);
             let mut rpc_writer = AsyncRpcSender::new(writer);
@@ -337,7 +337,7 @@ mod tests {
 
         let server_task = tokio::spawn(async move {
             let (io_stream, _) = listener.accept().await.unwrap();
-            let (reader, _) = io_stream.split_owned();
+            let (reader, _) = io_stream.owned_split();
             let mut rpc_reader = AsyncRpcReceiver::new(reader);
             loop {
                 match rpc_reader.receive().await {
@@ -397,7 +397,7 @@ mod tests {
 
         let server_task = tokio::spawn(async move {
             let (io_stream, _) = listener.accept().await.unwrap();
-            let (reader, writer) = io_stream.split_owned();
+            let (reader, writer) = io_stream.owned_split();
 
             let mut rpc_reader = AsyncRpcReceiver::new(reader);
             let mut rpc_writer = AsyncRpcSender::new(writer);

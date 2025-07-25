@@ -4,8 +4,8 @@ use std::sync::Arc;
 
 use tokio::task::JoinHandle;
 
+use crate::connection::OwnedSplitStream;
 use crate::connection::RpcListener;
-use crate::connection::SplitOwnedStream;
 use crate::error::{ErrKind, RpcResult};
 use crate::message::{Message, MessageType};
 use crate::service::RpcService;
@@ -59,7 +59,7 @@ where
     // TODO: Safe abort, if requested.
     fn spawn_connection(io_stream: L::Stream, service: Arc<H>) -> tokio::task::JoinHandle<()> {
         tokio::spawn(async move {
-            let (io_reader, io_writer) = io_stream.split_owned();
+            let (io_reader, io_writer) = io_stream.owned_split();
 
             let mut rpc_reader = AsyncRpcReceiver::new(io_reader);
             let mut rpc_writer = AsyncRpcSender::new(io_writer);
@@ -150,7 +150,7 @@ mod tests {
         let handle = server.start("127.0.0.1:8000").await.unwrap();
 
         let io_stream = TcpStream::connect("127.0.0.1:8000").await.unwrap();
-        let (io_reader, io_writer) = io_stream.split_owned();
+        let (io_reader, io_writer) = io_stream.owned_split();
 
         let mut rpc_reader = AsyncRpcReceiver::new(io_reader);
         let mut rpc_writer = AsyncRpcSender::new(io_writer);
@@ -182,7 +182,7 @@ mod tests {
         let handle = server.start(path).await.unwrap();
 
         let io_stream = UnixStream::connect(path).await.unwrap();
-        let (io_reader, io_writer) = io_stream.split_owned();
+        let (io_reader, io_writer) = io_stream.owned_split();
 
         let mut rpc_reader = AsyncRpcReceiver::new(io_reader);
         let mut rpc_writer = AsyncRpcSender::new(io_writer);

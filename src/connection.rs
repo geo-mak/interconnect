@@ -8,35 +8,35 @@ use tokio::net::tcp;
 use tokio::net::unix;
 use tokio::net::{TcpListener, TcpStream, UnixListener, UnixStream};
 
-pub trait SplitOwnedStream: Sized + Send {
+pub trait OwnedSplitStream {
     type OwnedReadHalf: AsyncReadExt + Send + Sync + Unpin;
     type OwnedWriteHalf: AsyncWriteExt + Send + Sync + Unpin;
-    fn split_owned(self) -> (Self::OwnedReadHalf, Self::OwnedWriteHalf);
+    fn owned_split(self) -> (Self::OwnedReadHalf, Self::OwnedWriteHalf);
 }
 
-impl SplitOwnedStream for TcpStream {
+impl OwnedSplitStream for TcpStream {
     type OwnedReadHalf = tcp::OwnedReadHalf;
     type OwnedWriteHalf = tcp::OwnedWriteHalf;
 
     #[inline(always)]
-    fn split_owned(self) -> (Self::OwnedReadHalf, Self::OwnedWriteHalf) {
+    fn owned_split(self) -> (Self::OwnedReadHalf, Self::OwnedWriteHalf) {
         TcpStream::into_split(self)
     }
 }
 
-impl SplitOwnedStream for UnixStream {
+impl OwnedSplitStream for UnixStream {
     type OwnedReadHalf = unix::OwnedReadHalf;
     type OwnedWriteHalf = unix::OwnedWriteHalf;
 
     #[inline(always)]
-    fn split_owned(self) -> (Self::OwnedReadHalf, Self::OwnedWriteHalf) {
+    fn owned_split(self) -> (Self::OwnedReadHalf, Self::OwnedWriteHalf) {
         UnixStream::into_split(self)
     }
 }
 
 pub trait RpcListener<A>: Sized + Send {
     type Address;
-    type Stream: SplitOwnedStream + Send;
+    type Stream: OwnedSplitStream + Send;
 
     fn bind(addr: A) -> impl Future<Output = io::Result<Self>>;
 

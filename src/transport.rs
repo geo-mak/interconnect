@@ -71,7 +71,7 @@ where
     }
 
     #[inline(always)]
-    pub async fn shutdown(&mut self) -> RpcResult<()> {
+    pub async fn close(&mut self) -> RpcResult<()> {
         self.writer.shutdown().await.map_err(Into::into)
     }
 }
@@ -81,7 +81,7 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
-    use crate::{SplitOwnedStream, message::MessageType};
+    use crate::{OwnedSplitStream, message::MessageType};
     use tokio::net::{TcpStream, UnixListener, UnixStream};
 
     #[tokio::test]
@@ -92,7 +92,7 @@ mod tests {
         let handle = tokio::spawn(async move {
             let (io_stream, _) = listener.accept().await.unwrap();
 
-            let (reader, writer) = io_stream.split_owned();
+            let (reader, writer) = io_stream.owned_split();
             let mut rpc_reader = AsyncRpcReceiver::new(reader);
             let mut rpc_writer = AsyncRpcSender::new(writer);
 
@@ -114,7 +114,7 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(10)).await;
 
         let io_stream = TcpStream::connect(addr).await.unwrap();
-        let (io_reader, io_writer) = io_stream.split_owned();
+        let (io_reader, io_writer) = io_stream.owned_split();
 
         let mut rpc_reader = AsyncRpcReceiver::new(io_reader);
         let mut rpc_writer = AsyncRpcSender::new(io_writer);
@@ -131,7 +131,7 @@ mod tests {
             _ => panic!("Expected call"),
         }
 
-        rpc_writer.shutdown().await.unwrap();
+        rpc_writer.close().await.unwrap();
         handle.await.unwrap()
     }
 
@@ -143,7 +143,7 @@ mod tests {
 
         let handle = tokio::spawn(async move {
             let (io_stream, _) = listener.accept().await.unwrap();
-            let (io_reader, io_writer) = io_stream.split_owned();
+            let (io_reader, io_writer) = io_stream.owned_split();
 
             let mut rpc_reader = AsyncRpcReceiver::new(io_reader);
             let mut rpc_writer = AsyncRpcSender::new(io_writer);
@@ -167,7 +167,7 @@ mod tests {
 
         let io_stream = UnixStream::connect(&path).await.unwrap();
 
-        let (io_reader, io_writer) = io_stream.split_owned();
+        let (io_reader, io_writer) = io_stream.owned_split();
         let mut rpc_reader = AsyncRpcReceiver::new(io_reader);
         let mut rpc_writer = AsyncRpcSender::new(io_writer);
 
@@ -183,7 +183,7 @@ mod tests {
             _ => panic!("Expected call"),
         }
 
-        rpc_writer.shutdown().await.unwrap();
+        rpc_writer.close().await.unwrap();
         handle.await.unwrap();
 
         std::fs::remove_file(&path).unwrap();

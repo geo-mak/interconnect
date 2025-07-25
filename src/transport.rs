@@ -19,6 +19,11 @@ impl<T> RpcStreamReader<T>
 where
     T: AsyncReadExt + Send + Sync + Unpin,
 {
+    #[inline(always)]
+    pub const fn new(reader: T) -> Self {
+        Self { reader }
+    }
+
     /// Reads and validates the raw message and decodes it as user-level message.
     pub async fn read(&mut self) -> RpcResult<Message> {
         // Read 4 bytes size-metadata.
@@ -48,6 +53,11 @@ impl<T> RpcStreamWriter<T>
 where
     T: AsyncWriteExt + Send + Sync + Unpin,
 {
+    #[inline(always)]
+    pub const fn new(writer: T) -> Self {
+        Self { writer }
+    }
+
     /// Encodes the message and writes it into the I/O stream.
     pub async fn write(&mut self, message: &Message) -> RpcResult<()> {
         // TODO: Encode to stream directly. No new buffers.
@@ -62,6 +72,7 @@ where
         Ok(())
     }
 
+    #[inline(always)]
     pub async fn shutdown(&mut self) -> RpcResult<()> {
         self.writer.shutdown().await.map_err(Into::into)
     }

@@ -13,11 +13,7 @@ pub trait RpcService: Send + Sync {
 
     /// Handles a notification message.
     /// By default, it returns `NotImplemented` error.
-    fn notify(
-        &self,
-        _method: u16,
-        _data: &[u8],
-    ) -> impl Future<Output = RpcResult<()>> + Send {
+    fn notify(&self, _method: u16, _data: &[u8]) -> impl Future<Output = RpcResult<()>> + Send {
         std::future::ready(Err(RpcError::error(ErrKind::NotImplemented)))
     }
 }

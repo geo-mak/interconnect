@@ -23,7 +23,7 @@ where
     H: RpcService,
 {
     service: H,
-    stream: Mutex<AsyncRpcSender<S::OwnedWriteHalf>>,
+    sender: Mutex<AsyncRpcSender<S::OwnedWriteHalf>>,
     pending: Mutex<HashMap<Uuid, Sender<RpcResult<MessageType>>>>,
 }
 
@@ -34,7 +34,7 @@ where
     H: RpcService,
 {
     state: Arc<ClientState<S, H>>,
-    task: tokio::task::JoinHandle<RpcResult<()>>,
+    task: tokio::task::JoinHandle<()>,
 }
 
 impl<S, H> RpcClient<S, H>
@@ -51,7 +51,7 @@ where
 
         let state = Arc::new(ClientState {
             service: call_handler,
-            stream: Mutex::new(rpc_writer),
+            sender: Mutex::new(rpc_writer),
             pending: Mutex::new(HashMap::new()),
         });
 
@@ -68,7 +68,7 @@ where
                     Err(e) => {
                         if matches!(e.kind, ErrKind::ConnectionClosed) {
                             log::info!("Connection closed");
-                            return Err(e);
+                            break;
                         }
                         log::error!("Error receiving message: {e}");
                     }
@@ -92,16 +92,16 @@ where
                     Ok(result) => result,
                     Err(e) => {
                         let error_msg = Message::error(message.id, e);
-                        let _ = state.stream.lock().await.send(&error_msg).await;
+                        let _ = state.sender.lock().await.send(&error_msg).await;
                         return;
                     }
                 };
                 let reply_msg = Message::reply(message.id, reply);
-                let _ = state.stream.lock().await.send(&reply_msg).await;
+                let _ = state.sender.lock().await.send(&reply_msg).await;
             }
             MessageType::Ping => {
                 let pong = Message::pong(message.id);
-                let _ = state.stream.lock().await.send(&pong).await;
+                let _ = state.sender.lock().await.send(&pong).await;
             }
             MessageType::Pong => {
                 let mut pending = state.pending.lock().await;
@@ -111,6 +111,47 @@ where
             }
             _ => {
                 log::warn!("Received unexpected message type: {:?}", message.kind);
+            }
+        }
+    }
+
+    /// Sends a message and waits for response.
+    async fn send_message(
+        &self,
+        message: Message,
+        timeout_duration: Duration,
+    ) -> RpcResult<MessageType> {
+        let (sender, receiver) = oneshot::channel();
+
+        let id = message.id;
+
+        // Store pending request.
+        {
+            let mut pending = self.state.pending.lock().await;
+            pending.insert(id, sender);
+        }
+
+        // Send the message.
+        if let Err(e) = self.state.sender.lock().await.send(&message).await {
+            let mut pending = self.state.pending.lock().await;
+            pending.remove(&id);
+            return Err(e);
+        }
+
+        // Wait for response with timeout.
+        match timeout(timeout_duration, receiver).await {
+            Ok(Ok(result)) => result,
+            Ok(Err(_)) => {
+                // Channel was closed without response.
+                let mut pending = self.state.pending.lock().await;
+                pending.remove(&id);
+                Err(RpcError::error(ErrKind::ConnectionClosed))
+            }
+            Err(_) => {
+                // Timeout occurred.
+                let mut pending = self.state.pending.lock().await;
+                pending.remove(&id);
+                Err(RpcError::error(ErrKind::Timeout))
             }
         }
     }
@@ -127,8 +168,7 @@ where
         P: Serialize,
     {
         let message = Message::notification_with(method, params)?;
-        // Use transport directly.
-        self.state.stream.lock().await.send(&message).await
+        self.state.sender.lock().await.send(&message).await
     }
 
     /// Makes a remote procedure call.
@@ -167,52 +207,11 @@ where
         }
     }
 
-    /// Sends a message and waits for response.
-    async fn send_message(
-        &self,
-        message: Message,
-        timeout_duration: Duration,
-    ) -> RpcResult<MessageType> {
-        let (sender, receiver) = oneshot::channel();
-
-        let id = message.id;
-
-        // Store pending request.
-        {
-            let mut pending = self.state.pending.lock().await;
-            pending.insert(id, sender);
-        }
-
-        // Send the message.
-        if let Err(e) = self.state.stream.lock().await.send(&message).await {
-            let mut pending = self.state.pending.lock().await;
-            pending.remove(&id);
-            return Err(e);
-        }
-
-        // Wait for response with timeout.
-        match timeout(timeout_duration, receiver).await {
-            Ok(Ok(result)) => result,
-            Ok(Err(_)) => {
-                // Channel was closed without response.
-                let mut pending = self.state.pending.lock().await;
-                pending.remove(&id);
-                Err(RpcError::error(ErrKind::ConnectionClosed))
-            }
-            Err(_) => {
-                // Timeout occurred.
-                let mut pending = self.state.pending.lock().await;
-                pending.remove(&id);
-                Err(RpcError::error(ErrKind::Timeout))
-            }
-        }
-    }
-
     /// Consumes the instance and aborts its background task.
     /// Pending requests will be dropped.
     pub async fn shutdown(self) -> RpcResult<()> {
         self.task.abort();
-        self.state.stream.lock().await.close().await
+        self.state.sender.lock().await.close().await
     }
 }
 

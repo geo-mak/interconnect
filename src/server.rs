@@ -2,6 +2,7 @@ use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
+use tokio::io::AsyncWriteExt;
 use tokio::task::JoinHandle;
 
 use crate::connection::OwnedSplitStream;
@@ -44,7 +45,6 @@ where
             loop {
                 match listener.accept().await {
                     Ok((io_stream, _)) => {
-                        // TODO: Needs handle.
                         Self::spawn_connection(io_stream, service.clone());
                     }
                     Err(e) => {
@@ -67,43 +67,48 @@ where
             loop {
                 match rpc_reader.receive().await {
                     Ok(message) => {
-                        let result = Self::process_incoming_message(message, &service).await;
-                        if let Some(reply_msg) = result {
-                            if let Err(e) = rpc_writer.send(&reply_msg).await {
-                                log::error!("Failed to send response to client: {e}");
-                                break;
-                            }
+                        if let Err(e) =
+                            Self::process_incoming_message(message, &service, &mut rpc_writer).await
+                        {
+                            log::error!("Failed to send response to client: {e}");
+                            break;
                         }
                     }
                     Err(e) => {
-                        if matches!(e.kind, ErrKind::ConnectionClosed) {
-                            log::info!("Client disconnected");
+                        if e.kind == ErrKind::ConnectionClosed {
+                            log::info!("Connection closed");
                         } else {
-                            log::error!("Error handling connection : {e}");
+                            log::error!("Connection error : {e}");
                         }
                         break;
                     }
                 }
             }
-            log::info!("Connection closed");
         })
     }
 
-    async fn process_incoming_message(message: Message, service: &H) -> Option<Message> {
+    async fn process_incoming_message<T>(
+        message: Message,
+        service: &H,
+        sender: &mut AsyncRpcSender<T>,
+    ) -> RpcResult<()>
+    where
+        T: AsyncWriteExt + Send + Sync + Unpin,
+    {
         match message.kind {
             MessageType::Call(call) => match service.call(&call).await {
-                Ok(result) => Some(Message::reply(message.id, result)),
-                Err(err) => Some(Message::error(message.id, err)),
+                Ok(result) => sender.send(&Message::reply(message.id, result)).await,
+                Err(err) => sender.send(&Message::error(message.id, err)).await,
             },
             MessageType::Notification(notify) => {
                 // Notification, no reply.
                 let _ = service.notify(&notify).await;
-                None
+                Ok(())
             }
-            MessageType::Ping => Some(Message::pong(message.id)),
+            MessageType::Ping => sender.send(&Message::pong(message.id)).await,
             _ => {
                 log::warn!("Received unexpected message type: {:?}", message.kind);
-                None
+                Ok(())
             }
         }
     }

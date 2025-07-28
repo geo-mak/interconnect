@@ -6,7 +6,7 @@ use tokio::task::JoinHandle;
 
 use crate::connection::OwnedSplitStream;
 use crate::connection::RpcListener;
-use crate::error::{ErrKind, RpcResult};
+use crate::error::RpcResult;
 use crate::message::{Message, MessageType};
 use crate::service::RpcService;
 use crate::transport::{AsyncRpcReceiver, AsyncRpcSender};
@@ -45,7 +45,7 @@ where
             loop {
                 match listener.accept().await {
                     Ok((io_stream, _)) => {
-                        Self::spawn_connection(io_stream, service.clone());
+                        tokio::spawn(Self::new_connection(io_stream, service.clone()));
                     }
                     Err(e) => {
                         log::error!("Failed to accept connection: {e}");
@@ -58,34 +58,28 @@ where
     }
 
     // TODO: Safe abort, if requested.
-    fn spawn_connection(io_stream: L::Stream, service: H) -> tokio::task::JoinHandle<()> {
-        tokio::spawn(async move {
-            let (io_reader, io_writer) = io_stream.owned_split();
-            let mut rpc_rx = AsyncRpcReceiver::new(io_reader);
-            let mut rpc_tx = AsyncRpcSender::new(io_writer);
+    async fn new_connection(io_stream: L::Stream, service: H) {
+        let (io_reader, io_writer) = io_stream.owned_split();
+        let mut rpc_rx = AsyncRpcReceiver::new(io_reader);
+        let mut rpc_tx = AsyncRpcSender::new(io_writer);
 
-            // TODO: Multiplexing strategy.
-            loop {
-                match rpc_rx.receive().await {
-                    Ok(message) => {
-                        if let Err(e) =
-                            Self::process_incoming_message(&message, &service, &mut rpc_tx).await
-                        {
-                            log::error!("Failed to send response to client: {e}");
-                            break;
-                        }
-                    }
-                    Err(e) => {
-                        if e.kind == ErrKind::ConnectionClosed {
-                            log::info!("Connection closed");
-                        } else {
-                            log::error!("Connection error : {e}");
-                        }
+        // TODO: Multiplexing strategy.
+        loop {
+            match rpc_rx.receive().await {
+                Ok(message) => {
+                    if let Err(e) =
+                        Self::process_incoming_message(&message, &service, &mut rpc_tx).await
+                    {
+                        log::error!("Failed to send response to client: {e}");
                         break;
                     }
                 }
+                Err(e) => {
+                    log::info!("Receive error: {e}");
+                    break;
+                }
             }
-        })
+        }
     }
 
     async fn process_incoming_message<T>(

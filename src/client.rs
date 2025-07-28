@@ -68,11 +68,7 @@ where
                         }
                     }
                     Err(e) => {
-                        if e.kind == ErrKind::ConnectionClosed {
-                            log::info!("Connection closed");
-                        } else {
-                            log::error!("Connection error : {e}");
-                        }
+                        log::info!("Receive error: {e}");
                         break;
                     }
                 }

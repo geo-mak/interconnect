@@ -46,31 +46,34 @@ where
     pub fn new(io_stream: S, call_handler: H) -> Self {
         let (io_reader, io_writer) = io_stream.owned_split();
 
-        let mut rpc_reader = AsyncRpcReceiver::new(io_reader);
-        let rpc_writer = AsyncRpcSender::new(io_writer);
-
         let state = Arc::new(ClientState {
             service: call_handler,
-            sender: Mutex::new(rpc_writer),
+            sender: Mutex::new(AsyncRpcSender::new(io_writer)),
             pending: Mutex::new(HashMap::new()),
         });
 
         let cloned_state = Arc::clone(&state);
+        let mut rpc_rx = AsyncRpcReceiver::new(io_reader);
 
-        // Processing incoming messages.
+        // TODO: Multiplexing strategy.
         let task = tokio::spawn(async move {
             loop {
                 // Stream is only being read here.
-                match rpc_reader.receive().await {
+                match rpc_rx.receive().await {
                     Ok(message) => {
-                        Self::process_incoming_message(message, &cloned_state).await;
-                    }
-                    Err(e) => {
-                        if matches!(e.kind, ErrKind::ConnectionClosed) {
-                            log::info!("Connection closed");
+                        if let Err(e) = Self::process_incoming_message(message, &cloned_state).await
+                        {
+                            log::error!("Failed to send response: {e}");
                             break;
                         }
-                        log::error!("Error receiving message: {e}");
+                    }
+                    Err(e) => {
+                        if e.kind == ErrKind::ConnectionClosed {
+                            log::info!("Connection closed");
+                        } else {
+                            log::error!("Connection error : {e}");
+                        }
+                        break;
                     }
                 }
             }
@@ -79,7 +82,10 @@ where
         Self { state, task }
     }
 
-    async fn process_incoming_message(message: Message, state: &ClientState<S, H>) {
+    async fn process_incoming_message(
+        message: Message,
+        state: &ClientState<S, H>,
+    ) -> RpcResult<()> {
         match message.kind {
             MessageType::Reply(_) | MessageType::Error(_) => {
                 let mut pending = state.pending.lock().await;
@@ -88,20 +94,20 @@ where
                 }
             }
             MessageType::Call(call) => {
-                let reply = match state.service.call(&call).await {
-                    Ok(result) => result,
+                match state.service.call(&call).await {
+                    Ok(reply) => {
+                        let reply_msg = Message::reply(message.id, reply);
+                        return state.sender.lock().await.send(&reply_msg).await;
+                    }
                     Err(e) => {
                         let error_msg = Message::error(message.id, e);
-                        let _ = state.sender.lock().await.send(&error_msg).await;
-                        return;
+                        return state.sender.lock().await.send(&error_msg).await;
                     }
                 };
-                let reply_msg = Message::reply(message.id, reply);
-                let _ = state.sender.lock().await.send(&reply_msg).await;
             }
             MessageType::Ping => {
                 let pong = Message::pong(message.id);
-                let _ = state.sender.lock().await.send(&pong).await;
+                return state.sender.lock().await.send(&pong).await;
             }
             MessageType::Pong => {
                 let mut pending = state.pending.lock().await;
@@ -113,6 +119,7 @@ where
                 log::warn!("Received unexpected message type: {:?}", message.kind);
             }
         }
+        Ok(())
     }
 
     /// Sends a message and waits for response.

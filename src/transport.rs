@@ -7,10 +7,11 @@ use crate::message::Message;
 
 const MAX_DATA_SIZE: u32 = 16_777_216;
 
-pub struct AsyncRpcReceiver<T>
-where
-    T: AsyncReadExt + Send + Sync + Unpin,
-{
+// Definitely not for bulk throughput or streams. But streams are a different story.
+const FRAMING_CAPACITY: usize = 1024;
+
+// TODO: TLS support.
+pub struct AsyncRpcReceiver<T> {
     reader: T,
     bytes: Vec<u8>,
 }
@@ -23,26 +24,44 @@ where
     pub fn new(reader: T) -> Self {
         Self {
             reader,
-            bytes: Vec::new(),
+            bytes: Vec::with_capacity(FRAMING_CAPACITY),
+        }
+    }
+
+    #[inline(always)]
+    pub fn with_capacity(reader: T, framing_cap: usize) -> Self {
+        Self {
+            reader,
+            bytes: Vec::with_capacity(framing_cap),
         }
     }
 
     /// Reads and validates the RPC frame and decodes its data as a message.
     /// This method is not cancellation-safe, and it should not be awaited as part of selection race.
+    /// **Currently**, if an error has been returned, receiving must be terminated and the stream must be closed.
+    #[allow(clippy::uninit_vec)]
     pub async fn receive(&mut self) -> RpcResult<Message> {
-        // Read 4 bytes size-metadata.
+        // Read 4 bytes size prefix.
         let len = self.reader.read_u32().await?;
 
         if len > MAX_DATA_SIZE {
             return Err(RpcError::error(ErrKind::LargeMessage));
         }
 
+        // Reserve uninitialized memory.
         self.bytes.reserve(len as usize);
 
-        // Safety: This is safe.
-        // Len is within the allocated range and matches the decoding size.
+        // Safety: This should be safe because:
+        //
+        // 1 - Buffer has allocated memory for `len` bytes.
+        //
+        // 2 - `len` matches the expected decoding size.
+        //
+        // 3 - In Rust, any operation (Add, Sub, Mul, etc.) with uninitialized memory is UB,
+        //     because the byte-pattern of that memory will not be interpreted in consistent manner (random),
+        //     but we are not doing any operation except copying/overwriting FROM the stream TO the buffer,
+        //     and only on success, or otherwise, an error will be returned.
         unsafe { self.bytes.set_len(len as usize) }
-
         self.reader.read_exact(&mut self.bytes).await?;
 
         Message::decode(&self.bytes)
@@ -61,10 +80,8 @@ impl Writer for BytesWriter {
     }
 }
 
-pub struct AsyncRpcSender<T>
-where
-    T: AsyncWriteExt + Send + Sync + Unpin,
-{
+// TODO: TLS support.
+pub struct AsyncRpcSender<T> {
     writer: T,
     bytes: BytesWriter,
 }
@@ -77,16 +94,31 @@ where
     pub fn new(writer: T) -> Self {
         Self {
             writer,
-            bytes: BytesWriter { buf: Vec::new() },
+            bytes: BytesWriter {
+                buf: Vec::with_capacity(FRAMING_CAPACITY),
+            },
+        }
+    }
+
+    #[inline(always)]
+    pub fn with_capacity(writer: T, framing_cap: usize) -> Self {
+        Self {
+            writer,
+            bytes: BytesWriter {
+                buf: Vec::with_capacity(framing_cap),
+            },
         }
     }
 
     /// Encodes a message as RPC frame and writes it into the I/O stream.
     pub async fn send(&mut self, message: &Message) -> RpcResult<()> {
-        // Safety: This is safe. I named the buffer bytes for safety reasons.
         unsafe { self.bytes.buf.set_len(0) }
+
         message.encode_into_writer(&mut self.bytes)?;
+
+        // Write 4-bytes size prefix.
         self.writer.write_u32(self.bytes.buf.len() as u32).await?;
+
         self.writer.write_all(&self.bytes.buf).await?;
         self.writer.flush().await?;
         Ok(())
@@ -94,6 +126,7 @@ where
 
     #[inline(always)]
     pub async fn close(&mut self) -> RpcResult<()> {
+        // Why only writer exposes shutdown?
         self.writer.shutdown().await.map_err(Into::into)
     }
 }
@@ -137,7 +170,6 @@ mod tests {
 
         let io_stream = TcpStream::connect(addr).await.unwrap();
         let (io_reader, io_writer) = io_stream.owned_split();
-
         let mut rpc_reader = AsyncRpcReceiver::new(io_reader);
         let mut rpc_writer = AsyncRpcSender::new(io_writer);
 

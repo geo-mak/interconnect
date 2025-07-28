@@ -60,15 +60,15 @@ where
     fn spawn_connection(io_stream: L::Stream, service: Arc<H>) -> tokio::task::JoinHandle<()> {
         tokio::spawn(async move {
             let (io_reader, io_writer) = io_stream.owned_split();
+            let mut rpc_rx = AsyncRpcReceiver::new(io_reader);
+            let mut rpc_tx = AsyncRpcSender::new(io_writer);
 
-            let mut rpc_reader = AsyncRpcReceiver::new(io_reader);
-            let mut rpc_writer = AsyncRpcSender::new(io_writer);
-
+            // TODO: Multiplexing strategy.
             loop {
-                match rpc_reader.receive().await {
+                match rpc_rx.receive().await {
                     Ok(message) => {
                         if let Err(e) =
-                            Self::process_incoming_message(message, &service, &mut rpc_writer).await
+                            Self::process_incoming_message(message, &service, &mut rpc_tx).await
                         {
                             log::error!("Failed to send response to client: {e}");
                             break;

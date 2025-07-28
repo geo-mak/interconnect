@@ -133,11 +133,14 @@ where
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     use std::time::Duration;
 
-    use super::*;
-    use crate::{OwnedSplitStream, message::MessageType};
     use tokio::net::{TcpStream, UnixListener, UnixStream};
+
+    use crate::connection::OwnedSplitStream;
+    use crate::message::MessageType;
 
     #[tokio::test]
     async fn test_read_write_tcp_rpc() {

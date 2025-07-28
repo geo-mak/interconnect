@@ -17,41 +17,40 @@ use crate::message::{Message, MessageType};
 use crate::service::RpcService;
 use crate::transport::{AsyncRpcReceiver, AsyncRpcSender};
 
-struct ClientState<S, H>
+struct ClientState<S>
 where
     S: OwnedSplitStream,
-    H: RpcService,
 {
-    service: H,
     sender: Mutex<AsyncRpcSender<S::OwnedWriteHalf>>,
     pending: Mutex<HashMap<Uuid, Sender<RpcResult<MessageType>>>>,
 }
 
 /// RPC Client implementation.
-pub struct RpcClient<S, H>
+pub struct RpcClient<S>
 where
     S: OwnedSplitStream,
-    H: RpcService,
 {
-    state: Arc<ClientState<S, H>>,
+    state: Arc<ClientState<S>>,
     task: tokio::task::JoinHandle<()>,
 }
 
-impl<S, H> RpcClient<S, H>
+impl<S> RpcClient<S>
 where
     S: OwnedSplitStream + 'static,
-    H: RpcService + 'static,
 {
     /// Creates a new RPC client with the given I/O stream.
-    pub fn new(io_stream: S, call_handler: H) -> Self {
+    pub fn new<H>(io_stream: S, call_handler: H) -> Self
+    where
+        H: RpcService,
+    {
         let (io_reader, io_writer) = io_stream.owned_split();
 
         let state = Arc::new(ClientState {
-            service: call_handler,
             sender: Mutex::new(AsyncRpcSender::new(io_writer)),
             pending: Mutex::new(HashMap::new()),
         });
 
+        let service = call_handler.clone();
         let cloned_state = Arc::clone(&state);
         let mut rpc_rx = AsyncRpcReceiver::new(io_reader);
 
@@ -61,7 +60,8 @@ where
                 // Stream is only being read here.
                 match rpc_rx.receive().await {
                     Ok(message) => {
-                        if let Err(e) = Self::process_incoming_message(message, &cloned_state).await
+                        if let Err(e) =
+                            Self::process_incoming_message(message, &service, &cloned_state).await
                         {
                             log::error!("Failed to send response: {e}");
                             break;
@@ -82,9 +82,10 @@ where
         Self { state, task }
     }
 
-    async fn process_incoming_message(
+    async fn process_incoming_message<H: RpcService>(
         message: Message,
-        state: &ClientState<S, H>,
+        service: &H,
+        state: &ClientState<S>,
     ) -> RpcResult<()> {
         match message.kind {
             MessageType::Reply(_) | MessageType::Error(_) => {
@@ -94,7 +95,7 @@ where
                 }
             }
             MessageType::Call(call) => {
-                match state.service.call(&call).await {
+                match service.call(&call).await {
                     Ok(reply) => {
                         let reply_msg = Message::reply(message.id, reply);
                         return state.sender.lock().await.send(&reply_msg).await;
@@ -125,7 +126,7 @@ where
     /// Sends a message and waits for response.
     async fn send_message(
         &self,
-        message: Message,
+        message: &Message,
         timeout_duration: Duration,
     ) -> RpcResult<MessageType> {
         let (sender, receiver) = oneshot::channel();
@@ -139,7 +140,7 @@ where
         }
 
         // Send the message.
-        if let Err(e) = self.state.sender.lock().await.send(&message).await {
+        if let Err(e) = self.state.sender.lock().await.send(message).await {
             let mut pending = self.state.pending.lock().await;
             pending.remove(&id);
             return Err(e);
@@ -165,7 +166,7 @@ where
 
     /// Sends a `ping`` message.
     pub async fn ping(&self, timeout: Duration) -> RpcResult<()> {
-        let _ = self.send_message(Message::ping(), timeout).await?;
+        let _ = self.send_message(&Message::ping(), timeout).await?;
         Ok(())
     }
 
@@ -202,7 +203,7 @@ where
     {
         let message = Message::call_with(method, params)?;
 
-        let response = self.send_message(message, timeout).await?;
+        let response = self.send_message(&message, timeout).await?;
 
         match response {
             MessageType::Reply(reply) => {
@@ -380,6 +381,7 @@ mod tests {
         client.shutdown().await.unwrap();
     }
 
+    #[derive(Clone)]
     struct ClientHandler {
         counter: Arc<AtomicU32>,
     }

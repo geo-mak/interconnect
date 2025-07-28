@@ -1,6 +1,5 @@
 use std::fmt::Debug;
 use std::marker::PhantomData;
-use std::sync::Arc;
 
 use tokio::io::AsyncWriteExt;
 use tokio::task::JoinHandle;
@@ -19,7 +18,7 @@ where
     A: Debug,
     H: RpcService,
 {
-    service: Arc<H>,
+    service: H,
     _l: PhantomData<L>,
     _a: PhantomData<A>,
 }
@@ -32,7 +31,7 @@ where
 {
     pub fn new(service: H) -> Self {
         Self {
-            service: Arc::new(service),
+            service,
             _l: PhantomData,
             _a: PhantomData,
         }
@@ -41,6 +40,7 @@ where
     pub async fn start(&mut self, addr: A) -> RpcResult<JoinHandle<()>> {
         let listener = L::bind(addr).await?;
         let service = self.service.clone();
+
         let handle = tokio::spawn(async move {
             loop {
                 match listener.accept().await {
@@ -53,11 +53,12 @@ where
                 }
             }
         });
+
         Ok(handle)
     }
 
     // TODO: Safe abort, if requested.
-    fn spawn_connection(io_stream: L::Stream, service: Arc<H>) -> tokio::task::JoinHandle<()> {
+    fn spawn_connection(io_stream: L::Stream, service: H) -> tokio::task::JoinHandle<()> {
         tokio::spawn(async move {
             let (io_reader, io_writer) = io_stream.owned_split();
             let mut rpc_rx = AsyncRpcReceiver::new(io_reader);
@@ -68,7 +69,7 @@ where
                 match rpc_rx.receive().await {
                     Ok(message) => {
                         if let Err(e) =
-                            Self::process_incoming_message(message, &service, &mut rpc_tx).await
+                            Self::process_incoming_message(&message, &service, &mut rpc_tx).await
                         {
                             log::error!("Failed to send response to client: {e}");
                             break;
@@ -88,21 +89,21 @@ where
     }
 
     async fn process_incoming_message<T>(
-        message: Message,
+        message: &Message,
         service: &H,
         sender: &mut AsyncRpcSender<T>,
     ) -> RpcResult<()>
     where
         T: AsyncWriteExt + Send + Sync + Unpin,
     {
-        match message.kind {
-            MessageType::Call(call) => match service.call(&call).await {
+        match &message.kind {
+            MessageType::Call(call) => match service.call(call).await {
                 Ok(result) => sender.send(&Message::reply(message.id, result)).await,
                 Err(err) => sender.send(&Message::error(message.id, err)).await,
             },
             MessageType::Notification(notify) => {
                 // Notification, no reply.
-                let _ = service.notify(&notify).await;
+                let _ = service.notify(notify).await;
                 Ok(())
             }
             MessageType::Ping => sender.send(&Message::pong(message.id)).await,
@@ -119,10 +120,14 @@ mod tests {
     use crate::message::{Call, Reply};
 
     use super::*;
+
+    use std::sync::Arc;
     use std::sync::atomic::{AtomicU32, Ordering};
     use std::time::Duration;
+
     use tokio::net::{TcpListener, TcpStream, UnixListener, UnixStream};
 
+    #[derive(Clone)]
     struct RpcTestService {
         counter: Arc<AtomicU32>,
     }

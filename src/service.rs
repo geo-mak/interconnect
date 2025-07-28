@@ -5,7 +5,7 @@ use crate::message::{Call, Notification, Reply};
 
 /// Trait for implementing RPC service handler.
 /// Implementations must assume responsibility for managing access to shared resources.
-pub trait RpcService: Send + Sync {
+pub trait RpcService: Send + Sync + Clone + 'static {
     /// Handles a method call and returns the result.
     /// By default, it returns `NotImplemented` error.
     fn call(&self, _call: &Call) -> impl Future<Output = RpcResult<Reply>> + Send {

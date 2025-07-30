@@ -149,7 +149,7 @@ where
                 // Channel was closed without response.
                 let mut pending = self.state.pending.lock().await;
                 pending.remove(&id);
-                Err(RpcError::error(ErrKind::ConnectionClosed))
+                Err(RpcError::error(ErrKind::DroppedMessage))
             }
             Err(_) => {
                 // Timeout occurred.

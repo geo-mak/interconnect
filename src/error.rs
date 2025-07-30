@@ -21,8 +21,6 @@ pub enum ErrKind {
 
     IO,
 
-    ConnectionFailed,
-
     ConnectionClosed,
 
     Timeout,
@@ -37,6 +35,8 @@ pub enum ErrKind {
     /// Message size exceeds the allowed size by the protocol.
     LargeMessage,
 
+    DroppedMessage,
+    
     // ===================== Common ==========================
     Unidentified,
 

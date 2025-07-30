@@ -5,9 +5,9 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use crate::error::{ErrKind, RpcError, RpcResult};
 use crate::message::Message;
 
-const MAX_DATA_SIZE: u32 = 16_777_216;
+const MAX_DATA_SIZE: u32 = 16 * 1024 * 1024;
 
-// Definitely not for bulk throughput or streams. But streams are a different story.
+// Definitely not for bulk throughput or streams, but streams are a different story.
 const FRAMING_CAPACITY: usize = 1024;
 
 // TODO: TLS support.
@@ -42,7 +42,7 @@ where
     #[allow(clippy::uninit_vec)]
     pub async fn receive(&mut self) -> RpcResult<Message> {
         // Read 4 bytes size prefix.
-        let len = self.reader.read_u32().await?;
+        let len = self.reader.read_u32_le().await?;
 
         if len > MAX_DATA_SIZE {
             return Err(RpcError::error(ErrKind::LargeMessage));
@@ -117,7 +117,9 @@ where
         message.encode_into_writer(&mut self.bytes)?;
 
         // Write 4-bytes size prefix.
-        self.writer.write_u32(self.bytes.buf.len() as u32).await?;
+        self.writer
+            .write_u32_le(self.bytes.buf.len() as u32)
+            .await?;
 
         self.writer.write_all(&self.bytes.buf).await?;
         self.writer.flush().await?;

@@ -21,7 +21,7 @@ pub enum ErrKind {
 
     IO,
 
-    ConnectionClosed,
+    Disconnected,
 
     Timeout,
 
@@ -45,7 +45,7 @@ pub enum ErrKind {
     Service,
 
     /// Method not implemented/not found.
-    NotImplemented,
+    Unimplemented,
 }
 
 impl From<i32> for ErrCtx {
@@ -119,7 +119,7 @@ impl From<io::Error> for RpcError {
     fn from(err: io::Error) -> Self {
         if err.kind() == std::io::ErrorKind::UnexpectedEof {
             RpcError {
-                kind: ErrKind::ConnectionClosed,
+                kind: ErrKind::Disconnected,
                 ctx: ErrCtx::None,
             }
         } else {

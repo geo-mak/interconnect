@@ -294,7 +294,7 @@ mod tests {
                                 assert_eq!(call.method, 2);
                                 let error = Message::error(
                                     message.id,
-                                    RpcError::error(ErrKind::NotImplemented),
+                                    RpcError::error(ErrKind::Unimplemented),
                                 );
                                 let _ = rpc_writer.send(&error).await;
                             }
@@ -320,7 +320,7 @@ mod tests {
         match result {
             Ok(_) => panic!("Expected error result"),
             Err(e) => {
-                assert!(e.kind == ErrKind::NotImplemented);
+                assert!(e.kind == ErrKind::Unimplemented);
             }
         }
 
@@ -387,7 +387,7 @@ mod tests {
                     let current = self.counter.fetch_add(1, Ordering::SeqCst);
                     Ok(Reply::with(&(current + 1)).unwrap())
                 }
-                _ => Err(RpcError::error(ErrKind::NotImplemented)),
+                _ => Err(RpcError::error(ErrKind::Unimplemented)),
             }
         }
     }

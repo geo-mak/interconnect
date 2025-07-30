@@ -5,7 +5,7 @@ High performance remote procedure call protocol.
 > **⚠️ This project is in early development stage.**
 
 ## Features
-
+- No clunky interface generation or schema definitions: a schema is any encodable type, and Rust’s compile-time monomorphization is used to specialize interfaces.
 - Asynchronous with bidirectional communication.
 - Layered extensible architecture with high efficiency abstractions and clear semantics.
 - Lightweight message format.

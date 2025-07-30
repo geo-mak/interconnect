@@ -4,12 +4,11 @@ use std::marker::PhantomData;
 use tokio::io::AsyncWriteExt;
 use tokio::task::JoinHandle;
 
-use crate::connection::OwnedSplitStream;
 use crate::connection::RpcListener;
 use crate::error::RpcResult;
 use crate::message::{Message, MessageType};
 use crate::service::RpcService;
-use crate::transport::{AsyncRpcReceiver, AsyncRpcSender};
+use crate::transport::{AsyncRpcReceiver, AsyncRpcSender, OwnedSplitStream};
 
 /// RPC Server implementation.
 pub struct RpcServer<L, A, H>

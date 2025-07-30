@@ -2,37 +2,11 @@ use std::net::SocketAddr;
 use std::path::Path;
 
 use tokio::io;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::ToSocketAddrs;
-use tokio::net::tcp;
 use tokio::net::unix;
 use tokio::net::{TcpListener, TcpStream, UnixListener, UnixStream};
 
-pub trait OwnedSplitStream {
-    type OwnedReadHalf: AsyncReadExt + Send + Sync + Unpin;
-    type OwnedWriteHalf: AsyncWriteExt + Send + Sync + Unpin;
-    fn owned_split(self) -> (Self::OwnedReadHalf, Self::OwnedWriteHalf);
-}
-
-impl OwnedSplitStream for TcpStream {
-    type OwnedReadHalf = tcp::OwnedReadHalf;
-    type OwnedWriteHalf = tcp::OwnedWriteHalf;
-
-    #[inline(always)]
-    fn owned_split(self) -> (Self::OwnedReadHalf, Self::OwnedWriteHalf) {
-        TcpStream::into_split(self)
-    }
-}
-
-impl OwnedSplitStream for UnixStream {
-    type OwnedReadHalf = unix::OwnedReadHalf;
-    type OwnedWriteHalf = unix::OwnedWriteHalf;
-
-    #[inline(always)]
-    fn owned_split(self) -> (Self::OwnedReadHalf, Self::OwnedWriteHalf) {
-        UnixStream::into_split(self)
-    }
-}
+use crate::transport::OwnedSplitStream;
 
 pub trait RpcListener<A>: Sized + Send {
     type Address;

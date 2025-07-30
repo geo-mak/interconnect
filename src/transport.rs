@@ -1,6 +1,10 @@
 use bincode::enc::write::Writer;
 use bincode::error::EncodeError;
+
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::tcp;
+use tokio::net::unix;
+use tokio::net::{TcpStream, UnixStream};
 
 use crate::error::{ErrKind, RpcError, RpcResult};
 use crate::message::Message;
@@ -133,6 +137,32 @@ where
     }
 }
 
+pub trait OwnedSplitStream {
+    type OwnedReadHalf: AsyncReadExt + Send + Sync + Unpin;
+    type OwnedWriteHalf: AsyncWriteExt + Send + Sync + Unpin;
+    fn owned_split(self) -> (Self::OwnedReadHalf, Self::OwnedWriteHalf);
+}
+
+impl OwnedSplitStream for TcpStream {
+    type OwnedReadHalf = tcp::OwnedReadHalf;
+    type OwnedWriteHalf = tcp::OwnedWriteHalf;
+
+    #[inline(always)]
+    fn owned_split(self) -> (Self::OwnedReadHalf, Self::OwnedWriteHalf) {
+        TcpStream::into_split(self)
+    }
+}
+
+impl OwnedSplitStream for UnixStream {
+    type OwnedReadHalf = unix::OwnedReadHalf;
+    type OwnedWriteHalf = unix::OwnedWriteHalf;
+
+    #[inline(always)]
+    fn owned_split(self) -> (Self::OwnedReadHalf, Self::OwnedWriteHalf) {
+        UnixStream::into_split(self)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -141,7 +171,6 @@ mod tests {
 
     use tokio::net::{TcpStream, UnixListener, UnixStream};
 
-    use crate::connection::OwnedSplitStream;
     use crate::message::MessageType;
 
     #[tokio::test]

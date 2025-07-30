@@ -7,8 +7,8 @@ pub mod service;
 pub mod transport;
 
 pub use client::RpcClient;
-pub use connection::{OwnedSplitStream, RpcListener};
+pub use connection::RpcListener;
 pub use error::{RpcError, RpcResult};
 pub use message::{Message, MessageType};
 pub use server::RpcServer;
-pub use transport::{AsyncRpcReceiver, AsyncRpcSender};
+pub use transport::{AsyncRpcReceiver, AsyncRpcSender, OwnedSplitStream};

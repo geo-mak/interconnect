@@ -11,11 +11,10 @@ use uuid::Uuid;
 
 use serde::{Deserialize, Serialize};
 
-use crate::connection::OwnedSplitStream;
 use crate::error::{ErrKind, RpcError, RpcResult};
 use crate::message::{Message, MessageType};
 use crate::service::RpcService;
-use crate::transport::{AsyncRpcReceiver, AsyncRpcSender};
+use crate::transport::{AsyncRpcReceiver, AsyncRpcSender, OwnedSplitStream};
 
 struct ClientState<S>
 where
@@ -221,9 +220,8 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::message::{Call, Reply};
-
     use super::*;
+    use crate::message::{Call, Reply};
     use std::sync::atomic::{AtomicU32, Ordering};
     use tokio::net::TcpStream;
 

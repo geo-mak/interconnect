@@ -36,7 +36,7 @@ pub enum ErrKind {
     LargeMessage,
 
     DroppedMessage,
-    
+
     // ===================== Common ==========================
     Unidentified,
 

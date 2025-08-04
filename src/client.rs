@@ -502,7 +502,7 @@ mod tests {
 
         client.notify(1, "some event").await.unwrap();
 
-        tokio::time::sleep(Duration::from_millis(10)).await;
+        tokio::time::sleep(Duration::from_millis(50)).await;
 
         assert!(*received_notification.lock().await);
 

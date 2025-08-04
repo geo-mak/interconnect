@@ -23,6 +23,9 @@ High performance remote procedure call protocol.
 │               RPC Stream Layer              │
 │         (Framing, Encoding/Decoding)        │
 ├─────────────────────────────────────────────┤
+│             RPC Capability Layer            │
+│    (Versioning, Feature Negotiation, etc.)  │
+├─────────────────────────────────────────────┤
 │             Raw I/O Stream Layer            │
 │             (TCP / Unix Sockets)            │
 └─────────────────────────────────────────────┘

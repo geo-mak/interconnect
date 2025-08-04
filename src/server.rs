@@ -1,14 +1,17 @@
 use std::fmt::Debug;
 use std::marker::PhantomData;
 
-use tokio::io::AsyncWriteExt;
 use tokio::task::JoinHandle;
 
+use crate::capability::{RpcCapability, negotiation};
 use crate::connection::RpcListener;
 use crate::error::RpcResult;
 use crate::message::{Message, MessageType};
 use crate::service::RpcService;
-use crate::transport::{AsyncRpcReceiver, AsyncRpcSender, OwnedSplitStream};
+use crate::transport::{
+    EncryptedRpcReceiver, EncryptedRpcSender, OwnedSplitStream, RpcAsyncReceiver, RpcAsyncSender,
+    RpcReceiver, RpcSender,
+};
 
 /// RPC Server implementation.
 pub struct RpcServer<L, A, H>
@@ -18,6 +21,7 @@ where
     H: RpcService,
 {
     service: H,
+    capability: RpcCapability,
     _l: PhantomData<L>,
     _a: PhantomData<A>,
 }
@@ -28,9 +32,10 @@ where
     A: Debug + 'static,
     H: RpcService + 'static,
 {
-    pub fn new(service: H) -> Self {
+    pub fn new(service: H, capability: RpcCapability) -> Self {
         Self {
             service,
+            capability,
             _l: PhantomData,
             _a: PhantomData,
         }
@@ -39,16 +44,17 @@ where
     pub async fn start(&mut self, addr: A) -> RpcResult<JoinHandle<()>> {
         let listener = L::bind(addr).await?;
         let service = self.service.clone();
+        let capability = self.capability;
 
         let handle = tokio::spawn(async move {
             loop {
                 match listener.accept().await {
-                    Ok((io_stream, _)) => {
-                        tokio::spawn(Self::new_connection(io_stream, service.clone()));
+                    Ok((stream, _)) => {
+                        let service = service.clone();
+                        // Capability is cheap to copy.
+                        tokio::spawn(Self::new_connection(stream, service, capability));
                     }
-                    Err(e) => {
-                        log::error!("Failed to accept connection: {e}");
-                    }
+                    Err(e) => log::error!("Accept failed: {e}"),
                 }
             }
         });
@@ -57,19 +63,46 @@ where
     }
 
     // TODO: Safe abort, if requested.
-    async fn new_connection(io_stream: L::Stream, service: H) {
-        let (io_reader, io_writer) = io_stream.owned_split();
-        let mut rpc_rx = AsyncRpcReceiver::new(io_reader);
-        let mut rpc_tx = AsyncRpcSender::new(io_writer);
+    async fn new_connection(mut io_stream: L::Stream, service: H, capability: RpcCapability) {
+        let consensus = match negotiation::accept_capability(&mut io_stream, capability).await {
+            Ok(c) => c,
+            Err(e) => {
+                log::error!("Negotiation failed: {e}");
+                return;
+            }
+        };
 
-        // TODO: Multiplexing strategy.
+        if consensus.encryption {
+            let (r_key, w_key) = match negotiation::accept_key_exchange(&mut io_stream).await {
+                Ok(keys) => keys,
+                Err(e) => {
+                    log::error!("Encryption session failed: {e}");
+                    return;
+                }
+            };
+            let (reader, writer) = io_stream.owned_split();
+            Self::handle_session(
+                EncryptedRpcReceiver::new(reader, r_key),
+                EncryptedRpcSender::new(writer, w_key),
+                service,
+            )
+            .await;
+        } else {
+            let (reader, writer) = io_stream.owned_split();
+            Self::handle_session(RpcReceiver::new(reader), RpcSender::new(writer), service).await;
+        }
+    }
+
+    async fn handle_session<R, W>(mut rx: R, mut tx: W, service: H)
+    where
+        R: RpcAsyncReceiver + 'static,
+        W: RpcAsyncSender + 'static,
+    {
         loop {
-            match rpc_rx.receive().await {
+            match rx.receive().await {
                 Ok(message) => {
-                    if let Err(e) =
-                        Self::process_incoming_message(&message, &service, &mut rpc_tx).await
-                    {
-                        log::error!("Failed to send response to client: {e}");
+                    if let Err(e) = Self::process_incoming(&message, &service, &mut tx).await {
+                        log::error!("Send error: {e}");
                         break;
                     }
                 }
@@ -81,13 +114,9 @@ where
         }
     }
 
-    async fn process_incoming_message<T>(
-        message: &Message,
-        service: &H,
-        sender: &mut AsyncRpcSender<T>,
-    ) -> RpcResult<()>
+    async fn process_incoming<S>(message: &Message, service: &H, sender: &mut S) -> RpcResult<()>
     where
-        T: AsyncWriteExt + Send + Sync + Unpin,
+        S: RpcAsyncSender + 'static,
     {
         match &message.kind {
             MessageType::Call(call) => match service.call(call).await {
@@ -110,8 +139,6 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::message::{Call, Reply};
-
     use super::*;
 
     use std::sync::Arc;
@@ -119,6 +146,9 @@ mod tests {
     use std::time::Duration;
 
     use tokio::net::{TcpListener, TcpStream, UnixListener, UnixStream};
+
+    use crate::capability;
+    use crate::message::{Call, Reply};
 
     #[derive(Clone)]
     struct RpcTestService {
@@ -148,15 +178,23 @@ mod tests {
     #[tokio::test]
     async fn test_tcp_rpc_server() {
         let service = RpcTestService::new();
-        let mut server = RpcServer::<TcpListener, &str, RpcTestService>::new(service);
+        let mut server = RpcServer::<TcpListener, &str, RpcTestService>::new(
+            service,
+            RpcCapability::new(1, false),
+        );
 
         let handle = server.start("127.0.0.1:8000").await.unwrap();
 
-        let io_stream = TcpStream::connect("127.0.0.1:8000").await.unwrap();
-        let (io_reader, io_writer) = io_stream.owned_split();
+        let mut io_stream = TcpStream::connect("127.0.0.1:8000").await.unwrap();
 
-        let mut rpc_reader = AsyncRpcReceiver::new(io_reader);
-        let mut rpc_writer = AsyncRpcSender::new(io_writer);
+        // Perform capability negotiation on the client side.
+        capability::negotiation::initiate_capability(&mut io_stream, RpcCapability::new(1, false))
+            .await
+            .expect("client negotiation failed");
+
+        let (reader, writer) = io_stream.owned_split();
+        let mut rpc_reader = RpcReceiver::new(reader);
+        let mut rpc_writer = RpcSender::new(writer);
 
         let payload = b"hi there".to_vec();
         let call_msg = Message::call(1, payload.clone());
@@ -180,15 +218,23 @@ mod tests {
         let path = "unix_server_test.sock";
 
         let service = RpcTestService::new();
-        let mut server = RpcServer::<UnixListener, &str, RpcTestService>::new(service);
+        let mut server = RpcServer::<UnixListener, &str, RpcTestService>::new(
+            service,
+            RpcCapability::new(1, false),
+        );
 
         let handle = server.start(path).await.unwrap();
 
-        let io_stream = UnixStream::connect(path).await.unwrap();
-        let (io_reader, io_writer) = io_stream.owned_split();
+        let mut io_stream = UnixStream::connect(path).await.unwrap();
 
-        let mut rpc_reader = AsyncRpcReceiver::new(io_reader);
-        let mut rpc_writer = AsyncRpcSender::new(io_writer);
+        // Perform capability negotiation.
+        capability::negotiation::initiate_capability(&mut io_stream, RpcCapability::new(1, false))
+            .await
+            .expect("client negotiation failed");
+
+        let (reader, writer) = io_stream.owned_split();
+        let mut rpc_reader = RpcReceiver::new(reader);
+        let mut rpc_writer = RpcSender::new(writer);
 
         tokio::time::sleep(Duration::from_millis(10)).await;
 
@@ -207,7 +253,6 @@ mod tests {
         }
 
         handle.abort();
-
         std::fs::remove_file(path).unwrap();
     }
 }

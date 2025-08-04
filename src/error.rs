@@ -23,6 +23,18 @@ pub enum ErrKind {
 
     Disconnected,
 
+    CapabilityMismatch,
+
+    InvalidConfirmation,
+
+    KeyDerivationFailed,
+
+    EncryptionFailed,
+
+    DecryptionFailed,
+
+    InvalidAeadKey,
+
     Timeout,
 
     Encoding,
@@ -60,7 +72,7 @@ impl From<&'static str> for ErrCtx {
     /// Returns `Msg` context variant.
     #[inline]
     fn from(value: &'static str) -> Self {
-        Self::Msg(Cow::Borrowed(value))
+        Self::Message(Cow::Borrowed(value))
     }
 }
 
@@ -68,7 +80,7 @@ impl From<String> for ErrCtx {
     /// Returns `Msg` context variant.
     #[inline]
     fn from(value: String) -> Self {
-        Self::Msg(Cow::Owned(value))
+        Self::Message(Cow::Owned(value))
     }
 }
 
@@ -78,7 +90,7 @@ impl From<String> for ErrCtx {
 pub enum ErrCtx {
     None,
     Code(i32),
-    Msg(Cow<'static, str>),
+    Message(Cow<'static, str>),
 }
 
 impl fmt::Display for ErrCtx {
@@ -86,7 +98,7 @@ impl fmt::Display for ErrCtx {
         match self {
             ErrCtx::None => write!(f, ""),
             ErrCtx::Code(code) => write!(f, "code={code}"),
-            ErrCtx::Msg(s) => write!(f, "{s}"),
+            ErrCtx::Message(s) => write!(f, "{s}"),
         }
     }
 }
@@ -125,7 +137,7 @@ impl From<io::Error> for RpcError {
         } else {
             RpcError {
                 kind: ErrKind::IO,
-                ctx: ErrCtx::Msg(Cow::Owned(err.to_string())),
+                ctx: ErrCtx::Message(Cow::Owned(err.to_string())),
             }
         }
     }
@@ -135,7 +147,7 @@ impl From<bincode::error::EncodeError> for RpcError {
     fn from(err: bincode::error::EncodeError) -> Self {
         RpcError {
             kind: ErrKind::Encoding,
-            ctx: ErrCtx::Msg(Cow::Owned(err.to_string())),
+            ctx: ErrCtx::Message(Cow::Owned(err.to_string())),
         }
     }
 }
@@ -145,7 +157,7 @@ impl From<bincode::error::DecodeError> for RpcError {
     fn from(err: bincode::error::DecodeError) -> Self {
         RpcError {
             kind: ErrKind::Decoding,
-            ctx: ErrCtx::Msg(Cow::Owned(err.to_string())),
+            ctx: ErrCtx::Message(Cow::Owned(err.to_string())),
         }
     }
 }

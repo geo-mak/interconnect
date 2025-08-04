@@ -6,71 +6,33 @@ use tokio::net::tcp;
 use tokio::net::unix;
 use tokio::net::{TcpStream, UnixStream};
 
+use crate::capability::EncryptionState;
 use crate::error::{ErrKind, RpcError, RpcResult};
 use crate::message::Message;
+use crate::transport::sealed::Sealed;
 
 const MAX_DATA_SIZE: u32 = 16 * 1024 * 1024;
 
 // Definitely not for bulk throughput or streams, but streams are a different story.
 const FRAMING_CAPACITY: usize = 1024;
 
-// TODO: TLS support.
-pub struct AsyncRpcReceiver<T> {
-    reader: T,
-    bytes: Vec<u8>,
+mod sealed {
+    pub trait Sealed {}
 }
 
-impl<T> AsyncRpcReceiver<T>
-where
-    T: AsyncReadExt + Send + Sync + Unpin,
-{
-    #[inline(always)]
-    pub fn new(reader: T) -> Self {
-        Self {
-            reader,
-            bytes: Vec::with_capacity(FRAMING_CAPACITY),
-        }
-    }
-
-    #[inline(always)]
-    pub fn with_capacity(reader: T, framing_cap: usize) -> Self {
-        Self {
-            reader,
-            bytes: Vec::with_capacity(framing_cap),
-        }
-    }
-
-    /// Reads and validates the RPC frame and decodes its data as a message.
-    /// This method is not cancellation-safe, and it should not be awaited as part of selection race.
-    /// **Currently**, if an error has been returned, receiving must be terminated and the stream must be closed.
-    #[allow(clippy::uninit_vec)]
-    pub async fn receive(&mut self) -> RpcResult<Message> {
-        // Read 4 bytes size prefix.
-        let len = self.reader.read_u32_le().await?;
-
-        if len > MAX_DATA_SIZE {
-            return Err(RpcError::error(ErrKind::LargeMessage));
-        }
-
-        // Reserve uninitialized memory.
-        self.bytes.reserve(len as usize);
-
-        // Safety: This should be safe because:
-        //
-        // 1 - Buffer has allocated memory for `len` bytes.
-        //
-        // 2 - `len` matches the expected decoding size.
-        //
-        // 3 - In Rust, any operation (Add, Sub, Mul, etc.) with uninitialized memory is UB,
-        //     because the byte-pattern of that memory will not be interpreted in consistent manner (random),
-        //     but we are not doing any operation except copying/overwriting FROM the stream TO the buffer,
-        //     and only on success, or otherwise, an error will be returned.
-        unsafe { self.bytes.set_len(len as usize) }
-        self.reader.read_exact(&mut self.bytes).await?;
-
-        Message::decode(&self.bytes)
-    }
+pub trait RpcAsyncReceiver: sealed::Sealed {
+    fn receive(&mut self) -> impl Future<Output = RpcResult<Message>> + Send;
 }
+
+pub trait RpcAsyncSender: sealed::Sealed {
+    fn send(&mut self, message: &Message) -> impl Future<Output = RpcResult<()>> + Send;
+    fn close(&mut self) -> impl Future<Output = RpcResult<()>> + Send;
+}
+
+impl<T> Sealed for RpcSender<T> {}
+impl<T> Sealed for EncryptedRpcSender<T> {}
+impl<T> Sealed for RpcReceiver<T> {}
+impl<T> Sealed for EncryptedRpcReceiver<T> {}
 
 pub struct BytesWriter {
     pub buf: Vec<u8>,
@@ -84,16 +46,12 @@ impl Writer for BytesWriter {
     }
 }
 
-// TODO: TLS support.
-pub struct AsyncRpcSender<T> {
+pub struct RpcSender<T> {
     writer: T,
     bytes: BytesWriter,
 }
 
-impl<T> AsyncRpcSender<T>
-where
-    T: AsyncWriteExt + Send + Sync + Unpin,
-{
+impl<T> RpcSender<T> {
     #[inline(always)]
     pub fn new(writer: T) -> Self {
         Self {
@@ -113,9 +71,14 @@ where
             },
         }
     }
+}
 
+impl<T> RpcAsyncSender for RpcSender<T>
+where
+    T: AsyncWriteExt + Send + Sync + Unpin,
+{
     /// Encodes a message as RPC frame and writes it into the I/O stream.
-    pub async fn send(&mut self, message: &Message) -> RpcResult<()> {
+    async fn send(&mut self, message: &Message) -> RpcResult<()> {
         unsafe { self.bytes.buf.set_len(0) }
 
         message.encode_into_writer(&mut self.bytes)?;
@@ -126,18 +89,198 @@ where
             .await?;
 
         self.writer.write_all(&self.bytes.buf).await?;
-        self.writer.flush().await?;
         Ok(())
     }
 
     #[inline(always)]
-    pub async fn close(&mut self) -> RpcResult<()> {
+    async fn close(&mut self) -> RpcResult<()> {
         // Why only writer exposes shutdown?
         self.writer.shutdown().await.map_err(Into::into)
     }
 }
 
-pub trait OwnedSplitStream {
+pub struct EncryptedRpcSender<T> {
+    writer: T,
+    state: EncryptionState,
+    bytes: BytesWriter,
+}
+
+impl<T> EncryptedRpcSender<T> {
+    #[inline(always)]
+    pub fn new(writer: T, state: EncryptionState) -> Self {
+        Self {
+            writer,
+            state,
+            bytes: BytesWriter {
+                buf: Vec::with_capacity(FRAMING_CAPACITY),
+            },
+        }
+    }
+
+    #[inline(always)]
+    pub fn with_capacity(writer: T, state: EncryptionState, framing_cap: usize) -> Self {
+        Self {
+            writer,
+            state,
+            bytes: BytesWriter {
+                buf: Vec::with_capacity(framing_cap),
+            },
+        }
+    }
+}
+
+impl<T> RpcAsyncSender for EncryptedRpcSender<T>
+where
+    T: AsyncWriteExt + Send + Sync + Unpin,
+{
+    /// Encodes a message as RPC frame and writes it into the I/O stream.
+    async fn send(&mut self, message: &Message) -> RpcResult<()> {
+        unsafe { self.bytes.buf.set_len(0) }
+
+        message.encode_into_writer(&mut self.bytes)?;
+
+        // Encryption will increase its size.
+        self.state.encrypt(&mut self.bytes.buf)?;
+
+        self.writer
+            .write_u32_le(self.bytes.buf.len() as u32)
+            .await?;
+
+        self.writer.write_all(&self.bytes.buf).await?;
+        Ok(())
+    }
+
+    #[inline(always)]
+    async fn close(&mut self) -> RpcResult<()> {
+        // Why only writer exposes shutdown?
+        self.writer.shutdown().await.map_err(Into::into)
+    }
+}
+
+pub struct RpcReceiver<T> {
+    reader: T,
+    bytes: Vec<u8>,
+}
+
+impl<T> RpcReceiver<T> {
+    #[inline(always)]
+    pub fn new(reader: T) -> Self {
+        Self {
+            reader,
+            bytes: Vec::with_capacity(FRAMING_CAPACITY),
+        }
+    }
+
+    #[inline(always)]
+    pub fn with_capacity(reader: T, framing_cap: usize) -> Self {
+        Self {
+            reader,
+            bytes: Vec::with_capacity(framing_cap),
+        }
+    }
+}
+
+impl<T> RpcAsyncReceiver for RpcReceiver<T>
+where
+    T: AsyncReadExt + Send + Sync + Unpin,
+{
+    /// Reads and validates the RPC frame and decodes its data as a message.
+    /// This method is not cancellation-safe, and it should not be awaited as part of selection race.
+    /// **Currently**, if an error has been returned, receiving must be terminated and the stream must be closed.
+    #[allow(clippy::uninit_vec)]
+    async fn receive(&mut self) -> RpcResult<Message> {
+        // Read 4 bytes size prefix.
+        let len = self.reader.read_u32_le().await?;
+
+        if len > MAX_DATA_SIZE {
+            return Err(RpcError::error(ErrKind::LargeMessage));
+        }
+
+        // Reserve uninitialized memory.
+        self.bytes.reserve(len as usize);
+
+        // Safety: This should be safe because:
+        //
+        // 1 - Buffer has allocated memory for `len` bytes.
+        //
+        // 2 - `len` matches the expected decoding size.
+        //
+        // 3 - In Rust, any operation (Add, Sub, Mul, etc.) with uninitialized memory is UB,
+        //     because the bit-pattern of that memory will not be interpreted in consistent manner (random),
+        //     but we are not doing any operation except copying/overwriting FROM the stream TO the buffer,
+        //     and only on success, or otherwise, an error will be returned.
+        unsafe { self.bytes.set_len(len as usize) }
+        self.reader.read_exact(&mut self.bytes).await?;
+
+        Message::decode(&self.bytes)
+    }
+}
+
+pub struct EncryptedRpcReceiver<T> {
+    reader: T,
+    state: EncryptionState,
+    bytes: Vec<u8>,
+}
+
+impl<T> EncryptedRpcReceiver<T> {
+    #[inline(always)]
+    pub fn new(reader: T, state: EncryptionState) -> Self {
+        Self {
+            reader,
+            state,
+            bytes: Vec::with_capacity(FRAMING_CAPACITY),
+        }
+    }
+
+    #[inline(always)]
+    pub fn with_capacity(reader: T, state: EncryptionState, framing_cap: usize) -> Self {
+        Self {
+            reader,
+            state,
+            bytes: Vec::with_capacity(framing_cap),
+        }
+    }
+}
+
+impl<T> RpcAsyncReceiver for EncryptedRpcReceiver<T>
+where
+    T: AsyncReadExt + Send + Sync + Unpin,
+{
+    /// Reads and validates the RPC frame and decodes its data as a message.
+    /// This method is not cancellation-safe, and it should not be awaited as part of selection race.
+    /// **Currently**, if an error has been returned, receiving must be terminated and the stream must be closed.
+    #[allow(clippy::uninit_vec)]
+    async fn receive(&mut self) -> RpcResult<Message> {
+        // Read 4 bytes size prefix.
+        let len = self.reader.read_u32_le().await?;
+
+        if len > MAX_DATA_SIZE {
+            return Err(RpcError::error(ErrKind::LargeMessage));
+        }
+
+        // Reserve uninitialized memory.
+        self.bytes.reserve(len as usize);
+
+        // Safety: This should be safe because:
+        //
+        // 1 - Buffer has allocated memory for `len` bytes.
+        //
+        // 2 - `len` matches the expected decoding size.
+        //
+        // 3 - In Rust, any operation (Add, Sub, Mul, etc.) with uninitialized memory is UB,
+        //     because the bit-pattern of that memory will not be interpreted in consistent manner (random),
+        //     but we are not doing any operation except copying/overwriting FROM the stream TO the buffer,
+        //     and only on success, or otherwise, an error will be returned.
+        unsafe { self.bytes.set_len(len as usize) }
+        self.reader.read_exact(&mut self.bytes).await?;
+
+        self.state.decrypt(&mut self.bytes)?;
+
+        Message::decode(&self.bytes)
+    }
+}
+
+pub trait OwnedSplitStream: AsyncWriteExt + AsyncReadExt + Send + Sync + Unpin {
     type OwnedReadHalf: AsyncReadExt + Send + Sync + Unpin;
     type OwnedWriteHalf: AsyncWriteExt + Send + Sync + Unpin;
     fn owned_split(self) -> (Self::OwnedReadHalf, Self::OwnedWriteHalf);
@@ -182,8 +325,8 @@ mod tests {
             let (io_stream, _) = listener.accept().await.unwrap();
 
             let (reader, writer) = io_stream.owned_split();
-            let mut rpc_reader = AsyncRpcReceiver::new(reader);
-            let mut rpc_writer = AsyncRpcSender::new(writer);
+            let mut rpc_reader = RpcReceiver::new(reader);
+            let mut rpc_writer = RpcSender::new(writer);
 
             loop {
                 match rpc_reader.receive().await {
@@ -204,8 +347,8 @@ mod tests {
 
         let io_stream = TcpStream::connect(addr).await.unwrap();
         let (io_reader, io_writer) = io_stream.owned_split();
-        let mut rpc_reader = AsyncRpcReceiver::new(io_reader);
-        let mut rpc_writer = AsyncRpcSender::new(io_writer);
+        let mut rpc_reader = RpcReceiver::new(io_reader);
+        let mut rpc_writer = RpcSender::new(io_writer);
 
         let call_msg = Message::call(1, b"hi there".to_vec());
         rpc_writer.send(&call_msg).await.unwrap();
@@ -233,8 +376,8 @@ mod tests {
             let (io_stream, _) = listener.accept().await.unwrap();
             let (io_reader, io_writer) = io_stream.owned_split();
 
-            let mut rpc_reader = AsyncRpcReceiver::new(io_reader);
-            let mut rpc_writer = AsyncRpcSender::new(io_writer);
+            let mut rpc_reader = RpcReceiver::new(io_reader);
+            let mut rpc_writer = RpcSender::new(io_writer);
 
             loop {
                 match rpc_reader.receive().await {
@@ -256,8 +399,8 @@ mod tests {
         let io_stream = UnixStream::connect(&path).await.unwrap();
 
         let (io_reader, io_writer) = io_stream.owned_split();
-        let mut rpc_reader = AsyncRpcReceiver::new(io_reader);
-        let mut rpc_writer = AsyncRpcSender::new(io_writer);
+        let mut rpc_reader = RpcReceiver::new(io_reader);
+        let mut rpc_writer = RpcSender::new(io_writer);
 
         let call_msg = Message::call(1, b"hi there".to_vec());
         rpc_writer.send(&call_msg).await.unwrap();

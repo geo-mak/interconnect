@@ -39,10 +39,10 @@ use crate::error::{ErrKind, RpcError, RpcResult};
 //                │ Ephemeral X25519 Public Key     │
 //                | ◄───────────────────────────────┤
 //
-//   ┌────────────────────────────┐    ┌────────────────────────────┐
-//   │ derive shared secret       │    │ derive shared secret       │
-//   │ via x25519 + HKDF          │    │ via x25519 + HKDF          │
-//   └────────────────────────────┘    └────────────────────────────┘
+// ┌──────────────────────┐                 ┌──────────────────────┐
+// │ derive shared secret │                 │ derive shared secret │
+// │ via x25519 + HKDF    │                 │ via x25519 + HKDF    │
+// └──────────────────────┘                 └──────────────────────┘
 //
 //                       ENCRYPTED SESSION BEGINS
 //
@@ -130,24 +130,40 @@ pub type WriteKey = [u8; 16];
 pub type ReadState = EncryptionState;
 pub type WriteState = EncryptionState;
 
+/// Stores the cipher-state and provides encryption and decryption methods.
 pub struct EncryptionState {
     cipher: Aes128Gcm,
-    nonce: [u8; 12],
+    sequence: u64,
+    nonce_base: [u8; 4],
 }
 
 impl EncryptionState {
-    pub fn new(key: &[u8], nonce: [u8; 12]) -> RpcResult<Self> {
+    pub fn new(key: &[u8], nonce_base: [u8; 4]) -> RpcResult<Self> {
         let cipher =
             Aes128Gcm::new_from_slice(key).map_err(|_| RpcError::error(ErrKind::InvalidAeadKey))?;
-        Ok(Self { cipher, nonce })
+        Ok(Self {
+            cipher,
+            sequence: 0,
+            nonce_base,
+        })
+    }
+
+    #[inline]
+    fn next_nonce(&mut self) -> [u8; 12] {
+        let mut nonce = [0u8; 12];
+        nonce[0..4].copy_from_slice(&self.nonce_base);
+        nonce[4..12].copy_from_slice(&self.sequence.to_le_bytes());
+        // Reaching the wraparound limit has practically zero-probability.
+        self.sequence += 1;
+        nonce
     }
 
     /// Encrypts the data in the buffer in-place.
     /// The buffer must have sufficient capacity to store the encrypted data,
     /// which will always be larger than the original data.
-    /// The exact size needed is currently unspecified.
-    pub fn encrypt(&self, data: &mut Vec<u8>) -> RpcResult<()> {
-        let nonce = Nonce::<Aes128Gcm>::from_slice(&self.nonce);
+    pub fn encrypt(&mut self, data: &mut Vec<u8>) -> RpcResult<()> {
+        let nonce_slice = self.next_nonce();
+        let nonce = Nonce::<Aes128Gcm>::from_slice(&nonce_slice);
         self.cipher
             .encrypt_in_place(nonce, b"", data)
             .map_err(|_| RpcError::error(ErrKind::EncryptionFailed))
@@ -155,8 +171,9 @@ impl EncryptionState {
 
     /// Decrypts the message in-place to its original format.
     /// The buffer will be truncated to the length of the original data upon success.
-    pub fn decrypt(&self, data: &mut Vec<u8>) -> RpcResult<()> {
-        let nonce = Nonce::<Aes128Gcm>::from_slice(&self.nonce);
+    pub fn decrypt(&mut self, data: &mut Vec<u8>) -> RpcResult<()> {
+        let nonce_slice = self.next_nonce();
+        let nonce = Nonce::<Aes128Gcm>::from_slice(&nonce_slice);
         self.cipher
             .decrypt_in_place(nonce, b"", data)
             .map_err(|_| RpcError::error(ErrKind::DecryptionFailed))
@@ -220,12 +237,11 @@ pub mod negotiation {
         let server_public = PublicKey::from(server_pub_bytes);
 
         let shared = client_secret.diffie_hellman(&server_public);
-        let (r_key, w_key) = derive_session_keys(shared.as_bytes())?;
+        let (r_key, w_key, nonce_base) = derive_session_keys(shared.as_bytes())?;
 
-        let nonce = [0u8; 12];
         Ok((
-            EncryptionState::new(&r_key, nonce)?,
-            EncryptionState::new(&w_key, nonce)?,
+            EncryptionState::new(&r_key, nonce_base)?,
+            EncryptionState::new(&w_key, nonce_base)?,
         ))
     }
 
@@ -243,21 +259,21 @@ pub mod negotiation {
         stream.write_all(server_public.as_bytes()).await?;
 
         let shared = server_secret.diffie_hellman(&client_public);
-        let (w_key, r_key) = derive_session_keys(shared.as_bytes())?;
+        let (w_key, r_key, nonce_base) = derive_session_keys(shared.as_bytes())?;
 
-        let nonce = [0u8; 12];
         Ok((
-            EncryptionState::new(&r_key, nonce)?,
-            EncryptionState::new(&w_key, nonce)?,
+            EncryptionState::new(&r_key, nonce_base)?,
+            EncryptionState::new(&w_key, nonce_base)?,
         ))
     }
 
     /// HMAC-based key-derivation function.
-    fn derive_session_keys(shared_secret: &[u8]) -> RpcResult<(ReadKey, WriteKey)> {
+    fn derive_session_keys(shared_secret: &[u8]) -> RpcResult<(ReadKey, WriteKey, [u8; 4])> {
         let hkdf = Hkdf::<Sha256>::new(Some(b"rpc-handshake"), shared_secret);
 
         let mut r_key = [0u8; 16];
         let mut w_key = [0u8; 16];
+        let mut nonce_base = [0u8; 4];
 
         hkdf.expand(b"rpc-client-read", &mut r_key)
             .map_err(|_| RpcError::error(ErrKind::KeyDerivationFailed))?;
@@ -265,7 +281,10 @@ pub mod negotiation {
         hkdf.expand(b"rpc-client-write", &mut w_key)
             .map_err(|_| RpcError::error(ErrKind::KeyDerivationFailed))?;
 
-        Ok((r_key, w_key))
+        hkdf.expand(b"rpc-nonce-base", &mut nonce_base)
+            .map_err(|_| RpcError::error(ErrKind::IVDerivationFailed))?;
+
+        Ok((r_key, w_key, nonce_base))
     }
 }
 
@@ -304,9 +323,16 @@ mod test {
             let len = io_stream.read_u16().await.unwrap() as usize;
             let mut buffer = vec![0u8; len];
             io_stream.read_exact(&mut buffer).await.unwrap();
+            let mut r_key = r_key;
             r_key.decrypt(&mut buffer).unwrap();
 
-            assert_eq!(&buffer, b"hello, interconnect!");
+            assert_eq!(&buffer, b"first message!");
+
+            let len = io_stream.read_u16().await.unwrap() as usize;
+            let mut buffer = vec![0u8; len];
+            io_stream.read_exact(&mut buffer).await.unwrap();
+            r_key.decrypt(&mut buffer).unwrap();
+            assert_eq!(&buffer, b"second message!");
         });
 
         tokio::time::sleep(Duration::from_millis(10)).await;
@@ -327,9 +353,16 @@ mod test {
             .expect("client encryption failed");
 
         // Encrypt and write message.
-        let mut buffer = b"hello, interconnect!".to_vec();
+        let mut buffer = b"first message!".to_vec();
+        let mut w_key = w_key;
         w_key.encrypt(&mut buffer).unwrap();
 
+        let len = buffer.len() as u16;
+        io_stream.write_u16(len).await.unwrap();
+        io_stream.write_all(&buffer).await.unwrap();
+
+        let mut buffer = b"second message!".to_vec();
+        w_key.encrypt(&mut buffer).unwrap();
         let len = buffer.len() as u16;
         io_stream.write_u16(len).await.unwrap();
         io_stream.write_all(&buffer).await.unwrap();

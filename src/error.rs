@@ -29,6 +29,8 @@ pub enum ErrKind {
 
     KeyDerivationFailed,
 
+    IVDerivationFailed,
+
     EncryptionFailed,
 
     DecryptionFailed,

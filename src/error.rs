@@ -13,8 +13,6 @@ pub type RpcResult<T> = Result<T, RpcError>;
 #[non_exhaustive]
 #[repr(u8)]
 pub enum ErrKind {
-    Undefined,
-
     // ================== Protocol errors ====================
     /// Violation of the protocol-specific invariants.
     Protocol,
@@ -32,6 +30,8 @@ pub enum ErrKind {
     IVDerivationFailed,
 
     EncryptionFailed,
+
+    MaxLimit,
 
     DecryptionFailed,
 
@@ -169,17 +169,6 @@ impl From<Elapsed> for RpcError {
     fn from(_: Elapsed) -> Self {
         RpcError {
             kind: ErrKind::Timeout,
-            ctx: ErrCtx::None,
-        }
-    }
-}
-
-impl Default for RpcError {
-    #[inline]
-    /// Creates undefined error without context.
-    fn default() -> Self {
-        Self {
-            kind: ErrKind::Undefined,
             ctx: ErrCtx::None,
         }
     }

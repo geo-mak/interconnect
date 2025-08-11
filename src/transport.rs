@@ -9,22 +9,18 @@ use tokio::net::{TcpStream, UnixStream};
 use crate::capability::EncryptionState;
 use crate::error::{ErrKind, RpcError, RpcResult};
 use crate::message::Message;
-use crate::transport::sealed::Sealed;
+use crate::sealed::Sealed;
 
 const MAX_DATA_SIZE: u32 = 16 * 1024 * 1024;
 
 // Definitely not for bulk throughput or streams, but streams are a different story.
 const FRAMING_CAPACITY: usize = 1024;
 
-mod sealed {
-    pub trait Sealed {}
-}
-
-pub trait RpcAsyncReceiver: sealed::Sealed {
+pub trait RpcAsyncReceiver: Sealed {
     fn receive(&mut self) -> impl Future<Output = RpcResult<Message>> + Send;
 }
 
-pub trait RpcAsyncSender: sealed::Sealed {
+pub trait RpcAsyncSender: Sealed {
     fn send(&mut self, message: &Message) -> impl Future<Output = RpcResult<()>> + Send;
     fn close(&mut self) -> impl Future<Output = RpcResult<()>> + Send;
 }
@@ -140,7 +136,7 @@ where
         message.encode_into_writer(&mut self.bytes)?;
 
         // Encryption will increase its size.
-        self.state.encrypt(&mut self.bytes.buf)?;
+        self.state.encrypt(&mut self.bytes.buf, b"")?;
 
         self.writer
             .write_u32_le(self.bytes.buf.len() as u32)
@@ -218,16 +214,16 @@ where
 
 pub struct EncryptedRpcReceiver<T> {
     reader: T,
-    state: EncryptionState,
+    encryption: EncryptionState,
     bytes: Vec<u8>,
 }
 
 impl<T> EncryptedRpcReceiver<T> {
     #[inline(always)]
-    pub fn new(reader: T, state: EncryptionState) -> Self {
+    pub fn new(reader: T, encryption: EncryptionState) -> Self {
         Self {
             reader,
-            state,
+            encryption,
             bytes: Vec::with_capacity(FRAMING_CAPACITY),
         }
     }
@@ -236,7 +232,7 @@ impl<T> EncryptedRpcReceiver<T> {
     pub fn with_capacity(reader: T, state: EncryptionState, framing_cap: usize) -> Self {
         Self {
             reader,
-            state,
+            encryption: state,
             bytes: Vec::with_capacity(framing_cap),
         }
     }
@@ -274,7 +270,7 @@ where
         unsafe { self.bytes.set_len(len as usize) }
         self.reader.read_exact(&mut self.bytes).await?;
 
-        self.state.decrypt(&mut self.bytes)?;
+        self.encryption.decrypt(&mut self.bytes, b"")?;
 
         Message::decode(&self.bytes)
     }

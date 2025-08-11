@@ -62,7 +62,7 @@ where
         S: OwnedSplitStream + 'static,
         H: RpcService,
     {
-        negotiation::initiate_capability(&mut io_stream, RpcCapability::new(1, false)).await?;
+        negotiation::initiate(&mut io_stream, RpcCapability::new(1, false)).await?;
 
         let (r, w) = io_stream.owned_split();
         Self::connect_with_parts(RpcReceiver::new(r), RpcSender::new(w), call_handler).await
@@ -77,7 +77,7 @@ where
         S: OwnedSplitStream + 'static,
         H: RpcService,
     {
-        negotiation::initiate_capability(&mut io_stream, RpcCapability::new(1, true)).await?;
+        negotiation::initiate(&mut io_stream, RpcCapability::new(1, true)).await?;
 
         let (r_key, w_key) = negotiation::initiate_key_exchange(&mut io_stream).await?;
 
@@ -285,9 +285,13 @@ mod tests {
         let server_task = tokio::spawn(async move {
             let (mut io_stream, _) = listener.accept().await.unwrap();
 
-            negotiation::accept_capability(&mut io_stream, RpcCapability::new(1, false))
+            negotiation::read_frame(&mut io_stream)
                 .await
-                .expect("Server error: negotiation failed");
+                .expect("server negotiation failed");
+
+            negotiation::confirm(&mut io_stream)
+                .await
+                .expect("Failed to send confirmation");
 
             let (r, w) = io_stream.owned_split();
             let mut rpc_reader = RpcReceiver::new(r);
@@ -342,12 +346,17 @@ mod tests {
         let server_task = tokio::spawn(async move {
             let (mut io_stream, _) = listener.accept().await.unwrap();
 
-            let consensus =
-                negotiation::accept_capability(&mut io_stream, RpcCapability::new(1, true))
-                    .await
-                    .expect("Server negotiation failed");
+            let proposed = negotiation::read_frame(&mut io_stream)
+                .await
+                .expect("server negotiation failed");
 
-            assert!(consensus.encryption);
+            assert!(proposed.encryption);
+
+            negotiation::confirm(&mut io_stream)
+                .await
+                .expect("Failed to send confirmation");
+
+            assert!(proposed.encryption);
 
             let (r_key, w_key) = negotiation::accept_key_exchange(&mut io_stream)
                 .await
@@ -403,9 +412,13 @@ mod tests {
         let server_task = tokio::spawn(async move {
             let (mut io_stream, _) = listener.accept().await.unwrap();
 
-            negotiation::accept_capability(&mut io_stream, RpcCapability::new(1, false))
+            negotiation::read_frame(&mut io_stream)
                 .await
-                .expect("Server error: negotiation failed");
+                .expect("server negotiation failed");
+
+            negotiation::confirm(&mut io_stream)
+                .await
+                .expect("Failed to send confirmation");
 
             let (r, w) = io_stream.owned_split();
             let mut rpc_reader = RpcReceiver::new(r);
@@ -466,9 +479,13 @@ mod tests {
         let server_task = tokio::spawn(async move {
             let (mut io_stream, _) = listener.accept().await.unwrap();
 
-            negotiation::accept_capability(&mut io_stream, RpcCapability::new(1, false))
+            negotiation::read_frame(&mut io_stream)
                 .await
-                .expect("Server error: negotiation failed");
+                .expect("server negotiation failed");
+
+            negotiation::confirm(&mut io_stream)
+                .await
+                .expect("Failed to send confirmation");
 
             let (r, _) = io_stream.owned_split();
             let mut rpc_reader = RpcReceiver::new(r);
@@ -535,9 +552,13 @@ mod tests {
         let server_task = tokio::spawn(async move {
             let (mut io_stream, _) = listener.accept().await.unwrap();
 
-            negotiation::accept_capability(&mut io_stream, RpcCapability::new(1, false))
+            negotiation::read_frame(&mut io_stream)
                 .await
-                .expect("Server error: negotiation failed");
+                .expect("server negotiation failed");
+
+            negotiation::confirm(&mut io_stream)
+                .await
+                .expect("Failed to send confirmation");
 
             let (r, w) = io_stream.owned_split();
             let mut rpc_reader = RpcReceiver::new(r);

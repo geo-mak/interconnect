@@ -3,7 +3,7 @@ use std::marker::PhantomData;
 
 use tokio::task::JoinHandle;
 
-use crate::capability::{RpcCapability, negotiation};
+use crate::capability::negotiation;
 use crate::connection::RpcListener;
 use crate::error::RpcResult;
 use crate::message::{Message, MessageType};
@@ -21,7 +21,6 @@ where
     H: RpcService,
 {
     service: H,
-    capability: RpcCapability,
     _l: PhantomData<L>,
     _a: PhantomData<A>,
 }
@@ -32,27 +31,27 @@ where
     A: Debug + 'static,
     H: RpcService + 'static,
 {
-    pub fn new(service: H, capability: RpcCapability) -> Self {
+    pub fn new(service: H) -> Self {
         Self {
             service,
-            capability,
             _l: PhantomData,
             _a: PhantomData,
         }
     }
 
-    pub async fn start(&mut self, addr: A) -> RpcResult<JoinHandle<()>> {
+    pub async fn start(&mut self, addr: A, allow_unencrypted: bool) -> RpcResult<JoinHandle<()>> {
         let listener = L::bind(addr).await?;
         let service = self.service.clone();
-        let capability = self.capability;
 
         let handle = tokio::spawn(async move {
             loop {
                 match listener.accept().await {
                     Ok((stream, _)) => {
-                        let service = service.clone();
-                        // Capability is cheap to copy.
-                        tokio::spawn(Self::new_connection(stream, service, capability));
+                        tokio::spawn(Self::new_connection(
+                            stream,
+                            service.clone(),
+                            allow_unencrypted,
+                        ));
                     }
                     Err(e) => log::error!("Accept failed: {e}"),
                 }
@@ -62,9 +61,9 @@ where
         Ok(handle)
     }
 
-    // TODO: Safe abort, if requested.
-    async fn new_connection(mut io_stream: L::Stream, service: H, capability: RpcCapability) {
-        let consensus = match negotiation::accept_capability(&mut io_stream, capability).await {
+    // Negotiates a new connection and starts a session with stream layer upon success.
+    async fn new_connection(mut io_stream: L::Stream, service: H, allow_unencrypted: bool) {
+        let proposed = match negotiation::read_frame(&mut io_stream).await {
             Ok(c) => c,
             Err(e) => {
                 log::error!("Negotiation failed: {e}");
@@ -72,7 +71,19 @@ where
             }
         };
 
-        if consensus.encryption {
+        if proposed.version != 1 {
+            let _ = negotiation::reject(&mut io_stream).await;
+            log::error!("Capability version mismatch");
+            return;
+        };
+
+        // Always supported.
+        if proposed.encryption {
+            if let Err(e) = negotiation::confirm(&mut io_stream).await {
+                log::error!("Failed to confirm: {e}");
+                return;
+            }
+
             let (r_key, w_key) = match negotiation::accept_key_exchange(&mut io_stream).await {
                 Ok(keys) => keys,
                 Err(e) => {
@@ -80,20 +91,31 @@ where
                     return;
                 }
             };
+
             let (reader, writer) = io_stream.owned_split();
-            Self::handle_session(
+            Self::new_session(
                 EncryptedRpcReceiver::new(reader, r_key),
                 EncryptedRpcSender::new(writer, w_key),
                 service,
             )
             .await;
         } else {
+            // Policy-dependent.
+            if !allow_unencrypted {
+                let _ = negotiation::reject(&mut io_stream).await;
+                log::error!("Unencrypted session rejected by policy");
+                return;
+            }
+            if let Err(e) = negotiation::confirm(&mut io_stream).await {
+                log::error!("Failed to confirm: {e}");
+                return;
+            }
             let (reader, writer) = io_stream.owned_split();
-            Self::handle_session(RpcReceiver::new(reader), RpcSender::new(writer), service).await;
+            Self::new_session(RpcReceiver::new(reader), RpcSender::new(writer), service).await;
         }
     }
 
-    async fn handle_session<R, W>(mut rx: R, mut tx: W, service: H)
+    async fn new_session<R, W>(mut rx: R, mut tx: W, service: H)
     where
         R: RpcAsyncReceiver + 'static,
         W: RpcAsyncSender + 'static,
@@ -147,7 +169,7 @@ mod tests {
 
     use tokio::net::{TcpListener, TcpStream, UnixListener, UnixStream};
 
-    use crate::capability;
+    use crate::capability::{self, RpcCapability};
     use crate::message::{Call, Reply};
 
     #[derive(Clone)]
@@ -178,17 +200,14 @@ mod tests {
     #[tokio::test]
     async fn test_tcp_rpc_server() {
         let service = RpcTestService::new();
-        let mut server = RpcServer::<TcpListener, &str, RpcTestService>::new(
-            service,
-            RpcCapability::new(1, false),
-        );
+        let mut server = RpcServer::<TcpListener, &str, RpcTestService>::new(service);
 
-        let handle = server.start("127.0.0.1:8000").await.unwrap();
+        let handle = server.start("127.0.0.1:8000", true).await.unwrap();
 
         let mut io_stream = TcpStream::connect("127.0.0.1:8000").await.unwrap();
 
         // Perform capability negotiation on the client side.
-        capability::negotiation::initiate_capability(&mut io_stream, RpcCapability::new(1, false))
+        capability::negotiation::initiate(&mut io_stream, RpcCapability::new(1, false))
             .await
             .expect("client negotiation failed");
 
@@ -218,17 +237,14 @@ mod tests {
         let path = "unix_server_test.sock";
 
         let service = RpcTestService::new();
-        let mut server = RpcServer::<UnixListener, &str, RpcTestService>::new(
-            service,
-            RpcCapability::new(1, false),
-        );
+        let mut server = RpcServer::<UnixListener, &str, RpcTestService>::new(service);
 
-        let handle = server.start(path).await.unwrap();
+        let handle = server.start(path, true).await.unwrap();
 
         let mut io_stream = UnixStream::connect(path).await.unwrap();
 
         // Perform capability negotiation.
-        capability::negotiation::initiate_capability(&mut io_stream, RpcCapability::new(1, false))
+        capability::negotiation::initiate(&mut io_stream, RpcCapability::new(1, false))
             .await
             .expect("client negotiation failed");
 

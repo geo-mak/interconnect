@@ -1,3 +1,6 @@
+mod opt;
+mod sealed;
+
 pub mod capability;
 pub mod client;
 pub mod connection;

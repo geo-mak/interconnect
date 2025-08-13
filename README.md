@@ -5,7 +5,6 @@ High performance remote procedure call protocol.
 > **⚠️ This project is in early development stage.**
 
 ## Features
-- No clunky interface generation or schema definitions: a schema is any encodable type, and Rust’s compile-time monomorphization is used to specialize interfaces.
 - Asynchronous with bidirectional communication.
 - Layered extensible architecture with high efficiency abstractions and clear semantics.
 - Lightweight message format.
@@ -17,16 +16,16 @@ High performance remote procedure call protocol.
 │                Service Layer                │
 │     (Method Handlers, Extensions, etc.)     │
 ├─────────────────────────────────────────────┤
-│          Connection Management Layer        │
-│     (Listeners, Roles (Client / Server))    │
+│                Session Layer                │
+│         (Client, Server, Policies)          │
 ├─────────────────────────────────────────────┤
 │               RPC Stream Layer              │
 │         (Framing, Encoding/Decoding)        │
 ├─────────────────────────────────────────────┤
 │             RPC Capability Layer            │
-│    (Versioning, Feature Negotiation, etc.)  │
+│    (Specs Negotiation, Establishing etc.)   │
 ├─────────────────────────────────────────────┤
-│             Raw I/O Stream Layer            │
+│               Transport Layer               │
 │             (TCP / Unix Sockets)            │
 └─────────────────────────────────────────────┘
 ```

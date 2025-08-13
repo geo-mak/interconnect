@@ -2,7 +2,7 @@ use std::io;
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-use aead::{AeadInPlace, KeyInit, Nonce, OsRng};
+use aead::{AeadInPlace, Buffer, KeyInit, Nonce, OsRng};
 use aes_gcm::Aes128Gcm;
 use hkdf::Hkdf;
 use sha2::Sha256;
@@ -92,6 +92,35 @@ impl RpcCapability {
     }
 }
 
+pub struct BufferView<'a> {
+    pub buf: &'a mut Vec<u8>,
+    pub offset: usize,
+}
+
+impl<'a> AsRef<[u8]> for BufferView<'a> {
+    #[inline(always)]
+    fn as_ref(&self) -> &[u8] {
+        &self.buf[self.offset..]
+    }
+}
+impl<'a> AsMut<[u8]> for BufferView<'a> {
+    #[inline(always)]
+    fn as_mut(&mut self) -> &mut [u8] {
+        &mut self.buf[self.offset..]
+    }
+}
+impl<'a> Buffer for BufferView<'a> {
+    #[inline(always)]
+    fn extend_from_slice(&mut self, other: &[u8]) -> aead::Result<()> {
+        self.buf.extend_from_slice(other);
+        Ok(())
+    }
+    #[inline(always)]
+    fn truncate(&mut self, len: usize) {
+        self.buf.truncate(self.offset + len);
+    }
+}
+
 pub type ReadKey = [u8; 16];
 pub type WriteKey = [u8; 16];
 pub type NonceBase = [u8; 4];
@@ -128,7 +157,7 @@ impl EncryptionState {
 
     /// Encrypts the data in the buffer in-place.
     /// The buffer will will be resized if needed.
-    pub fn encrypt(&mut self, data: &mut Vec<u8>, associated_data: &[u8]) -> RpcResult<()> {
+    pub fn encrypt(&mut self, data: &mut impl Buffer, associated_data: &[u8]) -> RpcResult<()> {
         if unlikely(self.sequence == u64::MAX) {
             return Err(RpcError::error(ErrKind::MaxLimit));
         }
@@ -141,7 +170,7 @@ impl EncryptionState {
 
     /// Decrypts the message in-place to its original format.
     /// The buffer will be truncated to the length of the original data upon success.
-    pub fn decrypt(&mut self, data: &mut Vec<u8>, associated_data: &[u8]) -> RpcResult<()> {
+    pub fn decrypt(&mut self, data: &mut impl Buffer, associated_data: &[u8]) -> RpcResult<()> {
         let next = self.next_nonce();
         let nonce = Nonce::<Aes128Gcm>::from_slice(&next);
         self.cipher
@@ -155,12 +184,12 @@ pub mod negotiation {
     use tokio::io::{AsyncRead, AsyncWrite};
     use x25519_dalek::{EphemeralSecret, PublicKey};
 
-    pub async fn read_frame<S>(stream: &mut S) -> io::Result<RpcCapability>
+    pub async fn read_frame<T>(transport: &mut T) -> io::Result<RpcCapability>
     where
-        S: AsyncReadExt + Send + Sync + Unpin,
+        T: AsyncReadExt + Send + Sync + Unpin,
     {
         let mut buf = [0u8; CAPABILITY_FRAME_LEN];
-        stream.read_exact(&mut buf).await?;
+        transport.read_exact(&mut buf).await?;
 
         if &buf[0..4] != PROTO {
             return Err(io::Error::new(
@@ -179,45 +208,45 @@ pub mod negotiation {
         })
     }
 
-    pub async fn write_frame<S>(stream: &mut S, capability: &RpcCapability) -> io::Result<()>
+    pub async fn write_frame<T>(transport: &mut T, capability: &RpcCapability) -> io::Result<()>
     where
-        S: AsyncWriteExt + Send + Sync + Unpin,
+        T: AsyncWriteExt + Send + Sync + Unpin,
     {
         let mut buf = [0u8; CAPABILITY_FRAME_LEN];
         buf[0..4].copy_from_slice(PROTO);
         buf[4] = capability.version;
         buf[5] = capability.encryption as u8;
         buf[6..8].copy_from_slice(&0u16.to_le_bytes());
-        stream.write_all(&buf).await
+        transport.write_all(&buf).await
     }
 
-    /// Send a confirmation (0x01) to the stream.
+    /// Send a confirmation (0x01) to the transport.
     #[inline(always)]
-    pub async fn confirm<S>(stream: &mut S) -> io::Result<()>
+    pub async fn confirm<T>(transport: &mut T) -> io::Result<()>
     where
-        S: AsyncWriteExt + Send + Sync + Unpin,
+        T: AsyncWriteExt + Send + Sync + Unpin,
     {
-        stream.write_all(&[0x01]).await
+        transport.write_all(&[0x01]).await
     }
 
-    /// Send a rejection (0x00) to the stream.
+    /// Send a rejection (0x00) to the transport.
     #[inline(always)]
-    pub async fn reject<S>(stream: &mut S) -> io::Result<()>
+    pub async fn reject<T>(transport: &mut T) -> io::Result<()>
     where
-        S: AsyncWriteExt + Send + Sync + Unpin,
+        T: AsyncWriteExt + Send + Sync + Unpin,
     {
-        stream.write_all(&[0x00]).await
+        transport.write_all(&[0x00]).await
     }
 
     /// Initiates a capability negotiation.
-    pub async fn initiate<S>(stream: &mut S, capability: RpcCapability) -> RpcResult<()>
+    pub async fn initiate<T>(transport: &mut T, capability: RpcCapability) -> RpcResult<()>
     where
-        S: AsyncRead + AsyncWrite + Unpin + Send + Sync,
+        T: AsyncRead + AsyncWrite + Unpin + Send + Sync,
     {
-        self::write_frame(stream, &capability).await?;
+        self::write_frame(transport, &capability).await?;
 
         let mut confirm = [0u8; 1];
-        stream.read_exact(&mut confirm).await?;
+        transport.read_exact(&mut confirm).await?;
 
         match confirm[0] {
             0x01 => Ok(()),
@@ -227,16 +256,16 @@ pub mod negotiation {
     }
 
     /// Initiates an expected cryptographic key-exchange session.
-    pub async fn initiate_key_exchange<S>(stream: &mut S) -> RpcResult<(ReadState, WriteState)>
+    pub async fn initiate_key_exchange<T>(transport: &mut T) -> RpcResult<(ReadState, WriteState)>
     where
-        S: AsyncRead + AsyncWrite + Unpin + Send + Sync,
+        T: AsyncRead + AsyncWrite + Unpin + Send + Sync,
     {
         let client_secret = EphemeralSecret::random_from_rng(OsRng);
         let client_public = PublicKey::from(&client_secret);
-        stream.write_all(client_public.as_bytes()).await?;
+        transport.write_all(client_public.as_bytes()).await?;
 
         let mut server_pub_bytes = [0u8; 32];
-        stream.read_exact(&mut server_pub_bytes).await?;
+        transport.read_exact(&mut server_pub_bytes).await?;
         let server_public = PublicKey::from(server_pub_bytes);
 
         let shared = client_secret.diffie_hellman(&server_public);
@@ -249,17 +278,17 @@ pub mod negotiation {
     }
 
     /// Accepts an expected cryptographic key-exchange session.
-    pub async fn accept_key_exchange<S>(stream: &mut S) -> RpcResult<(ReadState, WriteState)>
+    pub async fn accept_key_exchange<T>(transport: &mut T) -> RpcResult<(ReadState, WriteState)>
     where
-        S: AsyncRead + AsyncWrite + Unpin + Send + Sync,
+        T: AsyncRead + AsyncWrite + Unpin + Send + Sync,
     {
         let mut client_pub_bytes = [0u8; 32];
-        stream.read_exact(&mut client_pub_bytes).await?;
+        transport.read_exact(&mut client_pub_bytes).await?;
         let client_public = PublicKey::from(client_pub_bytes);
 
         let server_secret = EphemeralSecret::random_from_rng(OsRng);
         let server_public = PublicKey::from(&server_secret);
-        stream.write_all(server_public.as_bytes()).await?;
+        transport.write_all(server_public.as_bytes()).await?;
 
         let shared = server_secret.diffie_hellman(&client_public);
         let (w_key, r_key, nonce_base) = derive_session_keys(shared.as_bytes())?;
@@ -303,18 +332,18 @@ mod test {
         let addr = listener.local_addr().unwrap();
 
         let server = tokio::spawn(async move {
-            let (mut io_stream, _) = listener.accept().await.expect("accept failed");
+            let (mut transport, _) = listener.accept().await.expect("accept failed");
 
-            let proposed = negotiation::read_frame(&mut io_stream)
+            let proposed = negotiation::read_frame(&mut transport)
                 .await
                 .expect("server negotiation failed");
 
-            negotiation::confirm(&mut io_stream)
+            negotiation::confirm(&mut transport)
                 .await
                 .expect("Failed to send confirmation");
 
             let (r_key, _w_key) = if proposed.encryption {
-                negotiation::accept_key_exchange(&mut io_stream)
+                negotiation::accept_key_exchange(&mut transport)
                     .await
                     .expect("server encryption failed")
             } else {
@@ -322,35 +351,35 @@ mod test {
             };
 
             // Read and decrypt message.
-            let len = io_stream.read_u16().await.unwrap() as usize;
+            let len = transport.read_u16().await.unwrap() as usize;
             let mut buffer = vec![0u8; len];
-            io_stream.read_exact(&mut buffer).await.unwrap();
+            transport.read_exact(&mut buffer).await.unwrap();
             let mut r_key = r_key;
             r_key.decrypt(&mut buffer, b"").unwrap();
 
             assert_eq!(&buffer, b"first message!");
 
-            let len = io_stream.read_u16().await.unwrap() as usize;
+            let len = transport.read_u16().await.unwrap() as usize;
             let mut buffer = vec![0u8; len];
-            io_stream.read_exact(&mut buffer).await.unwrap();
+            transport.read_exact(&mut buffer).await.unwrap();
             r_key.decrypt(&mut buffer, b"").unwrap();
             assert_eq!(&buffer, b"second message!");
         });
 
         tokio::time::sleep(Duration::from_millis(10)).await;
 
-        let mut io_stream = TcpStream::connect(addr).await.unwrap();
+        let mut transport = TcpStream::connect(addr).await.unwrap();
 
         let capability = RpcCapability {
             version: 1,
             encryption: true,
         };
 
-        negotiation::initiate(&mut io_stream, capability)
+        negotiation::initiate(&mut transport, capability)
             .await
             .expect("client negotiation failed");
 
-        let (_r_key, w_key) = negotiation::initiate_key_exchange(&mut io_stream)
+        let (_r_key, w_key) = negotiation::initiate_key_exchange(&mut transport)
             .await
             .expect("client encryption failed");
 
@@ -360,14 +389,14 @@ mod test {
         w_key.encrypt(&mut buffer, b"").unwrap();
 
         let len = buffer.len() as u16;
-        io_stream.write_u16(len).await.unwrap();
-        io_stream.write_all(&buffer).await.unwrap();
+        transport.write_u16(len).await.unwrap();
+        transport.write_all(&buffer).await.unwrap();
 
         let mut buffer = b"second message!".to_vec();
         w_key.encrypt(&mut buffer, b"").unwrap();
         let len = buffer.len() as u16;
-        io_stream.write_u16(len).await.unwrap();
-        io_stream.write_all(&buffer).await.unwrap();
+        transport.write_u16(len).await.unwrap();
+        transport.write_all(&buffer).await.unwrap();
 
         server.await.unwrap();
     }

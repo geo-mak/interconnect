@@ -14,23 +14,22 @@ use serde::{Deserialize, Serialize};
 use crate::error::{ErrKind, RpcError, RpcResult};
 use crate::message::{Message, MessageType};
 
-use crate::capability::RpcCapability;
-use crate::capability::negotiation;
+use crate::capability::{RpcCapability, negotiation};
 use crate::service::RpcService;
-use crate::transport::EncryptedRpcReceiver;
-use crate::transport::EncryptedRpcSender;
-use crate::transport::RpcAsyncReceiver;
-use crate::transport::RpcAsyncSender;
-use crate::transport::{OwnedSplitStream, RpcReceiver, RpcSender};
+use crate::stream::{
+    EncryptedRpcReceiver, EncryptedRpcSender, RpcAsyncReceiver, RpcAsyncSender, RpcReceiver,
+    RpcSender,
+};
+use crate::transport::OwnedSplitTransport;
 
-struct ClientState<T> {
-    sender: Mutex<T>,
+struct ClientState<S> {
+    sender: Mutex<S>,
     pending: Mutex<HashMap<Uuid, Sender<RpcResult<MessageType>>>>,
 }
 
-impl<T> ClientState<T> {
+impl<S> ClientState<S> {
     #[inline(always)]
-    fn new(sender: T) -> ClientState<T> {
+    fn new(sender: S) -> ClientState<S> {
         ClientState {
             sender: Mutex::new(sender),
             pending: Mutex::new(HashMap::new()),
@@ -39,49 +38,49 @@ impl<T> ClientState<T> {
 }
 
 /// RPC Client implementation.
-pub struct RpcClient<T> {
-    state: Arc<ClientState<T>>,
+pub struct RpcClient<S> {
+    state: Arc<ClientState<S>>,
     task: tokio::task::JoinHandle<()>,
 }
 
-impl<T> RpcClient<T>
+impl<S> RpcClient<S>
 where
-    T: RpcAsyncSender + 'static,
+    S: RpcAsyncSender + 'static,
 {
     #[inline(always)]
-    const fn new(state: Arc<ClientState<T>>, task: tokio::task::JoinHandle<()>) -> Self {
+    const fn new(state: Arc<ClientState<S>>, task: tokio::task::JoinHandle<()>) -> Self {
         Self { state, task }
     }
 
     #[inline]
-    pub async fn connect<S, H>(
-        mut io_stream: S,
+    pub async fn connect<T, H>(
+        mut transport: T,
         call_handler: H,
-    ) -> RpcResult<RpcClient<RpcSender<S::OwnedWriteHalf>>>
+    ) -> RpcResult<RpcClient<RpcSender<T::OwnedWriteHalf>>>
     where
-        S: OwnedSplitStream + 'static,
+        T: OwnedSplitTransport + 'static,
         H: RpcService,
     {
-        negotiation::initiate(&mut io_stream, RpcCapability::new(1, false)).await?;
+        negotiation::initiate(&mut transport, RpcCapability::new(1, false)).await?;
 
-        let (r, w) = io_stream.owned_split();
+        let (r, w) = transport.owned_split();
         Self::connect_with_parts(RpcReceiver::new(r), RpcSender::new(w), call_handler).await
     }
 
     #[inline]
-    pub async fn connect_encrypted<S, H>(
-        mut io_stream: S,
+    pub async fn connect_encrypted<T, H>(
+        mut transport: T,
         call_handler: H,
-    ) -> RpcResult<RpcClient<EncryptedRpcSender<S::OwnedWriteHalf>>>
+    ) -> RpcResult<RpcClient<EncryptedRpcSender<T::OwnedWriteHalf>>>
     where
-        S: OwnedSplitStream + 'static,
+        T: OwnedSplitTransport + 'static,
         H: RpcService,
     {
-        negotiation::initiate(&mut io_stream, RpcCapability::new(1, true)).await?;
+        negotiation::initiate(&mut transport, RpcCapability::new(1, true)).await?;
 
-        let (r_key, w_key) = negotiation::initiate_key_exchange(&mut io_stream).await?;
+        let (r_key, w_key) = negotiation::initiate_key_exchange(&mut transport).await?;
 
-        let (r, w) = io_stream.owned_split();
+        let (r, w) = transport.owned_split();
 
         Self::connect_with_parts(
             EncryptedRpcReceiver::new(r, r_key),
@@ -283,17 +282,17 @@ mod tests {
         let addr = listener.local_addr().unwrap();
 
         let server_task = tokio::spawn(async move {
-            let (mut io_stream, _) = listener.accept().await.unwrap();
+            let (mut transport, _) = listener.accept().await.unwrap();
 
-            negotiation::read_frame(&mut io_stream)
+            negotiation::read_frame(&mut transport)
                 .await
                 .expect("server negotiation failed");
 
-            negotiation::confirm(&mut io_stream)
+            negotiation::confirm(&mut transport)
                 .await
                 .expect("Failed to send confirmation");
 
-            let (r, w) = io_stream.owned_split();
+            let (r, w) = transport.owned_split();
             let mut rpc_reader = RpcReceiver::new(r);
             let mut rpc_writer = RpcSender::new(w);
 
@@ -326,8 +325,8 @@ mod tests {
 
         tokio::time::sleep(Duration::from_millis(10)).await;
 
-        let stream = TcpStream::connect(addr).await.unwrap();
-        let client = RpcClient::<RpcSender<tcp::OwnedWriteHalf>>::connect(stream, ())
+        let transport = TcpStream::connect(addr).await.unwrap();
+        let client = RpcClient::<RpcSender<tcp::OwnedWriteHalf>>::connect(transport, ())
             .await
             .unwrap();
 
@@ -344,25 +343,25 @@ mod tests {
         let addr = listener.local_addr().unwrap();
 
         let server_task = tokio::spawn(async move {
-            let (mut io_stream, _) = listener.accept().await.unwrap();
+            let (mut transport, _) = listener.accept().await.unwrap();
 
-            let proposed = negotiation::read_frame(&mut io_stream)
+            let proposed = negotiation::read_frame(&mut transport)
                 .await
                 .expect("server negotiation failed");
 
             assert!(proposed.encryption);
 
-            negotiation::confirm(&mut io_stream)
+            negotiation::confirm(&mut transport)
                 .await
                 .expect("Failed to send confirmation");
 
             assert!(proposed.encryption);
 
-            let (r_key, w_key) = negotiation::accept_key_exchange(&mut io_stream)
+            let (r_key, w_key) = negotiation::accept_key_exchange(&mut transport)
                 .await
                 .expect("Server encryption setup failed");
 
-            let (r, w) = io_stream.owned_split();
+            let (r, w) = transport.owned_split();
             let mut rpc_reader = EncryptedRpcReceiver::new(r, r_key);
             let mut rpc_writer = EncryptedRpcSender::new(w, w_key);
 
@@ -391,9 +390,9 @@ mod tests {
 
         tokio::time::sleep(Duration::from_millis(10)).await;
 
-        let stream = TcpStream::connect(addr).await.unwrap();
+        let transport = TcpStream::connect(addr).await.unwrap();
         let client =
-            RpcClient::<EncryptedRpcSender<tcp::OwnedWriteHalf>>::connect_encrypted(stream, ())
+            RpcClient::<EncryptedRpcSender<tcp::OwnedWriteHalf>>::connect_encrypted(transport, ())
                 .await
                 .unwrap();
 
@@ -410,17 +409,17 @@ mod tests {
         let addr = listener.local_addr().unwrap();
 
         let server_task = tokio::spawn(async move {
-            let (mut io_stream, _) = listener.accept().await.unwrap();
+            let (mut transport, _) = listener.accept().await.unwrap();
 
-            negotiation::read_frame(&mut io_stream)
+            negotiation::read_frame(&mut transport)
                 .await
                 .expect("server negotiation failed");
 
-            negotiation::confirm(&mut io_stream)
+            negotiation::confirm(&mut transport)
                 .await
                 .expect("Failed to send confirmation");
 
-            let (r, w) = io_stream.owned_split();
+            let (r, w) = transport.owned_split();
             let mut rpc_reader = RpcReceiver::new(r);
             let mut rpc_writer = RpcSender::new(w);
 
@@ -450,8 +449,8 @@ mod tests {
 
         tokio::time::sleep(Duration::from_millis(10)).await;
 
-        let stream = TcpStream::connect(addr).await.unwrap();
-        let client = RpcClient::<RpcSender<tcp::OwnedWriteHalf>>::connect(stream, ())
+        let transport = TcpStream::connect(addr).await.unwrap();
+        let client = RpcClient::<RpcSender<tcp::OwnedWriteHalf>>::connect(transport, ())
             .await
             .unwrap();
 
@@ -477,17 +476,17 @@ mod tests {
         let received_clone = Arc::clone(&received_notification);
 
         let server_task = tokio::spawn(async move {
-            let (mut io_stream, _) = listener.accept().await.unwrap();
+            let (mut transport, _) = listener.accept().await.unwrap();
 
-            negotiation::read_frame(&mut io_stream)
+            negotiation::read_frame(&mut transport)
                 .await
                 .expect("server negotiation failed");
 
-            negotiation::confirm(&mut io_stream)
+            negotiation::confirm(&mut transport)
                 .await
                 .expect("Failed to send confirmation");
 
-            let (r, _) = io_stream.owned_split();
+            let (r, _) = transport.owned_split();
             let mut rpc_reader = RpcReceiver::new(r);
 
             loop {
@@ -512,8 +511,8 @@ mod tests {
             }
         });
 
-        let stream = TcpStream::connect(addr).await.unwrap();
-        let client = RpcClient::<RpcSender<tcp::OwnedWriteHalf>>::connect(stream, ())
+        let transport = TcpStream::connect(addr).await.unwrap();
+        let client = RpcClient::<RpcSender<tcp::OwnedWriteHalf>>::connect(transport, ())
             .await
             .unwrap();
 
@@ -550,17 +549,17 @@ mod tests {
         let addr = listener.local_addr().unwrap();
 
         let server_task = tokio::spawn(async move {
-            let (mut io_stream, _) = listener.accept().await.unwrap();
+            let (mut transport, _) = listener.accept().await.unwrap();
 
-            negotiation::read_frame(&mut io_stream)
+            negotiation::read_frame(&mut transport)
                 .await
                 .expect("server negotiation failed");
 
-            negotiation::confirm(&mut io_stream)
+            negotiation::confirm(&mut transport)
                 .await
                 .expect("Failed to send confirmation");
 
-            let (r, w) = io_stream.owned_split();
+            let (r, w) = transport.owned_split();
             let mut rpc_reader = RpcReceiver::new(r);
             let mut rpc_writer = RpcSender::new(w);
 
@@ -592,8 +591,8 @@ mod tests {
             counter: Arc::new(AtomicU32::new(0)),
         };
 
-        let stream = TcpStream::connect(addr).await.unwrap();
-        let client = RpcClient::<RpcSender<tcp::OwnedWriteHalf>>::connect(stream, handler)
+        let transport = TcpStream::connect(addr).await.unwrap();
+        let client = RpcClient::<RpcSender<tcp::OwnedWriteHalf>>::connect(transport, handler)
             .await
             .unwrap();
 

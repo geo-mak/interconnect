@@ -1,288 +1,71 @@
-use bincode::enc::write::Writer;
-use bincode::error::EncodeError;
+use std::net::SocketAddr;
+use std::path::Path;
 
+use tokio::io;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::ToSocketAddrs;
 use tokio::net::tcp;
 use tokio::net::unix;
-use tokio::net::{TcpStream, UnixStream};
+use tokio::net::{TcpListener, TcpStream, UnixListener, UnixStream};
 
-use crate::capability::EncryptionState;
-use crate::error::{ErrKind, RpcError, RpcResult};
-use crate::message::Message;
-use crate::sealed::Sealed;
+pub trait TransportListener<A>: Sized + Send {
+    type Address;
+    type Transport: OwnedSplitTransport + Send;
 
-const MAX_DATA_SIZE: u32 = 16 * 1024 * 1024;
+    fn bind(addr: A) -> impl Future<Output = io::Result<Self>>;
 
-// Definitely not for bulk throughput or streams, but streams are a different story.
-const FRAMING_CAPACITY: usize = 1024;
+    fn accept(&self) -> impl Future<Output = io::Result<(Self::Transport, Self::Address)>> + Send;
 
-pub trait RpcAsyncReceiver: Sealed {
-    fn receive(&mut self) -> impl Future<Output = RpcResult<Message>> + Send;
+    fn local_addr(&self) -> io::Result<Self::Address>;
 }
 
-pub trait RpcAsyncSender: Sealed {
-    fn send(&mut self, message: &Message) -> impl Future<Output = RpcResult<()>> + Send;
-    fn close(&mut self) -> impl Future<Output = RpcResult<()>> + Send;
-}
+impl<A: ToSocketAddrs> TransportListener<A> for TcpListener {
+    type Address = SocketAddr;
+    type Transport = TcpStream;
 
-impl<T> Sealed for RpcSender<T> {}
-impl<T> Sealed for EncryptedRpcSender<T> {}
-impl<T> Sealed for RpcReceiver<T> {}
-impl<T> Sealed for EncryptedRpcReceiver<T> {}
-
-pub struct BytesWriter {
-    pub buf: Vec<u8>,
-}
-
-impl Writer for BytesWriter {
     #[inline(always)]
-    fn write(&mut self, bytes: &[u8]) -> Result<(), EncodeError> {
-        self.buf.extend_from_slice(bytes);
-        Ok(())
-    }
-}
-
-pub struct RpcSender<T> {
-    writer: T,
-    bytes: BytesWriter,
-}
-
-impl<T> RpcSender<T> {
-    #[inline(always)]
-    pub fn new(writer: T) -> Self {
-        Self {
-            writer,
-            bytes: BytesWriter {
-                buf: Vec::with_capacity(FRAMING_CAPACITY),
-            },
-        }
+    async fn bind(addr: A) -> io::Result<Self> {
+        TcpListener::bind(addr).await
     }
 
     #[inline(always)]
-    pub fn with_capacity(writer: T, framing_cap: usize) -> Self {
-        Self {
-            writer,
-            bytes: BytesWriter {
-                buf: Vec::with_capacity(framing_cap),
-            },
-        }
-    }
-}
-
-impl<T> RpcAsyncSender for RpcSender<T>
-where
-    T: AsyncWriteExt + Send + Sync + Unpin,
-{
-    /// Encodes a message as RPC frame and writes it into the I/O stream.
-    async fn send(&mut self, message: &Message) -> RpcResult<()> {
-        unsafe { self.bytes.buf.set_len(0) }
-
-        message.encode_into_writer(&mut self.bytes)?;
-
-        // Write 4-bytes size prefix.
-        self.writer
-            .write_u32_le(self.bytes.buf.len() as u32)
-            .await?;
-
-        self.writer.write_all(&self.bytes.buf).await?;
-        Ok(())
+    async fn accept(&self) -> io::Result<(Self::Transport, SocketAddr)> {
+        self.accept().await
     }
 
     #[inline(always)]
-    async fn close(&mut self) -> RpcResult<()> {
-        // Why only writer exposes shutdown?
-        self.writer.shutdown().await.map_err(Into::into)
+    fn local_addr(&self) -> io::Result<Self::Address> {
+        TcpListener::local_addr(self)
     }
 }
 
-pub struct EncryptedRpcSender<T> {
-    writer: T,
-    state: EncryptionState,
-    bytes: BytesWriter,
-}
+impl<A: AsRef<Path>> TransportListener<A> for UnixListener {
+    type Address = unix::SocketAddr;
+    type Transport = UnixStream;
 
-impl<T> EncryptedRpcSender<T> {
     #[inline(always)]
-    pub fn new(writer: T, state: EncryptionState) -> Self {
-        Self {
-            writer,
-            state,
-            bytes: BytesWriter {
-                buf: Vec::with_capacity(FRAMING_CAPACITY),
-            },
-        }
+    async fn bind(addr: A) -> io::Result<Self> {
+        UnixListener::bind(addr)
     }
 
     #[inline(always)]
-    pub fn with_capacity(writer: T, state: EncryptionState, framing_cap: usize) -> Self {
-        Self {
-            writer,
-            state,
-            bytes: BytesWriter {
-                buf: Vec::with_capacity(framing_cap),
-            },
-        }
-    }
-}
-
-impl<T> RpcAsyncSender for EncryptedRpcSender<T>
-where
-    T: AsyncWriteExt + Send + Sync + Unpin,
-{
-    /// Encodes a message as RPC frame and writes it into the I/O stream.
-    async fn send(&mut self, message: &Message) -> RpcResult<()> {
-        unsafe { self.bytes.buf.set_len(0) }
-
-        message.encode_into_writer(&mut self.bytes)?;
-
-        // Encryption will increase its size.
-        self.state.encrypt(&mut self.bytes.buf, b"")?;
-
-        self.writer
-            .write_u32_le(self.bytes.buf.len() as u32)
-            .await?;
-
-        self.writer.write_all(&self.bytes.buf).await?;
-        Ok(())
+    async fn accept(&self) -> io::Result<(UnixStream, Self::Address)> {
+        self.accept().await
     }
 
     #[inline(always)]
-    async fn close(&mut self) -> RpcResult<()> {
-        // Why only writer exposes shutdown?
-        self.writer.shutdown().await.map_err(Into::into)
+    fn local_addr(&self) -> io::Result<Self::Address> {
+        UnixListener::local_addr(self)
     }
 }
 
-pub struct RpcReceiver<T> {
-    reader: T,
-    bytes: Vec<u8>,
-}
-
-impl<T> RpcReceiver<T> {
-    #[inline(always)]
-    pub fn new(reader: T) -> Self {
-        Self {
-            reader,
-            bytes: Vec::with_capacity(FRAMING_CAPACITY),
-        }
-    }
-
-    #[inline(always)]
-    pub fn with_capacity(reader: T, framing_cap: usize) -> Self {
-        Self {
-            reader,
-            bytes: Vec::with_capacity(framing_cap),
-        }
-    }
-}
-
-impl<T> RpcAsyncReceiver for RpcReceiver<T>
-where
-    T: AsyncReadExt + Send + Sync + Unpin,
-{
-    /// Reads and validates the RPC frame and decodes its data as a message.
-    /// This method is not cancellation-safe, and it should not be awaited as part of selection race.
-    /// **Currently**, if an error has been returned, receiving must be terminated and the stream must be closed.
-    #[allow(clippy::uninit_vec)]
-    async fn receive(&mut self) -> RpcResult<Message> {
-        // Read 4 bytes size prefix.
-        let len = self.reader.read_u32_le().await?;
-
-        if len > MAX_DATA_SIZE {
-            return Err(RpcError::error(ErrKind::LargeMessage));
-        }
-
-        // Reserve uninitialized memory.
-        self.bytes.reserve(len as usize);
-
-        // Safety: This should be safe because:
-        //
-        // 1 - Buffer has allocated memory for `len` bytes.
-        //
-        // 2 - `len` matches the expected decoding size.
-        //
-        // 3 - In Rust, any operation (Add, Sub, Mul, etc.) with uninitialized memory is UB,
-        //     because the bit-pattern of that memory will not be interpreted in consistent manner (random),
-        //     but we are not doing any operation except copying/overwriting FROM the stream TO the buffer,
-        //     and only on success, or otherwise, an error will be returned.
-        unsafe { self.bytes.set_len(len as usize) }
-        self.reader.read_exact(&mut self.bytes).await?;
-
-        Message::decode(&self.bytes)
-    }
-}
-
-pub struct EncryptedRpcReceiver<T> {
-    reader: T,
-    encryption: EncryptionState,
-    bytes: Vec<u8>,
-}
-
-impl<T> EncryptedRpcReceiver<T> {
-    #[inline(always)]
-    pub fn new(reader: T, encryption: EncryptionState) -> Self {
-        Self {
-            reader,
-            encryption,
-            bytes: Vec::with_capacity(FRAMING_CAPACITY),
-        }
-    }
-
-    #[inline(always)]
-    pub fn with_capacity(reader: T, state: EncryptionState, framing_cap: usize) -> Self {
-        Self {
-            reader,
-            encryption: state,
-            bytes: Vec::with_capacity(framing_cap),
-        }
-    }
-}
-
-impl<T> RpcAsyncReceiver for EncryptedRpcReceiver<T>
-where
-    T: AsyncReadExt + Send + Sync + Unpin,
-{
-    /// Reads and validates the RPC frame and decodes its data as a message.
-    /// This method is not cancellation-safe, and it should not be awaited as part of selection race.
-    /// **Currently**, if an error has been returned, receiving must be terminated and the stream must be closed.
-    #[allow(clippy::uninit_vec)]
-    async fn receive(&mut self) -> RpcResult<Message> {
-        // Read 4 bytes size prefix.
-        let len = self.reader.read_u32_le().await?;
-
-        if len > MAX_DATA_SIZE {
-            return Err(RpcError::error(ErrKind::LargeMessage));
-        }
-
-        // Reserve uninitialized memory.
-        self.bytes.reserve(len as usize);
-
-        // Safety: This should be safe because:
-        //
-        // 1 - Buffer has allocated memory for `len` bytes.
-        //
-        // 2 - `len` matches the expected decoding size.
-        //
-        // 3 - In Rust, any operation (Add, Sub, Mul, etc.) with uninitialized memory is UB,
-        //     because the bit-pattern of that memory will not be interpreted in consistent manner (random),
-        //     but we are not doing any operation except copying/overwriting FROM the stream TO the buffer,
-        //     and only on success, or otherwise, an error will be returned.
-        unsafe { self.bytes.set_len(len as usize) }
-        self.reader.read_exact(&mut self.bytes).await?;
-
-        self.encryption.decrypt(&mut self.bytes, b"")?;
-
-        Message::decode(&self.bytes)
-    }
-}
-
-pub trait OwnedSplitStream: AsyncWriteExt + AsyncReadExt + Send + Sync + Unpin {
+pub trait OwnedSplitTransport: AsyncWriteExt + AsyncReadExt + Send + Sync + Unpin {
     type OwnedReadHalf: AsyncReadExt + Send + Sync + Unpin;
     type OwnedWriteHalf: AsyncWriteExt + Send + Sync + Unpin;
     fn owned_split(self) -> (Self::OwnedReadHalf, Self::OwnedWriteHalf);
 }
 
-impl OwnedSplitStream for TcpStream {
+impl OwnedSplitTransport for TcpStream {
     type OwnedReadHalf = tcp::OwnedReadHalf;
     type OwnedWriteHalf = tcp::OwnedWriteHalf;
 
@@ -292,127 +75,12 @@ impl OwnedSplitStream for TcpStream {
     }
 }
 
-impl OwnedSplitStream for UnixStream {
+impl OwnedSplitTransport for UnixStream {
     type OwnedReadHalf = unix::OwnedReadHalf;
     type OwnedWriteHalf = unix::OwnedWriteHalf;
 
     #[inline(always)]
     fn owned_split(self) -> (Self::OwnedReadHalf, Self::OwnedWriteHalf) {
         UnixStream::into_split(self)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    use std::time::Duration;
-
-    use tokio::net::{TcpStream, UnixListener, UnixStream};
-
-    use crate::message::MessageType;
-
-    #[tokio::test]
-    async fn test_read_write_tcp_rpc() {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let addr = listener.local_addr().unwrap();
-
-        let handle = tokio::spawn(async move {
-            let (io_stream, _) = listener.accept().await.unwrap();
-
-            let (reader, writer) = io_stream.owned_split();
-            let mut rpc_reader = RpcReceiver::new(reader);
-            let mut rpc_writer = RpcSender::new(writer);
-
-            loop {
-                match rpc_reader.receive().await {
-                    Ok(msg) => {
-                        if let Err(e) = rpc_writer.send(&msg).await {
-                            println!("Server error: {:?}", e);
-                        }
-                    }
-                    Err(e) => {
-                        println!("Server error: {:?}", e);
-                        break;
-                    }
-                }
-            }
-        });
-
-        tokio::time::sleep(Duration::from_millis(10)).await;
-
-        let io_stream = TcpStream::connect(addr).await.unwrap();
-        let (io_reader, io_writer) = io_stream.owned_split();
-        let mut rpc_reader = RpcReceiver::new(io_reader);
-        let mut rpc_writer = RpcSender::new(io_writer);
-
-        let call_msg = Message::call(1, b"hi there".to_vec());
-        rpc_writer.send(&call_msg).await.unwrap();
-
-        let reply_msg = rpc_reader.receive().await.unwrap();
-        match (&call_msg.kind, &reply_msg.kind) {
-            (MessageType::Call(sent), MessageType::Call(got)) => {
-                assert_eq!(sent.method, got.method);
-                assert_eq!(sent.data, got.data);
-            }
-            _ => panic!("Expected call"),
-        }
-
-        rpc_writer.close().await.unwrap();
-        handle.await.unwrap()
-    }
-
-    #[tokio::test]
-    async fn test_read_write_unix_rpc() {
-        let path = "unix_transport_test.sock";
-
-        let listener = UnixListener::bind(&path).unwrap();
-
-        let handle = tokio::spawn(async move {
-            let (io_stream, _) = listener.accept().await.unwrap();
-            let (io_reader, io_writer) = io_stream.owned_split();
-
-            let mut rpc_reader = RpcReceiver::new(io_reader);
-            let mut rpc_writer = RpcSender::new(io_writer);
-
-            loop {
-                match rpc_reader.receive().await {
-                    Ok(msg) => {
-                        if let Err(e) = rpc_writer.send(&msg).await {
-                            println!("Server error: {:?}", e);
-                        }
-                    }
-                    Err(e) => {
-                        println!("Server error: {:?}", e);
-                        break;
-                    }
-                }
-            }
-        });
-
-        tokio::time::sleep(Duration::from_millis(10)).await;
-
-        let io_stream = UnixStream::connect(&path).await.unwrap();
-
-        let (io_reader, io_writer) = io_stream.owned_split();
-        let mut rpc_reader = RpcReceiver::new(io_reader);
-        let mut rpc_writer = RpcSender::new(io_writer);
-
-        let call_msg = Message::call(1, b"hi there".to_vec());
-        rpc_writer.send(&call_msg).await.unwrap();
-
-        let reply_msg = rpc_reader.receive().await.unwrap();
-        match (&call_msg.kind, &reply_msg.kind) {
-            (MessageType::Call(sent), MessageType::Call(got)) => {
-                assert_eq!(sent.method, got.method);
-                assert_eq!(sent.data, got.data);
-            }
-            _ => panic!("Expected call"),
-        }
-
-        rpc_writer.close().await.unwrap();
-        handle.await.unwrap();
-
-        std::fs::remove_file(&path).unwrap();
     }
 }

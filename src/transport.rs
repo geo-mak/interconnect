@@ -30,7 +30,7 @@ impl<A: ToSocketAddrs> TransportListener<A> for TcpListener {
 
     #[inline(always)]
     async fn accept(&self) -> io::Result<(Self::Transport, SocketAddr)> {
-        self.accept().await
+        TcpListener::accept(self).await
     }
 
     #[inline(always)]
@@ -50,7 +50,7 @@ impl<A: AsRef<Path>> TransportListener<A> for UnixListener {
 
     #[inline(always)]
     async fn accept(&self) -> io::Result<(UnixStream, Self::Address)> {
-        self.accept().await
+        UnixListener::accept(self).await
     }
 
     #[inline(always)]

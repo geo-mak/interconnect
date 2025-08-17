@@ -1,6 +1,3 @@
-use std::fmt::Debug;
-use std::marker::PhantomData;
-
 use tokio::task::JoinHandle;
 
 use crate::capability::negotiation;
@@ -14,43 +11,30 @@ use crate::stream::{
 use crate::transport::{OwnedSplitTransport, TransportListener};
 
 /// RPC Server implementation.
-pub struct RpcServer<L, A, H>
-where
-    L: TransportListener<A>,
-    A: Debug,
-    H: RpcService,
-{
-    service: H,
-    _l: PhantomData<L>,
-    _a: PhantomData<A>,
+pub struct RpcServer {
+    // TODO: Track sessions.
+    task: JoinHandle<()>,
 }
 
-impl<L, A, H> RpcServer<L, A, H>
-where
-    L: TransportListener<A> + Send + 'static,
-    A: Debug + 'static,
-    H: RpcService + 'static,
-{
-    pub fn new(service: H) -> Self {
-        Self {
-            service,
-            _l: PhantomData,
-            _a: PhantomData,
-        }
-    }
-
-    pub async fn start(&mut self, addr: A, allow_unencrypted: bool) -> RpcResult<JoinHandle<()>> {
+impl RpcServer {
+    pub async fn serve<A, L, H>(addr: A, service: H, encryption_required: bool) -> RpcResult<Self>
+    where
+        A: 'static,
+        L: TransportListener<A> + Send + 'static,
+        H: RpcService + 'static,
+    {
         let listener = L::bind(addr).await?;
-        let service = self.service.clone();
+        let service = service.clone();
 
-        let handle = tokio::spawn(async move {
+        let task = tokio::spawn(async move {
             loop {
                 match listener.accept().await {
                     Ok((transport, _)) => {
-                        tokio::spawn(Self::new_connection(
+                        // TODO: Safe abort.
+                        tokio::spawn(Self::new_connection::<A, L, H>(
                             transport,
                             service.clone(),
-                            allow_unencrypted,
+                            encryption_required,
                         ));
                     }
                     Err(e) => log::error!("Accept failed: {e}"),
@@ -58,11 +42,19 @@ where
             }
         });
 
-        Ok(handle)
+        Ok(Self { task })
     }
 
     // Negotiates a new connection and starts a session over the transport layer upon success.
-    async fn new_connection(mut transport: L::Transport, service: H, allow_unencrypted: bool) {
+    async fn new_connection<A, L, H>(
+        mut transport: L::Transport,
+        service: H,
+        encryption_required: bool,
+    ) where
+        A: 'static,
+        L: TransportListener<A> + Send + 'static,
+        H: RpcService + 'static,
+    {
         let proposed = match negotiation::read_frame(&mut transport).await {
             Ok(c) => c,
             Err(e) => {
@@ -101,7 +93,7 @@ where
             .await;
         } else {
             // Policy-dependent.
-            if !allow_unencrypted {
+            if encryption_required {
                 let _ = negotiation::reject(&mut transport).await;
                 log::error!("Unencrypted session rejected by policy");
                 return;
@@ -115,10 +107,11 @@ where
         }
     }
 
-    async fn new_session<R, W>(mut rx: R, mut tx: W, service: H)
+    async fn new_session<R, W, H>(mut rx: R, mut tx: W, service: H)
     where
         R: RpcAsyncReceiver + 'static,
         W: RpcAsyncSender + 'static,
+        H: RpcService + 'static,
     {
         loop {
             match rx.receive().await {
@@ -136,8 +129,9 @@ where
         }
     }
 
-    async fn process_incoming<S>(message: &Message, service: &H, sender: &mut S) -> RpcResult<()>
+    async fn process_incoming<H, S>(message: &Message, service: &H, sender: &mut S) -> RpcResult<()>
     where
+        H: RpcService + 'static,
         S: RpcAsyncSender + 'static,
     {
         match &message.kind {
@@ -157,6 +151,11 @@ where
             }
         }
     }
+
+    /// Consumes the instance and aborts its background task.
+    pub fn shutdown(self) {
+        self.task.abort();
+    }
 }
 
 #[cfg(test)]
@@ -170,6 +169,7 @@ mod tests {
     use tokio::net::{TcpListener, TcpStream, UnixListener, UnixStream};
 
     use crate::capability::{self, RpcCapability};
+    use crate::error::{ErrKind, RpcError};
     use crate::message::{Call, Reply};
 
     #[derive(Clone)]
@@ -187,22 +187,26 @@ mod tests {
 
     impl RpcService for RpcTestService {
         async fn call(&self, call: &Call) -> RpcResult<Reply> {
-            let count = self.counter.fetch_add(1, Ordering::SeqCst);
-            let response = format!(
-                "Method called {} times. Data size: {}",
-                count + 1,
-                call.data.len()
-            );
-            Ok(Reply::with(&response)?)
+            match call.method {
+                1 => {
+                    let current = self.counter.fetch_add(1, Ordering::SeqCst);
+                    Ok(Reply::with(&(current + 1)).unwrap())
+                }
+                _ => Err(RpcError::error(ErrKind::Unimplemented)),
+            }
         }
     }
 
     #[tokio::test]
     async fn test_tcp_rpc_server() {
         let service = RpcTestService::new();
-        let mut server = RpcServer::<TcpListener, &str, RpcTestService>::new(service);
-
-        let handle = server.start("127.0.0.1:8000", true).await.unwrap();
+        let server = RpcServer::serve::<&str, TcpListener, RpcTestService>(
+            "127.0.0.1:8000",
+            service,
+            false,
+        )
+        .await
+        .unwrap();
 
         let mut transport = TcpStream::connect("127.0.0.1:8000").await.unwrap();
 
@@ -215,21 +219,19 @@ mod tests {
         let mut rpc_reader = RpcReceiver::new(reader);
         let mut rpc_writer = RpcSender::new(writer);
 
-        let payload = b"hi there".to_vec();
-        let call_msg = Message::call(1, payload.clone());
+        let call_msg = Message::call_with(1, ()).unwrap();
         rpc_writer.send(&call_msg).await.unwrap();
 
         let reply_msg = rpc_reader.receive().await.unwrap();
         match reply_msg.kind {
             MessageType::Reply(reply) => {
-                let response: String = crate::message::Message::decode_as(&reply.data).unwrap();
-                assert!(response.contains("Method called"));
-                assert!(response.contains(&payload.len().to_string()));
+                let response: u32 = crate::message::Message::decode_as(&reply.data).unwrap();
+                assert!(response == 1);
             }
             _ => panic!("Expected reply"),
         }
 
-        handle.abort();
+        server.shutdown();
     }
 
     #[tokio::test]
@@ -237,9 +239,9 @@ mod tests {
         let path = "unix_server_test.sock";
 
         let service = RpcTestService::new();
-        let mut server = RpcServer::<UnixListener, &str, RpcTestService>::new(service);
-
-        let handle = server.start(path, true).await.unwrap();
+        let server = RpcServer::serve::<&str, UnixListener, RpcTestService>(path, service, false)
+            .await
+            .unwrap();
 
         let mut transport = UnixStream::connect(path).await.unwrap();
 
@@ -253,21 +255,19 @@ mod tests {
 
         tokio::time::sleep(Duration::from_millis(10)).await;
 
-        let payload = b"hi there".to_vec();
-        let call_msg = Message::call(1, payload.clone());
+        let call_msg = Message::call_with(1, ()).unwrap();
         rpc_writer.send(&call_msg).await.unwrap();
 
         let reply_msg = rpc_reader.receive().await.unwrap();
         match reply_msg.kind {
             MessageType::Reply(reply) => {
-                let response: String = crate::message::Message::decode_as(&reply.data).unwrap();
-                assert!(response.contains("Method called"));
-                assert!(response.contains(&payload.len().to_string()));
+                let response: u32 = crate::message::Message::decode_as(&reply.data).unwrap();
+                assert!(response == 1);
             }
             _ => panic!("Expected reply"),
         }
 
-        handle.abort();
+        server.shutdown();
         std::fs::remove_file(path).unwrap();
     }
 }

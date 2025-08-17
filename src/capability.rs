@@ -156,7 +156,7 @@ impl EncryptionState {
     }
 
     /// Encrypts the data in the buffer in-place.
-    /// The buffer will will be resized if needed.
+    /// The buffer will be resized if needed.
     pub fn encrypt(&mut self, data: &mut impl Buffer, associated_data: &[u8]) -> RpcResult<()> {
         if unlikely(self.sequence == u64::MAX) {
             return Err(RpcError::error(ErrKind::MaxLimit));

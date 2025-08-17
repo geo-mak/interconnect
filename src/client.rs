@@ -47,11 +47,6 @@ impl<S> RpcClient<S>
 where
     S: RpcAsyncSender + 'static,
 {
-    #[inline(always)]
-    const fn new(state: Arc<ClientState<S>>, task: tokio::task::JoinHandle<()>) -> Self {
-        Self { state, task }
-    }
-
     #[inline]
     pub async fn connect<T, H>(
         mut transport: T,
@@ -88,6 +83,11 @@ where
             call_handler,
         )
         .await
+    }
+
+    #[inline(always)]
+    const fn new(state: Arc<ClientState<S>>, task: tokio::task::JoinHandle<()>) -> Self {
+        Self { state, task }
     }
 
     async fn connect_with_parts<R, W, H>(

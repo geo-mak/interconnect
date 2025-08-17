@@ -24,14 +24,13 @@ impl RpcServer {
         H: RpcService + 'static,
     {
         let listener = L::bind(addr).await?;
-        let service = service.clone();
 
         let task = tokio::spawn(async move {
             loop {
                 match listener.accept().await {
                     Ok((transport, _)) => {
                         // TODO: Safe abort.
-                        tokio::spawn(Self::new_connection::<A, L, H>(
+                        tokio::spawn(Self::new_connection::<L::Transport, H>(
                             transport,
                             service.clone(),
                             encryption_required,
@@ -46,13 +45,9 @@ impl RpcServer {
     }
 
     // Negotiates a new connection and starts a session over the transport layer upon success.
-    async fn new_connection<A, L, H>(
-        mut transport: L::Transport,
-        service: H,
-        encryption_required: bool,
-    ) where
-        A: 'static,
-        L: TransportListener<A> + Send + 'static,
+    async fn new_connection<T, H>(mut transport: T, service: H, encryption_required: bool)
+    where
+        T: OwnedSplitTransport + 'static,
         H: RpcService + 'static,
     {
         let proposed = match negotiation::read_frame(&mut transport).await {
@@ -200,13 +195,10 @@ mod tests {
     #[tokio::test]
     async fn test_tcp_rpc_server() {
         let service = RpcTestService::new();
-        let server = RpcServer::serve::<&str, TcpListener, RpcTestService>(
-            "127.0.0.1:8000",
-            service,
-            false,
-        )
-        .await
-        .unwrap();
+        let server =
+            RpcServer::serve::<&str, TcpListener, RpcTestService>("127.0.0.1:8000", service, false)
+                .await
+                .unwrap();
 
         let mut transport = TcpStream::connect("127.0.0.1:8000").await.unwrap();
 

@@ -294,7 +294,6 @@ mod tests {
     use tokio::net::{TcpStream, UnixListener, UnixStream};
 
     use crate::message::MessageType;
-    use crate::transport::OwnedSplitTransport;
 
     #[tokio::test]
     async fn test_read_write_tcp_rpc() {
@@ -304,7 +303,7 @@ mod tests {
         let handle = tokio::spawn(async move {
             let (transport, _) = listener.accept().await.unwrap();
 
-            let (t_reader, t_writer) = transport.owned_split();
+            let (t_reader, t_writer) = transport.into_split();
             let mut rpc_reader = RpcReceiver::new(t_reader);
             let mut rpc_writer = RpcSender::new(t_writer);
 
@@ -326,7 +325,7 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(10)).await;
 
         let transport = TcpStream::connect(addr).await.unwrap();
-        let (io_reader, io_writer) = transport.owned_split();
+        let (io_reader, io_writer) = transport.into_split();
         let mut rpc_reader = RpcReceiver::new(io_reader);
         let mut rpc_writer = RpcSender::new(io_writer);
 
@@ -354,7 +353,7 @@ mod tests {
 
         let handle = tokio::spawn(async move {
             let (transport, _) = listener.accept().await.unwrap();
-            let (t_reader, t_writer) = transport.owned_split();
+            let (t_reader, t_writer) = transport.into_split();
 
             let mut rpc_reader = RpcReceiver::new(t_reader);
             let mut rpc_writer = RpcSender::new(t_writer);
@@ -378,7 +377,7 @@ mod tests {
 
         let transport = UnixStream::connect(&path).await.unwrap();
 
-        let (t_reader, t_writer) = transport.owned_split();
+        let (t_reader, t_writer) = transport.into_split();
         let mut rpc_reader = RpcReceiver::new(t_reader);
         let mut rpc_writer = RpcSender::new(t_writer);
 

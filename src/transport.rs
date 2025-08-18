@@ -10,7 +10,7 @@ use tokio::net::{TcpListener, TcpStream, UnixListener, UnixStream};
 
 pub trait TransportListener<A>: Sized + Send {
     type Address;
-    type Transport: OwnedSplitTransport + Send;
+    type Transport: TransportLayer + Send;
 
     fn bind(addr: A) -> impl Future<Output = io::Result<Self>>;
 
@@ -59,28 +59,37 @@ impl<A: AsRef<Path>> TransportListener<A> for UnixListener {
     }
 }
 
-pub trait OwnedSplitTransport: AsyncWriteExt + AsyncReadExt + Send + Sync + Unpin {
+/// Trait represents types that can act as transport layers.
+///
+/// Types that implement this trait should comply with the following requirements:
+///
+/// - They don't use intermediate buffers, in sense that calling `flush` is not required.
+///
+/// - They provide two modes of operation: single-mode and split-mode.
+///
+/// - In split-mode, the two halves must be owned handles, that allow **parallel** access.
+pub trait TransportLayer: AsyncWriteExt + AsyncReadExt + Send + Sync + Unpin {
     type OwnedReadHalf: AsyncReadExt + Send + Sync + Unpin;
     type OwnedWriteHalf: AsyncWriteExt + Send + Sync + Unpin;
-    fn owned_split(self) -> (Self::OwnedReadHalf, Self::OwnedWriteHalf);
+    fn into_split(self) -> (Self::OwnedReadHalf, Self::OwnedWriteHalf);
 }
 
-impl OwnedSplitTransport for TcpStream {
+impl TransportLayer for TcpStream {
     type OwnedReadHalf = tcp::OwnedReadHalf;
     type OwnedWriteHalf = tcp::OwnedWriteHalf;
 
     #[inline(always)]
-    fn owned_split(self) -> (Self::OwnedReadHalf, Self::OwnedWriteHalf) {
+    fn into_split(self) -> (Self::OwnedReadHalf, Self::OwnedWriteHalf) {
         TcpStream::into_split(self)
     }
 }
 
-impl OwnedSplitTransport for UnixStream {
+impl TransportLayer for UnixStream {
     type OwnedReadHalf = unix::OwnedReadHalf;
     type OwnedWriteHalf = unix::OwnedWriteHalf;
 
     #[inline(always)]
-    fn owned_split(self) -> (Self::OwnedReadHalf, Self::OwnedWriteHalf) {
+    fn into_split(self) -> (Self::OwnedReadHalf, Self::OwnedWriteHalf) {
         UnixStream::into_split(self)
     }
 }

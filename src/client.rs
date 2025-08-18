@@ -20,7 +20,7 @@ use crate::stream::{
     EncryptedRpcReceiver, EncryptedRpcSender, RpcAsyncReceiver, RpcAsyncSender, RpcReceiver,
     RpcSender,
 };
-use crate::transport::OwnedSplitTransport;
+use crate::transport::TransportLayer;
 
 struct ClientState<S> {
     sender: Mutex<S>,
@@ -53,12 +53,12 @@ where
         call_handler: H,
     ) -> RpcResult<RpcClient<RpcSender<T::OwnedWriteHalf>>>
     where
-        T: OwnedSplitTransport + 'static,
+        T: TransportLayer + 'static,
         H: RpcService,
     {
         negotiation::initiate(&mut transport, RpcCapability::new(1, false)).await?;
 
-        let (r, w) = transport.owned_split();
+        let (r, w) = transport.into_split();
         Self::connect_with_parts(RpcReceiver::new(r), RpcSender::new(w), call_handler).await
     }
 
@@ -68,14 +68,14 @@ where
         call_handler: H,
     ) -> RpcResult<RpcClient<EncryptedRpcSender<T::OwnedWriteHalf>>>
     where
-        T: OwnedSplitTransport + 'static,
+        T: TransportLayer + 'static,
         H: RpcService,
     {
         negotiation::initiate(&mut transport, RpcCapability::new(1, true)).await?;
 
         let (r_key, w_key) = negotiation::initiate_key_exchange(&mut transport).await?;
 
-        let (r, w) = transport.owned_split();
+        let (r, w) = transport.into_split();
 
         Self::connect_with_parts(
             EncryptedRpcReceiver::new(r, r_key),
@@ -272,9 +272,12 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::message::{Call, Reply};
+
     use std::sync::atomic::{AtomicU32, Ordering};
+
     use tokio::net::{TcpStream, tcp};
+
+    use crate::message::{Call, Reply};
 
     #[tokio::test]
     async fn test_client_call_reply() {
@@ -292,7 +295,7 @@ mod tests {
                 .await
                 .expect("Failed to send confirmation");
 
-            let (r, w) = transport.owned_split();
+            let (r, w) = transport.into_split();
             let mut rpc_reader = RpcReceiver::new(r);
             let mut rpc_writer = RpcSender::new(w);
 
@@ -361,7 +364,7 @@ mod tests {
                 .await
                 .expect("Server encryption setup failed");
 
-            let (r, w) = transport.owned_split();
+            let (r, w) = transport.into_split();
             let mut rpc_reader = EncryptedRpcReceiver::new(r, r_key);
             let mut rpc_writer = EncryptedRpcSender::new(w, w_key);
 
@@ -419,7 +422,7 @@ mod tests {
                 .await
                 .expect("Failed to send confirmation");
 
-            let (r, w) = transport.owned_split();
+            let (r, w) = transport.into_split();
             let mut rpc_reader = RpcReceiver::new(r);
             let mut rpc_writer = RpcSender::new(w);
 
@@ -486,7 +489,7 @@ mod tests {
                 .await
                 .expect("Failed to send confirmation");
 
-            let (r, _) = transport.owned_split();
+            let (r, _) = transport.into_split();
             let mut rpc_reader = RpcReceiver::new(r);
 
             loop {
@@ -559,7 +562,7 @@ mod tests {
                 .await
                 .expect("Failed to send confirmation");
 
-            let (r, w) = transport.owned_split();
+            let (r, w) = transport.into_split();
             let mut rpc_reader = RpcReceiver::new(r);
             let mut rpc_writer = RpcSender::new(w);
 

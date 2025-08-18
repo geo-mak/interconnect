@@ -8,7 +8,7 @@ use crate::stream::{
     EncryptedRpcReceiver, EncryptedRpcSender, RpcAsyncReceiver, RpcAsyncSender, RpcReceiver,
     RpcSender,
 };
-use crate::transport::{OwnedSplitTransport, TransportListener};
+use crate::transport::{TransportLayer, TransportListener};
 
 /// RPC Server implementation.
 pub struct RpcServer {
@@ -47,7 +47,7 @@ impl RpcServer {
     // Negotiates a new connection and starts a session over the transport layer upon success.
     async fn new_connection<T, H>(mut transport: T, service: H, encryption_required: bool)
     where
-        T: OwnedSplitTransport + 'static,
+        T: TransportLayer + 'static,
         H: RpcService + 'static,
     {
         let proposed = match negotiation::read_frame(&mut transport).await {
@@ -79,7 +79,7 @@ impl RpcServer {
                 }
             };
 
-            let (reader, writer) = transport.owned_split();
+            let (reader, writer) = transport.into_split();
             Self::new_session(
                 EncryptedRpcReceiver::new(reader, r_key),
                 EncryptedRpcSender::new(writer, w_key),
@@ -97,7 +97,7 @@ impl RpcServer {
                 log::error!("Failed to confirm: {e}");
                 return;
             }
-            let (reader, writer) = transport.owned_split();
+            let (reader, writer) = transport.into_split();
             Self::new_session(RpcReceiver::new(reader), RpcSender::new(writer), service).await;
         }
     }
@@ -207,7 +207,7 @@ mod tests {
             .await
             .expect("client negotiation failed");
 
-        let (reader, writer) = transport.owned_split();
+        let (reader, writer) = transport.into_split();
         let mut rpc_reader = RpcReceiver::new(reader);
         let mut rpc_writer = RpcSender::new(writer);
 
@@ -241,7 +241,7 @@ mod tests {
             .await
             .expect("client negotiation failed");
 
-        let (reader, writer) = transport.owned_split();
+        let (reader, writer) = transport.into_split();
         let mut rpc_reader = RpcReceiver::new(reader);
         let mut rpc_writer = RpcSender::new(writer);
 

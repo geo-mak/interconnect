@@ -15,4 +15,4 @@ pub use error::{RpcError, RpcResult};
 pub use message::{Message, MessageType};
 pub use server::RpcServer;
 pub use stream::{RpcReceiver, RpcSender};
-pub use transport::{OwnedSplitTransport, TransportListener};
+pub use transport::{TransportLayer, TransportListener};

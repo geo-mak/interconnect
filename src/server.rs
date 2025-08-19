@@ -227,6 +227,55 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_tcp_rpc_server_encryption_policy() {
+        let service = RpcTestService::new();
+
+        // Server with encryption-only policy.
+        let server =
+            RpcServer::serve::<&str, TcpListener, RpcTestService>("127.0.0.1:8001", service, true)
+                .await
+                .unwrap();
+
+        // Unencrypted session.
+        {
+            let mut transport = TcpStream::connect("127.0.0.1:8001").await.unwrap();
+            let response =
+                capability::negotiation::initiate(&mut transport, RpcCapability::new(1, false))
+                    .await;
+            assert!(response == Err(RpcError::error(ErrKind::CapabilityMismatch)));
+        };
+
+        // Encrypted session.
+        let mut transport = TcpStream::connect("127.0.0.1:8001").await.unwrap();
+
+        capability::negotiation::initiate(&mut transport, RpcCapability::new(1, true))
+            .await
+            .expect("client negotiation failed");
+
+        let (r_key, w_key) = negotiation::initiate_key_exchange(&mut transport)
+            .await
+            .expect("client encryption setup failed");
+
+        let (r, w) = transport.into_split();
+        let mut rpc_rx = EncryptedRpcReceiver::new(r, r_key);
+        let mut rpc_tx = EncryptedRpcSender::new(w, w_key);
+
+        let call_msg = Message::call_with(1, ()).unwrap();
+        rpc_tx.send(&call_msg).await.unwrap();
+
+        let reply_msg = rpc_rx.receive().await.unwrap();
+        match reply_msg.kind {
+            MessageType::Reply(reply) => {
+                let response: u32 = crate::message::Message::decode_as(&reply.data).unwrap();
+                assert!(response == 1);
+            }
+            _ => panic!("Expected reply"),
+        }
+
+        server.shutdown();
+    }
+
+    #[tokio::test]
     async fn test_unix_rpc_server() {
         let path = "unix_server_test.sock";
 

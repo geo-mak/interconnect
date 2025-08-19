@@ -342,7 +342,7 @@ mod test {
                 .await
                 .expect("Failed to send confirmation");
 
-            let (r_key, _w_key) = if proposed.encryption {
+            let (mut r_key, _w_key) = if proposed.encryption {
                 negotiation::accept_key_exchange(&mut transport)
                     .await
                     .expect("server encryption failed")
@@ -350,18 +350,19 @@ mod test {
                 panic!("expected encryption");
             };
 
-            // Read and decrypt message.
+            // First message.
             let len = transport.read_u16().await.unwrap() as usize;
             let mut buffer = vec![0u8; len];
             transport.read_exact(&mut buffer).await.unwrap();
-            let mut r_key = r_key;
-            r_key.decrypt(&mut buffer, b"").unwrap();
 
+            r_key.decrypt(&mut buffer, b"").unwrap();
             assert_eq!(&buffer, b"first message!");
 
+            // Second message.
             let len = transport.read_u16().await.unwrap() as usize;
             let mut buffer = vec![0u8; len];
             transport.read_exact(&mut buffer).await.unwrap();
+
             r_key.decrypt(&mut buffer, b"").unwrap();
             assert_eq!(&buffer, b"second message!");
         });
@@ -379,21 +380,22 @@ mod test {
             .await
             .expect("client negotiation failed");
 
-        let (_r_key, w_key) = negotiation::initiate_key_exchange(&mut transport)
+        let (_r_key, mut w_key) = negotiation::initiate_key_exchange(&mut transport)
             .await
             .expect("client encryption failed");
 
-        // Encrypt and write message.
+        // First message.
         let mut buffer = b"first message!".to_vec();
-        let mut w_key = w_key;
         w_key.encrypt(&mut buffer, b"").unwrap();
 
         let len = buffer.len() as u16;
         transport.write_u16(len).await.unwrap();
         transport.write_all(&buffer).await.unwrap();
 
+        // Second message.
         let mut buffer = b"second message!".to_vec();
         w_key.encrypt(&mut buffer, b"").unwrap();
+
         let len = buffer.len() as u16;
         transport.write_u16(len).await.unwrap();
         transport.write_all(&buffer).await.unwrap();

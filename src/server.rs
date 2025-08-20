@@ -60,7 +60,7 @@ impl RpcServer {
 
         if proposed.version != 1 {
             let _ = negotiation::reject(&mut transport).await;
-            log::error!("Capability version mismatch");
+            log::error!("Stream version mismatch");
             return;
         };
 

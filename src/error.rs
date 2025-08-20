@@ -1,4 +1,3 @@
-use std::borrow::Cow;
 use std::fmt;
 use std::io;
 
@@ -13,118 +12,83 @@ pub type RpcResult<T> = Result<T, RpcError>;
 #[non_exhaustive]
 #[repr(u8)]
 pub enum ErrKind {
-    // ================== Protocol errors ====================
-    /// Violation of the protocol-specific invariants.
-    Protocol,
+    /// Service-defined error.
+    Service,
 
+    /// Unmapped I/O error.
     IO,
 
     Disconnected,
 
+    InvalidNegotiation,
+
     CapabilityMismatch,
 
-    InvalidConfirmation,
+    KeyDerivation,
 
-    KeyDerivationFailed,
+    InvalidKey,
 
-    IVDerivationFailed,
+    Encryption,
 
-    EncryptionFailed,
-
-    MaxLimit,
-
-    DecryptionFailed,
-
-    InvalidAeadKey,
-
-    Timeout,
+    Decryption,
 
     Encoding,
 
     Decoding,
 
-    /// Unexpected message has been received/sent.
-    UnexpectedMsg,
+    MaxLimit,
 
-    /// Message size exceeds the allowed size by the protocol.
+    Timeout,
+
     LargeMessage,
+
+    UnexpectedMsg,
 
     DroppedMessage,
 
-    // ===================== Common ==========================
     Unidentified,
 
-    // ================== Service errors =====================
-    /// Errors originated from the service implementation.
-    Service,
-
-    /// Method not implemented/not found.
     Unimplemented,
 }
 
-impl From<i32> for ErrCtx {
-    /// Returns `Code` context variant.
-    #[inline]
-    fn from(value: i32) -> Self {
-        Self::Code(value)
-    }
-}
-
-impl From<&'static str> for ErrCtx {
-    /// Returns `Msg` context variant.
-    #[inline]
-    fn from(value: &'static str) -> Self {
-        Self::Message(Cow::Borrowed(value))
-    }
-}
-
-impl From<String> for ErrCtx {
-    /// Returns `Msg` context variant.
-    #[inline]
-    fn from(value: String) -> Self {
-        Self::Message(Cow::Owned(value))
-    }
-}
-
-/// RPC error context.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[non_exhaustive]
-pub enum ErrCtx {
-    None,
-    Code(i32),
-    Message(Cow<'static, str>),
-}
-
-impl fmt::Display for ErrCtx {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            ErrCtx::None => write!(f, ""),
-            ErrCtx::Code(code) => write!(f, "code={code}"),
-            ErrCtx::Message(s) => write!(f, "{s}"),
-        }
-    }
-}
-
 /// Error type of RPC operations.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+///
+/// This type is designed to be very lightweight with the following scheme:
+///
+/// - Error: A representative error that can be direct or indirect/categorical.
+/// - Reference: An extra context to the error as reference. `0` as value means `N/A` or `None`.
+///
+/// This style is limiting but allows efficient matching of errors, at the same time it keeps
+/// the error type simple and small to be used internally and over the wire.
+///
+/// For example, for reporting service-specific error, the kind can be set to `Service`
+/// as a general marker, and the error can be provided as reference to member of
+/// some set of service-specific errors.
+///
+/// For text-formatted error messages, helper functions can be used to provide formatted string
+/// representation, in similar fashion to POSIX error-handling.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
 pub struct RpcError {
     pub kind: ErrKind,
-    pub ctx: ErrCtx,
+    // errno is i32.
+    pub refer: i32,
 }
 
 impl RpcError {
     #[inline(always)]
+    pub const fn new(kind: ErrKind, refer: i32) -> Self {
+        Self { kind, refer }
+    }
+
+    #[inline(always)]
     pub const fn error(kind: ErrKind) -> Self {
-        Self {
-            kind,
-            ctx: ErrCtx::None,
-        }
+        Self::new(kind, 0)
     }
 }
 
 impl fmt::Display for RpcError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Error: {:?}, Context: {}", self.kind, self.ctx)
+        write!(f, "Error: {:?}, Reference: {}", self.kind, self.refer)
     }
 }
 
@@ -134,32 +98,32 @@ impl From<io::Error> for RpcError {
         if err.kind() == std::io::ErrorKind::UnexpectedEof {
             RpcError {
                 kind: ErrKind::Disconnected,
-                ctx: ErrCtx::None,
+                refer: 0,
             }
         } else {
             RpcError {
                 kind: ErrKind::IO,
-                ctx: ErrCtx::Message(Cow::Owned(err.to_string())),
+                refer: err.raw_os_error().unwrap_or(0),
             }
         }
     }
 }
 
 impl From<bincode::error::EncodeError> for RpcError {
-    fn from(err: bincode::error::EncodeError) -> Self {
+    fn from(_: bincode::error::EncodeError) -> Self {
         RpcError {
             kind: ErrKind::Encoding,
-            ctx: ErrCtx::Message(Cow::Owned(err.to_string())),
+            refer: 0,
         }
     }
 }
 
 impl From<bincode::error::DecodeError> for RpcError {
     #[inline]
-    fn from(err: bincode::error::DecodeError) -> Self {
+    fn from(_: bincode::error::DecodeError) -> Self {
         RpcError {
             kind: ErrKind::Decoding,
-            ctx: ErrCtx::Message(Cow::Owned(err.to_string())),
+            refer: 0,
         }
     }
 }
@@ -169,7 +133,7 @@ impl From<Elapsed> for RpcError {
     fn from(_: Elapsed) -> Self {
         RpcError {
             kind: ErrKind::Timeout,
-            ctx: ErrCtx::None,
+            refer: 0,
         }
     }
 }

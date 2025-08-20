@@ -138,7 +138,7 @@ pub struct EncryptionState {
 impl EncryptionState {
     pub fn new(key: &[u8], nonce_base: [u8; 4]) -> RpcResult<Self> {
         let cipher =
-            Aes128Gcm::new_from_slice(key).map_err(|_| RpcError::error(ErrKind::InvalidAeadKey))?;
+            Aes128Gcm::new_from_slice(key).map_err(|_| RpcError::error(ErrKind::InvalidKey))?;
         Ok(Self {
             cipher,
             sequence: 0,
@@ -165,7 +165,7 @@ impl EncryptionState {
         let nonce = Nonce::<Aes128Gcm>::from_slice(&next);
         self.cipher
             .encrypt_in_place(nonce, associated_data, data)
-            .map_err(|_| RpcError::error(ErrKind::EncryptionFailed))
+            .map_err(|_| RpcError::error(ErrKind::Encryption))
     }
 
     /// Decrypts the message in-place to its original format.
@@ -175,7 +175,7 @@ impl EncryptionState {
         let nonce = Nonce::<Aes128Gcm>::from_slice(&next);
         self.cipher
             .decrypt_in_place(nonce, associated_data, data)
-            .map_err(|_| RpcError::error(ErrKind::DecryptionFailed))
+            .map_err(|_| RpcError::error(ErrKind::Decryption))
     }
 }
 
@@ -251,7 +251,7 @@ pub mod negotiation {
         match confirm[0] {
             0x01 => Ok(()),
             0x00 => Err(RpcError::error(ErrKind::CapabilityMismatch)),
-            _ => Err(RpcError::error(ErrKind::InvalidConfirmation)),
+            _ => Err(RpcError::error(ErrKind::InvalidNegotiation)),
         }
     }
 
@@ -307,14 +307,14 @@ pub mod negotiation {
         let mut w_key = [0u8; 16];
         let mut nonce_base = [0u8; 4];
 
+        let map_err = |_| RpcError::error(ErrKind::KeyDerivation);
+
         hkdf.expand(b"rpc-client-read", &mut r_key)
-            .map_err(|_| RpcError::error(ErrKind::KeyDerivationFailed))?;
-
+            .map_err(map_err)?;
         hkdf.expand(b"rpc-client-write", &mut w_key)
-            .map_err(|_| RpcError::error(ErrKind::KeyDerivationFailed))?;
-
+            .map_err(map_err)?;
         hkdf.expand(b"rpc-nonce-base", &mut nonce_base)
-            .map_err(|_| RpcError::error(ErrKind::IVDerivationFailed))?;
+            .map_err(map_err)?;
 
         Ok((r_key, w_key, nonce_base))
     }

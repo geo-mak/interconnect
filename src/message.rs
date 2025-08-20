@@ -52,6 +52,9 @@ pub enum MessageType {
     /// A response message (can be returned by either side).
     Reply(Reply),
 
+    /// Error message is a lightweight structure for operational errors.
+    /// Rich and detailed errors are considered part of the service design,
+    /// and subject to the documented reply type of a particular method.
     Error(RpcError),
 
     /// A notification message (no response expected).

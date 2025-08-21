@@ -12,7 +12,7 @@ use uuid::Uuid;
 use serde::{Deserialize, Serialize};
 
 use crate::error::{ErrKind, RpcError, RpcResult};
-use crate::message::{Message, MessageType};
+use crate::message::{Message, MessageType, Reply};
 
 use crate::capability::{RpcCapability, negotiation};
 use crate::service::RpcService;
@@ -22,9 +22,15 @@ use crate::stream::{
 };
 use crate::transport::TransportLayer;
 
+enum Response {
+    Pong,
+    Reply(Reply),
+}
+
 struct ClientState<S> {
     sender: Mutex<S>,
-    pending: Mutex<HashMap<Uuid, Sender<RpcResult<MessageType>>>>,
+    // RpcResult<Response> is 24-bytes, the same size of `Reply` alone.
+    pending: Mutex<HashMap<Uuid, Sender<RpcResult<Response>>>>,
 }
 
 impl<S> ClientState<S> {
@@ -98,7 +104,7 @@ where
     where
         R: RpcAsyncReceiver + Send + 'static,
         W: RpcAsyncSender + Send + 'static,
-        H: RpcService + Clone + Send + Sync + 'static,
+        H: RpcService + 'static,
     {
         let state = Arc::new(ClientState::new(tx));
         let cloned_state = Arc::clone(&state);
@@ -110,12 +116,12 @@ where
                         if let Err(e) =
                             Self::process_incoming(message, &call_handler, &cloned_state).await
                         {
-                            log::error!("Receive task error: {e}");
+                            log::error!("Incoming message error: {e}");
                             break;
                         }
                     }
                     Err(e) => {
-                        log::info!("Receive error: {e}");
+                        log::warn!("Receiving error: {e}");
                         break;
                     }
                 }
@@ -134,33 +140,39 @@ where
         W: RpcAsyncSender + 'static,
     {
         match message.kind {
-            MessageType::Reply(_) | MessageType::Error(_) => {
+            MessageType::Reply(reply) => {
                 let mut pending = state.pending.lock().await;
                 if let Some(sender) = pending.remove(&message.id) {
-                    let _ = sender.send(Ok(message.kind));
+                    let _ = sender.send(Ok(Response::Reply(reply)));
+                }
+            }
+            MessageType::Error(err) => {
+                let mut pending = state.pending.lock().await;
+                if let Some(sender) = pending.remove(&message.id) {
+                    let _ = sender.send(Err(err));
+                }
+            }
+            MessageType::Pong => {
+                let mut pending = state.pending.lock().await;
+                if let Some(sender) = pending.remove(&message.id) {
+                    let _ = sender.send(Ok(Response::Pong));
                 }
             }
             MessageType::Call(call) => {
                 match service.call(&call).await {
                     Ok(reply) => {
-                        let reply_msg = Message::reply(message.id, reply);
-                        return state.sender.lock().await.send(&reply_msg).await;
+                        let message = Message::reply(message.id, reply);
+                        return state.sender.lock().await.send(&message).await;
                     }
                     Err(e) => {
-                        let error_msg = Message::error(message.id, e);
-                        return state.sender.lock().await.send(&error_msg).await;
+                        let message = Message::error(message.id, e);
+                        return state.sender.lock().await.send(&message).await;
                     }
                 };
             }
             MessageType::Ping => {
                 let pong = Message::pong(message.id);
                 return state.sender.lock().await.send(&pong).await;
-            }
-            MessageType::Pong => {
-                let mut pending = state.pending.lock().await;
-                if let Some(sender) = pending.remove(&message.id) {
-                    let _ = sender.send(Ok(message.kind));
-                }
             }
             _ => {
                 log::warn!("Received unexpected message type: {:?}", message.kind);
@@ -174,7 +186,7 @@ where
         &self,
         message: &Message,
         timeout_duration: Duration,
-    ) -> RpcResult<MessageType> {
+    ) -> RpcResult<Response> {
         let (sender, receiver) = oneshot::channel();
 
         let id = message.id;
@@ -195,34 +207,19 @@ where
         // Wait for response with timeout.
         match timeout(timeout_duration, receiver).await {
             Ok(Ok(result)) => result,
+            // Channel was closed without response.
             Ok(Err(_)) => {
-                // Channel was closed without response.
                 let mut pending = self.state.pending.lock().await;
                 pending.remove(&id);
                 Err(RpcError::error(ErrKind::DroppedMessage))
             }
+            // Timeout occurred.
             Err(_) => {
-                // Timeout occurred.
                 let mut pending = self.state.pending.lock().await;
                 pending.remove(&id);
                 Err(RpcError::error(ErrKind::Timeout))
             }
         }
-    }
-
-    /// Sends a `ping`` message.
-    pub async fn ping(&self, timeout: Duration) -> RpcResult<()> {
-        let _ = self.send_message(&Message::ping(), timeout).await?;
-        Ok(())
-    }
-
-    /// Sends a notification without response.
-    pub async fn notify<P>(&self, method: u16, params: P) -> RpcResult<()>
-    where
-        P: Serialize,
-    {
-        let message = Message::notification_with(method, params)?;
-        self.state.sender.lock().await.send(&message).await
     }
 
     /// Makes a remote procedure call.
@@ -252,13 +249,27 @@ where
         let response = self.send_message(&message, timeout).await?;
 
         match response {
-            MessageType::Reply(reply) => {
+            Response::Reply(reply) => {
                 let result: R = Message::decode_as(&reply.data)?;
                 Ok(result)
             }
-            MessageType::Error(err) => Err(err),
             _ => Err(RpcError::error(ErrKind::UnexpectedMsg)),
         }
+    }
+
+    /// Sends a notification without response.
+    pub async fn notify<P>(&self, method: u16, params: P) -> RpcResult<()>
+    where
+        P: Serialize,
+    {
+        let message = Message::notification_with(method, params)?;
+        self.state.sender.lock().await.send(&message).await
+    }
+
+    /// Sends a `ping`` message.
+    pub async fn ping(&self, timeout: Duration) -> RpcResult<()> {
+        let _ = self.send_message(&Message::ping(), timeout).await?;
+        Ok(())
     }
 
     /// Consumes the instance and aborts its background task.

@@ -213,7 +213,7 @@ where
                 pending.remove(&id);
                 Err(RpcError::error(ErrKind::Timeout))
             }
-            _ => Err(RpcError::error(ErrKind::DroppedMessage)),
+            _ => unreachable!(),
         }
     }
 

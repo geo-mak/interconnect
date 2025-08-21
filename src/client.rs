@@ -207,18 +207,13 @@ where
         // Wait for response with timeout.
         match timeout(timeout_duration, receiver).await {
             Ok(Ok(result)) => result,
-            // Channel was closed without response.
-            Ok(Err(_)) => {
-                let mut pending = self.state.pending.lock().await;
-                pending.remove(&id);
-                Err(RpcError::error(ErrKind::DroppedMessage))
-            }
             // Timeout occurred.
             Err(_) => {
                 let mut pending = self.state.pending.lock().await;
                 pending.remove(&id);
                 Err(RpcError::error(ErrKind::Timeout))
             }
+            _ => Err(RpcError::error(ErrKind::DroppedMessage)),
         }
     }
 

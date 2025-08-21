@@ -158,6 +158,7 @@ impl EncryptionState {
     /// Encrypts the data in the buffer in-place.
     /// The buffer will be resized if needed.
     pub fn encrypt(&mut self, data: &mut impl Buffer, associated_data: &[u8]) -> RpcResult<()> {
+        // TODO: Make limit configurable.
         if unlikely(self.sequence == u64::MAX) {
             return Err(RpcError::error(ErrKind::MaxLimit));
         }
@@ -309,9 +310,9 @@ pub mod negotiation {
 
         let map_err = |_| RpcError::error(ErrKind::KeyDerivation);
 
-        hkdf.expand(b"rpc-client-read", &mut r_key)
+        hkdf.expand(b"rpc-session-read", &mut r_key)
             .map_err(map_err)?;
-        hkdf.expand(b"rpc-client-write", &mut w_key)
+        hkdf.expand(b"rpc-session-write", &mut w_key)
             .map_err(map_err)?;
         hkdf.expand(b"rpc-nonce-base", &mut nonce_base)
             .map_err(map_err)?;

@@ -8,6 +8,7 @@ pub mod message;
 pub mod server;
 pub mod service;
 pub mod stream;
+pub mod sync;
 pub mod transport;
 
 pub use client::RpcClient;

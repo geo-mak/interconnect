@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
+
 use std::time::Duration;
 
 use tokio::sync::Mutex;
@@ -20,6 +21,7 @@ use crate::stream::{
     EncryptedRpcReceiver, EncryptedRpcSender, RpcAsyncReceiver, RpcAsyncSender, RpcReceiver,
     RpcSender,
 };
+use crate::sync::ReleaseBarrier;
 use crate::transport::TransportLayer;
 
 enum Response {
@@ -31,6 +33,7 @@ struct ClientState<S> {
     sender: Mutex<S>,
     // RpcResult<Response> is 24-bytes, the same size of `Reply` alone.
     pending: Mutex<HashMap<Uuid, Sender<RpcResult<Response>>>>,
+    abort_barrier: ReleaseBarrier,
 }
 
 impl<S> ClientState<S> {
@@ -39,11 +42,14 @@ impl<S> ClientState<S> {
         ClientState {
             sender: Mutex::new(sender),
             pending: Mutex::new(HashMap::new()),
+            abort_barrier: ReleaseBarrier::new(),
         }
     }
 }
 
 /// RPC Client implementation.
+/// This implementation utilized single shared transport instance,
+/// which makes it very lightweight at the cost of some synchronization overhead.
 pub struct RpcClient<S> {
     state: Arc<ClientState<S>>,
     task: tokio::task::JoinHandle<()>,
@@ -107,14 +113,14 @@ where
         H: RpcService + 'static,
     {
         let state = Arc::new(ClientState::new(tx));
-        let cloned_state = Arc::clone(&state);
+        let c_state = Arc::clone(&state);
 
         let task = tokio::spawn(async move {
             loop {
                 match rx.receive().await {
                     Ok(message) => {
                         if let Err(e) =
-                            Self::process_incoming(message, &call_handler, &cloned_state).await
+                            Self::process_incoming(message, &call_handler, &c_state).await
                         {
                             log::error!("Incoming message error: {e}");
                             break;
@@ -159,16 +165,19 @@ where
                 }
             }
             MessageType::Call(call) => {
-                match service.call(&call).await {
-                    Ok(reply) => {
-                        let message = Message::reply(message.id, reply);
-                        return state.sender.lock().await.send(&message).await;
+                // Protected section, no interruption if acquiring a lock is successful.
+                if let Some(_lock) = state.abort_barrier.lock() {
+                    match service.call(&call).await {
+                        Ok(reply) => {
+                            let message = Message::reply(message.id, reply);
+                            return state.sender.lock().await.send(&message).await;
+                        }
+                        Err(e) => {
+                            let message = Message::error(message.id, e);
+                            return state.sender.lock().await.send(&message).await;
+                        }
                     }
-                    Err(e) => {
-                        let message = Message::error(message.id, e);
-                        return state.sender.lock().await.send(&message).await;
-                    }
-                };
+                }
             }
             MessageType::Ping => {
                 let pong = Message::pong(message.id);
@@ -267,9 +276,17 @@ where
         Ok(())
     }
 
-    /// Consumes the instance and aborts its background task.
-    /// Pending requests will be dropped.
-    pub async fn shutdown(self) -> RpcResult<()> {
+    /// Closes its sender and shutdowns the receiving task in graceful manner.
+    ///
+    /// This call doesn't have immediate effect and may take longer time,
+    /// because it allows critical regions to fully complete their execution.
+    /// If awaiting it to complete is not desired, it can be spawned.
+    ///
+    /// Buffered data will be sent followed by FIN message.
+    ///
+    /// Any attempts to send messages after this call will return `Broken pipe` I/O error.
+    pub async fn shutdown(&mut self) -> RpcResult<()> {
+        self.state.abort_barrier.release().await;
         self.task.abort();
         self.state.sender.lock().await.close().await
     }
@@ -305,7 +322,6 @@ mod tests {
             let mut rpc_reader = RpcReceiver::new(r);
             let mut rpc_writer = RpcSender::new(w);
 
-            // Read the message (dynamically typed)
             loop {
                 match rpc_reader.receive().await {
                     Ok(message) => {
@@ -335,7 +351,7 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(10)).await;
 
         let transport = TcpStream::connect(addr).await.unwrap();
-        let client = RpcClient::<RpcSender<tcp::OwnedWriteHalf>>::connect(transport, ())
+        let mut client = RpcClient::<RpcSender<tcp::OwnedWriteHalf>>::connect(transport, ())
             .await
             .unwrap();
 
@@ -400,7 +416,7 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(10)).await;
 
         let transport = TcpStream::connect(addr).await.unwrap();
-        let client =
+        let mut client =
             RpcClient::<EncryptedRpcSender<tcp::OwnedWriteHalf>>::connect_encrypted(transport, ())
                 .await
                 .unwrap();
@@ -459,7 +475,7 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(10)).await;
 
         let transport = TcpStream::connect(addr).await.unwrap();
-        let client = RpcClient::<RpcSender<tcp::OwnedWriteHalf>>::connect(transport, ())
+        let mut client = RpcClient::<RpcSender<tcp::OwnedWriteHalf>>::connect(transport, ())
             .await
             .unwrap();
 
@@ -521,7 +537,7 @@ mod tests {
         });
 
         let transport = TcpStream::connect(addr).await.unwrap();
-        let client = RpcClient::<RpcSender<tcp::OwnedWriteHalf>>::connect(transport, ())
+        let mut client = RpcClient::<RpcSender<tcp::OwnedWriteHalf>>::connect(transport, ())
             .await
             .unwrap();
 
@@ -601,7 +617,7 @@ mod tests {
         };
 
         let transport = TcpStream::connect(addr).await.unwrap();
-        let client = RpcClient::<RpcSender<tcp::OwnedWriteHalf>>::connect(transport, handler)
+        let mut client = RpcClient::<RpcSender<tcp::OwnedWriteHalf>>::connect(transport, handler)
             .await
             .unwrap();
 

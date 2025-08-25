@@ -40,15 +40,15 @@ impl<S> ClientState<S> {
     #[inline(always)]
     fn new(sender: S) -> ClientState<S> {
         ClientState {
-            sender: Mutex::new(sender),
-            pending: Mutex::new(HashMap::new()),
+            sender: Mutex::const_new(sender),
+            pending: Mutex::const_new(HashMap::new()),
             abort_barrier: ReleaseBarrier::new(),
         }
     }
 }
 
 /// RPC Client implementation.
-/// This implementation utilized single shared transport instance,
+/// This implementation utilizes single shared transport instance,
 /// which makes it very lightweight at the cost of some synchronization overhead.
 pub struct RpcClient<S> {
     state: Arc<ClientState<S>>,

@@ -31,18 +31,17 @@ enum Response {
 
 struct ClientState<S> {
     sender: Mutex<S>,
-    // RpcResult<Response> is 24-bytes, the same size of `Reply` alone.
-    pending: Mutex<HashMap<Uuid, Sender<RpcResult<Response>>>>,
     abort_barrier: ReleaseBarrier,
+    pending: Mutex<HashMap<Uuid, Sender<RpcResult<Response>>>>,
 }
 
 impl<S> ClientState<S> {
     #[inline(always)]
-    fn new(sender: S) -> ClientState<S> {
+    fn new(sender: S, cap: usize) -> ClientState<S> {
         ClientState {
-            sender: Mutex::const_new(sender),
-            pending: Mutex::const_new(HashMap::new()),
+            sender: Mutex::new(sender),
             abort_barrier: ReleaseBarrier::new(),
+            pending: Mutex::new(HashMap::with_capacity(cap)),
         }
     }
 }
@@ -63,6 +62,7 @@ where
     pub async fn connect<T, H>(
         mut transport: T,
         call_handler: H,
+        capacity: usize,
     ) -> RpcResult<RpcClient<RpcSender<T::OwnedWriteHalf>>>
     where
         T: TransportLayer + 'static,
@@ -71,13 +71,20 @@ where
         negotiation::initiate(&mut transport, RpcCapability::new(1, false)).await?;
 
         let (r, w) = transport.into_split();
-        Self::connect_with_parts(RpcReceiver::new(r), RpcSender::new(w), call_handler).await
+        Self::connect_with_parts(
+            RpcReceiver::new(r),
+            RpcSender::new(w),
+            call_handler,
+            capacity,
+        )
+        .await
     }
 
     #[inline]
     pub async fn connect_encrypted<T, H>(
         mut transport: T,
         call_handler: H,
+        capacity: usize,
     ) -> RpcResult<RpcClient<EncryptedRpcSender<T::OwnedWriteHalf>>>
     where
         T: TransportLayer + 'static,
@@ -93,6 +100,7 @@ where
             EncryptedRpcReceiver::new(r, r_key),
             EncryptedRpcSender::new(w, w_key),
             call_handler,
+            capacity,
         )
         .await
     }
@@ -106,13 +114,14 @@ where
         mut rx: R,
         tx: W,
         call_handler: H,
+        cap: usize,
     ) -> RpcResult<RpcClient<W>>
     where
         R: RpcAsyncReceiver + Send + 'static,
         W: RpcAsyncSender + Send + 'static,
         H: RpcService + 'static,
     {
-        let state = Arc::new(ClientState::new(tx));
+        let state = Arc::new(ClientState::new(tx, cap));
         let c_state = Arc::clone(&state);
 
         let task = tokio::spawn(async move {
@@ -280,7 +289,6 @@ where
     ///
     /// This call doesn't have immediate effect and may take longer time,
     /// because it allows critical regions to fully complete their execution.
-    /// If awaiting it to complete is not desired, it can be spawned.
     ///
     /// Buffered data will be sent followed by FIN message.
     ///
@@ -351,7 +359,7 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(10)).await;
 
         let transport = TcpStream::connect(addr).await.unwrap();
-        let mut client = RpcClient::<RpcSender<tcp::OwnedWriteHalf>>::connect(transport, ())
+        let mut client = RpcClient::<RpcSender<tcp::OwnedWriteHalf>>::connect(transport, (), 1)
             .await
             .unwrap();
 
@@ -416,10 +424,13 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(10)).await;
 
         let transport = TcpStream::connect(addr).await.unwrap();
-        let mut client =
-            RpcClient::<EncryptedRpcSender<tcp::OwnedWriteHalf>>::connect_encrypted(transport, ())
-                .await
-                .unwrap();
+        let mut client = RpcClient::<EncryptedRpcSender<tcp::OwnedWriteHalf>>::connect_encrypted(
+            transport,
+            (),
+            1,
+        )
+        .await
+        .unwrap();
 
         let reply = client.call::<&str, String>(1, "call").await.unwrap();
         assert_eq!(reply, "reply".to_string());
@@ -475,7 +486,7 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(10)).await;
 
         let transport = TcpStream::connect(addr).await.unwrap();
-        let mut client = RpcClient::<RpcSender<tcp::OwnedWriteHalf>>::connect(transport, ())
+        let mut client = RpcClient::<RpcSender<tcp::OwnedWriteHalf>>::connect(transport, (), 1)
             .await
             .unwrap();
 
@@ -537,7 +548,7 @@ mod tests {
         });
 
         let transport = TcpStream::connect(addr).await.unwrap();
-        let mut client = RpcClient::<RpcSender<tcp::OwnedWriteHalf>>::connect(transport, ())
+        let mut client = RpcClient::<RpcSender<tcp::OwnedWriteHalf>>::connect(transport, (), 0)
             .await
             .unwrap();
 
@@ -617,9 +628,10 @@ mod tests {
         };
 
         let transport = TcpStream::connect(addr).await.unwrap();
-        let mut client = RpcClient::<RpcSender<tcp::OwnedWriteHalf>>::connect(transport, handler)
-            .await
-            .unwrap();
+        let mut client =
+            RpcClient::<RpcSender<tcp::OwnedWriteHalf>>::connect(transport, handler, 0)
+                .await
+                .unwrap();
 
         tokio::time::sleep(Duration::from_millis(10)).await;
 

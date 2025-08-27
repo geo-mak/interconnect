@@ -1,9 +1,128 @@
-use std::{
-    sync::atomic::{AtomicBool, AtomicUsize, Ordering},
-    task::Poll,
+use std::cell::UnsafeCell;
+use std::fmt;
+use std::pin::Pin;
+use std::sync::atomic::{
+    AtomicBool, AtomicUsize, Ordering,
+    Ordering::{AcqRel, Acquire, Release},
 };
+use std::task::{Context, Poll, Waker};
 
-use futures::task::AtomicWaker;
+const SET: usize = 0b01;
+const WAIT: usize = 0b00;
+const WAKE: usize = 0b10;
+
+/// A concurrent version of task's waker, protected via atomic operations.
+///
+/// This implementation tracks changes with 3-state:
+/// - Set
+/// - Wait
+/// - Wake
+///
+/// Inter-thread transitions are tracked with proper memory ordering,
+/// ensuring observability and proper responses within internal methods.
+///
+/// Consider reading methods' documentation carefully,
+/// as each provides more information about its safety requirements and tradeoffs.
+///
+/// The current implementation doesn't track panic state.
+pub(crate) struct AtomicWaker {
+    state: AtomicUsize,
+    waker: UnsafeCell<Option<Waker>>,
+}
+
+unsafe impl Send for AtomicWaker {}
+unsafe impl Sync for AtomicWaker {}
+
+impl AtomicWaker {
+    #[inline]
+    pub(crate) const fn new() -> Self {
+        Self {
+            state: AtomicUsize::new(WAIT),
+            waker: UnsafeCell::new(None),
+        }
+    }
+
+    /// Sets the waker to be notified on calls to `wake`.
+    ///
+    /// If a waker has been set already and the new one is not identical,
+    /// the waker will be overwritten by the new waker.
+    ///
+    /// If a waker is already set and currently being woken,
+    /// the provided waker will be woken as well without storing it.
+    ///
+    /// In case of race condition to set waker at the same time, the first thread to change the state
+    /// will set its waker, other threads will not set.
+    pub(crate) fn set(&self, waker: &Waker) {
+        let observed = match self.state.compare_exchange(WAIT, SET, Acquire, Acquire) {
+            Ok(prev) => prev,
+            Err(current) => current,
+        };
+
+        match observed {
+            WAIT => unsafe {
+                match &*self.waker.get() {
+                    // Current waker == stored waker => do nothing.
+                    Some(existing) if existing.will_wake(waker) => (),
+                    // Set or overwrite.
+                    _ => *self.waker.get() = Some(waker.clone()),
+                }
+
+                // State has been changed concurrently.
+                if let Err(current) = self.state.compare_exchange(SET, WAIT, AcqRel, Acquire) {
+                    debug_assert_eq!(current, SET | WAKE);
+                    let waker = (*self.waker.get()).take().unwrap();
+                    self.state.swap(WAIT, AcqRel);
+                    waker.wake();
+                }
+            },
+            WAKE => {
+                // Just wake this one also please.
+                waker.wake_by_ref();
+            }
+            other => {
+                // Do nothing.
+                debug_assert!(other == SET || other == SET | WAKE);
+            }
+        }
+    }
+
+    /// Returns the last set waker if any.
+    pub(crate) fn take(&self) -> Option<Waker> {
+        match self.state.fetch_or(WAKE, AcqRel) {
+            WAIT => {
+                let waker = unsafe { (*self.waker.get()).take() };
+                self.state.fetch_and(!WAKE, Release);
+                waker
+            }
+            other => {
+                debug_assert!(other == SET || other == SET | WAKE || other == WAKE);
+                None
+            }
+        }
+    }
+
+    /// Wake the last stored waker if any.
+    ///
+    /// Safe to call concurrently with `set()`.
+    #[inline]
+    pub(crate) fn wake(&self) {
+        if let Some(waker) = self.take() {
+            waker.wake();
+        }
+    }
+}
+
+impl Default for AtomicWaker {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl fmt::Debug for AtomicWaker {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "AtomicWaker")
+    }
+}
 
 /// A reference-counted "release" barrier.
 ///
@@ -27,17 +146,17 @@ use futures::task::AtomicWaker;
 /// All attempts to create locks after `release` has been started will fail,
 /// and the scheduled `release` future will resolve automatically when the count has reached `0`.
 pub struct ReleaseBarrier {
-    active: AtomicUsize,
     release: AtomicBool,
-    waker: AtomicWaker,
+    active: AtomicUsize,
+    waiter: AtomicWaker,
 }
 
 impl ReleaseBarrier {
     pub const fn new() -> Self {
         Self {
-            active: AtomicUsize::new(0),
             release: AtomicBool::new(false),
-            waker: AtomicWaker::new(),
+            active: AtomicUsize::new(0),
+            waiter: AtomicWaker::new(),
         }
     }
 
@@ -66,30 +185,51 @@ impl ReleaseBarrier {
         Some(ReleaseLock { barrier: self })
     }
 
+    #[inline]
     fn discard(&self) {
         if self.active.fetch_sub(1, Ordering::Release) == 1 && self.release.load(Ordering::Acquire)
         {
-            self.waker.wake();
+            self.waiter.wake();
         }
     }
 
     /// Triggers release and registers the calling context.
     ///
-    /// Internal waker is overwritten by new calls,
-    /// so only the last caller will be registered.
-    ///
     /// Creating new locks after this call will fail,
     /// and protected scopes will be awaited until they finish.
-    pub async fn release(&self) {
+    ///
+    /// **Note**:
+    /// This method is safe for concurrent access in terms of memory safety,
+    /// but it is not what it is designed for.
+    ///
+    /// If releasing is not yet feasible, a new call will reset the internal waker to the waker
+    /// of the last **observed** caller, and the previous returned futures will not resolve.
+    ///
+    /// In case of race condition, only one thread will be successful in registering its waker,
+    /// calls from other threads will not be registered at all.
+    ///
+    /// The `XOR` mutability rule is not enforced to give more flexibility, 
+    /// and avoid synchronization overhead of internal APIs, but exposing it
+    /// in public APIs requires enforcing `XOR` mutability rule.
+    pub fn release(&self) -> ReleaseFuture<'_> {
         self.release.store(true, Ordering::Release);
-        futures::future::poll_fn(|cx| {
-            if self.active.load(Ordering::Acquire) == 0 {
-                return Poll::Ready(());
-            }
-            self.waker.register(cx.waker());
-            Poll::Pending
-        })
-        .await;
+        ReleaseFuture { barrier: self }
+    }
+}
+
+pub struct ReleaseFuture<'a> {
+    barrier: &'a ReleaseBarrier,
+}
+
+impl<'a> Future for ReleaseFuture<'a> {
+    type Output = ();
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        if self.barrier.active.load(Ordering::Acquire) == 0 {
+            return Poll::Ready(());
+        }
+        self.barrier.waiter.set(cx.waker());
+        Poll::Pending
     }
 }
 

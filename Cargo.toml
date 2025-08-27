@@ -13,7 +13,6 @@ env_logger = "0.11.8"
 
 [dependencies]
 tokio = { version = "1.47.1", features = ["rt-multi-thread", "macros", "net", "io-util", "time", "sync"]}
-futures ={ version = "0.3.31"}
 
 bincode =  { version = "2.0.1", features = ["serde", "derive"] }
 serde = { version = "1.0.209", features = ["derive"] }

@@ -53,6 +53,7 @@ impl AtomicWaker {
     /// In case of race condition to set waker at the same time, the first thread to change the state
     /// will set its waker, other threads will not set.
     pub(crate) fn set(&self, waker: &Waker) {
+        // Whatever.
         let observed = match self.state.compare_exchange(WAIT, SET, Acquire, Acquire) {
             Ok(prev) => prev,
             Err(current) => current,
@@ -60,16 +61,16 @@ impl AtomicWaker {
 
         match observed {
             WAIT => unsafe {
-                match &*self.waker.get() {
-                    // Current waker == stored waker => do nothing.
-                    Some(existing) if existing.will_wake(waker) => (),
-                    // Set or overwrite.
-                    _ => *self.waker.get() = Some(waker.clone()),
-                }
+                // Set.
+                *self.waker.get() = Some(waker.clone());
 
-                // State has been changed concurrently.
+                // If the state transitioned to include the `WAKE` flag,
+                // this means that `self.wake()` has been called concurrently,
                 if let Err(current) = self.state.compare_exchange(SET, WAIT, AcqRel, Acquire) {
+                    // Only reachable if `current` == `SET | WAKE`.
                     debug_assert_eq!(current, SET | WAKE);
+
+                    // Remove this thing and call wake on it as requested.
                     let waker = (*self.waker.get()).take().unwrap();
                     self.state.swap(WAIT, AcqRel);
                     waker.wake();
@@ -86,28 +87,24 @@ impl AtomicWaker {
         }
     }
 
-    /// Returns the last set waker if any.
-    pub(crate) fn take(&self) -> Option<Waker> {
-        match self.state.fetch_or(WAKE, AcqRel) {
-            WAIT => {
-                let waker = unsafe { (*self.waker.get()).take() };
-                self.state.fetch_and(!WAKE, Release);
-                waker
-            }
-            other => {
-                debug_assert!(other == SET || other == SET | WAKE || other == WAKE);
-                None
-            }
-        }
-    }
-
-    /// Wake the last stored waker if any.
+    /// Removes and wakes the stored waker if any.
     ///
     /// Safe to call concurrently with `set()`.
     #[inline]
     pub(crate) fn wake(&self) {
-        if let Some(waker) = self.take() {
-            waker.wake();
+        match self.state.fetch_or(WAKE, AcqRel) {
+            WAIT => {
+                let data = unsafe { (*self.waker.get()).take() };
+                self.state.fetch_and(!WAKE, Release);
+                if let Some(waker) = data {
+                    waker.wake();
+                }
+            }
+            other => {
+                // A concurrent thread is doing `SET` currently.
+                // `WAKE` flag has been set, `set()` method will deal with it.
+                debug_assert!(other == SET || other == SET | WAKE || other == WAKE);
+            }
         }
     }
 }
@@ -177,7 +174,9 @@ impl ReleaseBarrier {
 
         // If `R` operation has been started concurrently we don't create lock.
         if self.release.load(Ordering::Acquire) {
-            self.discard();
+            if self.active.fetch_sub(1, Ordering::Release) == 1 {
+                self.waiter.wake();
+            }
             return None;
         }
 
@@ -187,6 +186,7 @@ impl ReleaseBarrier {
 
     #[inline]
     fn discard(&self) {
+        // Rechecking `self.release` is a much faster path than calling wake blindly.
         if self.active.fetch_sub(1, Ordering::Release) == 1 && self.release.load(Ordering::Acquire)
         {
             self.waiter.wake();
@@ -208,7 +208,7 @@ impl ReleaseBarrier {
     /// In case of race condition, only one thread will be successful in registering its waker,
     /// calls from other threads will not be registered at all.
     ///
-    /// The `XOR` mutability rule is not enforced to give more flexibility, 
+    /// The `XOR` mutability rule is not enforced to give more flexibility,
     /// and avoid synchronization overhead of internal APIs, but exposing it
     /// in public APIs requires enforcing `XOR` mutability rule.
     pub fn release(&self) -> ReleaseFuture<'_> {

@@ -21,7 +21,7 @@ use crate::stream::{
     EncryptedRpcReceiver, EncryptedRpcSender, RpcAsyncReceiver, RpcAsyncSender, RpcReceiver,
     RpcSender,
 };
-use crate::sync::ReleaseBarrier;
+use crate::sync::DynamicLatch;
 use crate::transport::TransportLayer;
 
 enum Response {
@@ -31,7 +31,7 @@ enum Response {
 
 struct ClientState<S> {
     sender: Mutex<S>,
-    abort_barrier: ReleaseBarrier,
+    abort_latch: DynamicLatch,
     pending: Mutex<HashMap<Uuid, Sender<RpcResult<Response>>>>,
 }
 
@@ -40,7 +40,7 @@ impl<S> ClientState<S> {
     fn new(sender: S, cap: usize) -> ClientState<S> {
         ClientState {
             sender: Mutex::new(sender),
-            abort_barrier: ReleaseBarrier::new(),
+            abort_latch: DynamicLatch::new(),
             pending: Mutex::new(HashMap::with_capacity(cap)),
         }
     }
@@ -175,7 +175,7 @@ where
             }
             MessageType::Call(call) => {
                 // Protected section, no interruption if acquiring a lock is successful.
-                if let Some(_lock) = state.abort_barrier.lock() {
+                if let Some(_lock) = state.abort_latch.acquire() {
                     match service.call(&call).await {
                         Ok(reply) => {
                             let message = Message::reply(message.id, reply);
@@ -294,7 +294,7 @@ where
     ///
     /// Any attempts to send messages after this call will return `Broken pipe` I/O error.
     pub async fn shutdown(&mut self) -> RpcResult<()> {
-        self.state.abort_barrier.release().await;
+        self.state.abort_latch.open().await;
         self.task.abort();
         self.state.sender.lock().await.close().await
     }

@@ -20,6 +20,8 @@ pub enum ErrKind {
 
     Disconnected,
 
+    Canceled,
+
     InvalidNegotiation,
 
     CapabilityMismatch,

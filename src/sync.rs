@@ -1,8 +1,11 @@
 use std::cell::UnsafeCell;
 use std::fmt;
+use std::marker::PhantomPinned;
 use std::pin::Pin;
+use std::ptr::NonNull;
+use std::sync::Arc;
 use std::sync::atomic::{
-    AtomicBool, AtomicUsize, Ordering,
+    AtomicUsize, Ordering,
     Ordering::{AcqRel, Acquire, Release},
 };
 use std::task::{Context, Poll, Waker};
@@ -126,13 +129,13 @@ impl fmt::Debug for AtomicWaker {
 /// This synchronization primitive works according to the concept of `passive consensus`,
 /// and has four operations:
 ///
-/// - Attest (`A` operation): Checks if `R` operation has been started, signaling void protection if it `true`.
+/// - Attest (`A` operation): Checks if `O` operation has been started, signaling void protection if it `true`.
 ///
 /// - Increment (`I` operation): increments the reference count of active locks.
 ///
 /// - Decrement (`D` operation): decrements the reference count of active locks.
 ///
-/// - Open (`O` operation): Sets the open flag to `true`.
+/// - Open (`O` operation): Sets the open flag.
 ///   This operation is irreversible per instance.
 ///
 /// Each call to `acquire` performs `A` operation. On success, `I` operation is performed,
@@ -140,20 +143,21 @@ impl fmt::Debug for AtomicWaker {
 ///
 /// Once a lock is dropped, a `D` operation is performed automatically.
 ///
-/// All attempts to create locks after `open` has been started will fail,
-/// and the scheduled `open` future will resolve automatically,
+/// All attempts to create locks after `open` has been set will fail,
+/// and the scheduled `wait` future will resolve automatically,
 /// when the count of active locks has reached `0`.
 pub struct DynamicLatch {
-    open: AtomicBool,
-    active: AtomicUsize,
+    /// Bits array: [ ... lock count ... | open bit ].
+    /// Lock count: usize value.
+    /// Open bit: 1 is open, 0 is closed.
+    state: AtomicUsize,
     waiter: AtomicWaker,
 }
 
 impl DynamicLatch {
     pub const fn new() -> Self {
         Self {
-            open: AtomicBool::new(false),
-            active: AtomicUsize::new(0),
+            state: AtomicUsize::new(0),
             waiter: AtomicWaker::new(),
         }
     }
@@ -163,40 +167,47 @@ impl DynamicLatch {
     /// Returns `None` if `open` has been started, signaling void protection.
     #[inline]
     pub fn acquire(&self) -> Option<LatchLock<'_>> {
-        // Initial `A` operation.
-        if self.open.load(Ordering::Acquire) {
+        // Open is only done once, so we optimize for the likely case.
+        // This will make the failure case more expensive.
+        let current = self.state.fetch_add(2, Ordering::Acquire);
+        if (current & 1) != 0 {
+            self.release();
             return None;
         }
-
-        // All atomic operations on a single variable participate in a single total modification order.
-        // If that is held true by the implementation, then `Relaxed` ordering here is fine.
-        // So if this call succeeds, next call to open() must observe the modification.
-        self.active.fetch_add(1, Ordering::Relaxed);
-
-        // If `O` operation has been started concurrently we don't create lock.
-        if self.open.load(Ordering::Acquire) {
-            if self.active.fetch_sub(1, Ordering::Release) == 1 {
-                self.waiter.wake();
-            }
-            return None;
-        }
-
         // All set.
         Some(LatchLock { latch: self })
     }
 
-    #[inline]
+    /// Tries to acquire an owned lock.
+    ///
+    /// Returns `None` if `open` has been started.
+    pub fn acquire_owned(self: &Arc<Self>) -> Option<OwnedLatchLock> {
+        let current = self.state.fetch_add(2, Ordering::Acquire);
+        if (current & 1) != 0 {
+            self.release();
+            return None;
+        }
+
+        Some(OwnedLatchLock {
+            latch: self.clone(),
+        })
+    }
+
+    #[inline(always)]
     fn release(&self) {
-        // Rechecking `self.open` is a much faster path than calling wake blindly.
-        if self.active.fetch_sub(1, Ordering::Release) == 1 && self.open.load(Ordering::Acquire) {
+        // If last state was open and has exactly one last lock.
+        if self.state.fetch_sub(2, Ordering::Release) == 3 {
             self.waiter.wake();
         }
     }
 
-    /// Triggers open and registers the calling context.
-    ///
-    /// Creating new locks after this call will fail,
-    /// and protected scopes will be awaited until they finish.
+    /// Sets the open flag, preventing new locks from being created.
+    #[inline(always)]
+    pub fn open(&self) {
+        self.state.fetch_or(1, Ordering::AcqRel);
+    }
+
+    /// Returns a future that resolves when all locks are released.
     ///
     /// **Note**:
     /// This method is safe for concurrent access in terms of memory safety,
@@ -211,27 +222,39 @@ impl DynamicLatch {
     /// The `XOR` mutability rule is not enforced to give more flexibility,
     /// and avoid synchronization overhead of internal APIs, but exposing it
     /// in public APIs requires enforcing `XOR` mutability rule.
-    pub fn open(&self) -> OpenFuture<'_> {
-        self.open.store(true, Ordering::Release);
-        OpenFuture { latch: self }
+    #[inline(always)]
+    pub fn wait(&self) -> WaitFuture<'_> {
+        WaitFuture { latch: self }
     }
 
     /// Returns `true` if the latch is currently open.
     #[inline(always)]
-    pub fn opened(&self) -> bool {
-        self.open.load(Ordering::Acquire)
+    pub fn is_open(&self) -> bool {
+        (self.state.load(Ordering::Acquire) & 1) != 0
+    }
+
+    /// Returns the current count of held locks.
+    #[inline(always)]
+    pub fn count(&self) -> usize {
+        self.state.load(Ordering::Acquire) >> 1
     }
 }
 
-pub struct OpenFuture<'a> {
+impl Default for DynamicLatch {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+pub struct WaitFuture<'a> {
     latch: &'a DynamicLatch,
 }
 
-impl<'a> Future for OpenFuture<'a> {
+impl<'a> Future for WaitFuture<'a> {
     type Output = ();
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        if self.latch.active.load(Ordering::Acquire) == 0 {
+        if self.latch.state.load(Ordering::Acquire) == 1 {
             return Poll::Ready(());
         }
         self.latch.waiter.set(cx.waker());
@@ -252,59 +275,289 @@ impl Drop for LatchLock<'_> {
     }
 }
 
-impl Default for DynamicLatch {
-    fn default() -> Self {
-        Self::new()
+/// An owned lock for a protected scope, not tied to a lifetime.
+///
+/// This can be moved freely between threads and tasks.
+pub struct OwnedLatchLock {
+    latch: Arc<DynamicLatch>,
+}
+
+impl Drop for OwnedLatchLock {
+    fn drop(&mut self) {
+        self.latch.release();
+    }
+}
+
+/// An intrusive list node.
+///
+/// Node must have stable address during its lifetime.
+#[derive(Debug)]
+pub(crate) struct INode<T> {
+    prev: Option<NonNull<INode<T>>>,
+    next: Option<NonNull<INode<T>>>,
+    data: T,
+    _pin: PhantomPinned,
+}
+
+impl<T> INode<T> {
+    pub(crate) const fn new(data: T) -> INode<T> {
+        INode::<T> {
+            prev: None,
+            next: None,
+            data,
+            _pin: PhantomPinned,
+        }
+    }
+}
+
+impl<T> std::ops::Deref for INode<T> {
+    type Target = T;
+
+    fn deref(&self) -> &T {
+        &self.data
+    }
+}
+
+impl<T> std::ops::DerefMut for INode<T> {
+    fn deref_mut(&mut self) -> &mut T {
+        &mut self.data
+    }
+}
+
+/// An intrusive linked list.
+#[derive(Debug)]
+pub(crate) struct IList<T> {
+    first: Option<NonNull<INode<T>>>,
+    last: Option<NonNull<INode<T>>>,
+}
+
+impl<T> IList<T> {
+    pub(crate) const fn new() -> Self {
+        IList::<T> {
+            first: None,
+            last: None,
+        }
+    }
+
+    #[allow(dead_code)]
+    #[inline(always)]
+    pub(crate) fn is_empty(&self) -> bool {
+        self.first.is_none()
+    }
+
+    /// Attaches the node to the list as the last node (i=n-1).
+    #[allow(dead_code)]
+    pub(crate) unsafe fn attach_last(&mut self, node: &mut INode<T>) {
+        node.prev = self.last;
+        node.next = None;
+
+        match self.last {
+            Some(mut last) => last.as_mut().next = Some(node.into()),
+            None => {
+                // list is empty, so first is now this node also.
+                self.first = Some(node.into());
+            }
+        }
+
+        self.last = Some(node.into());
+    }
+
+    /// Attaches the node to the list as the first node (i=0).
+    pub(crate) unsafe fn attach_first(&mut self, node: &mut INode<T>) {
+        node.next = self.first;
+        node.prev = None;
+        match self.first {
+            Some(mut first) => first.as_mut().prev = Some(node.into()),
+            None => {}
+        };
+        self.first = Some(node.into());
+        if self.last.is_none() {
+            self.last = Some(node.into());
+        }
+    }
+
+    /// Detaches the node from the list.
+    pub(crate) unsafe fn detach(&mut self, node: &mut INode<T>) -> bool {
+        match node.prev {
+            None => {
+                if self.first != Some(node.into()) {
+                    debug_assert!(node.next.is_none());
+                    return false;
+                }
+                self.first = node.next;
+            }
+            Some(mut prev) => {
+                debug_assert_eq!(prev.as_ref().next, Some(node.into()));
+                prev.as_mut().next = node.next;
+            }
+        }
+
+        match node.next {
+            None => {
+                debug_assert_eq!(self.last, Some(node.into()));
+                self.last = node.prev;
+            }
+            Some(mut next) => {
+                debug_assert_eq!(next.as_mut().prev, Some(node.into()));
+                next.as_mut().prev = node.prev;
+            }
+        }
+
+        node.next = None;
+        node.prev = None;
+
+        true
+    }
+
+    /// Detaches the first node (i=0) from the list if the list.
+    ///
+    /// Returns the unlinked node if any.
+    #[allow(dead_code)]
+    pub(crate) fn detach_first(&mut self) -> Option<&mut INode<T>> {
+        unsafe {
+            let mut current_first = self.first?;
+            self.first = current_first.as_mut().next;
+
+            let first = current_first.as_mut();
+            match first.next {
+                None => {
+                    debug_assert_eq!(Some(first.into()), self.last);
+                    self.last = None;
+                }
+                Some(mut next) => {
+                    next.as_mut().prev = None;
+                }
+            }
+
+            first.prev = None;
+            first.next = None;
+            Some(&mut *(first as *mut INode<T>))
+        }
+    }
+
+    /// Detaches the last node (i=n-1) from the list.
+    ///
+    /// Returns the unlinked node if any.
+    #[allow(dead_code)]
+    pub(crate) fn detach_last(&mut self) -> Option<&mut INode<T>> {
+        unsafe {
+            let mut current_last = self.last?;
+            self.last = current_last.as_mut().prev;
+
+            let last = current_last.as_mut();
+            match last.prev {
+                None => {
+                    debug_assert_eq!(Some(last.into()), self.first);
+                    self.first = None;
+                }
+                Some(mut prev) => {
+                    prev.as_mut().next = None;
+                }
+            }
+
+            last.prev = None;
+            last.next = None;
+            Some(&mut *(last as *mut INode<T>))
+        }
+    }
+
+    /// Iterates over the nodes from first to last (0 -> n-1),
+    /// and applies `f` functions to each of them after detaching.
+    pub(crate) fn drain<F>(&mut self, mut f: F)
+    where
+        F: FnMut(&mut INode<T>),
+    {
+        let mut current = self.first;
+        self.first = None;
+        self.last = None;
+
+        while let Some(mut node) = current {
+            unsafe {
+                let node_ref = node.as_mut();
+                current = node_ref.next;
+
+                node_ref.next = None;
+                node_ref.prev = None;
+
+                f(node_ref);
+            }
+        }
+    }
+
+    /// Iterates over the nodes from last to first (n-1 -> 0),
+    /// and applies `f` functions to each of them after detaching.
+    #[allow(dead_code)]
+    pub(crate) fn drain_rev<F>(&mut self, mut f: F)
+    where
+        F: FnMut(&mut INode<T>),
+    {
+        let mut current = self.last;
+        self.first = None;
+        self.last = None;
+
+        while let Some(mut node) = current {
+            unsafe {
+                let node_ref = node.as_mut();
+                current = node_ref.prev;
+
+                node_ref.next = None;
+                node_ref.prev = None;
+
+                f(node_ref);
+            }
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tokio::time::{Duration, timeout};
+
+    use std::sync::Arc;
+
+    use tokio::sync::Barrier;
+    use tokio::time::{Duration, sleep, timeout};
 
     #[tokio::test]
-    async fn test_barrier_core_ops() {
+    async fn test_latch_core_ops() {
         let latch = DynamicLatch::new();
 
         let lock1 = latch.acquire().expect("Should acquire lock 1");
         let lock2 = latch.acquire().expect("Should acquire lock 2");
         let lock3 = latch.acquire().expect("Should acquire lock 3");
 
-        assert_eq!(latch.active.load(Ordering::Acquire), 3);
+        assert_eq!((latch.count()), 3);
 
-        // Release should not complete while any guard is held.
-        let res = timeout(Duration::from_millis(100), latch.open()).await;
+        latch.open();
+
+        // Open should not complete while any guard is held.
+        let res = timeout(Duration::from_millis(100), latch.wait()).await;
         assert!(
             res.is_err(),
-            "release() should not complete while locks are held"
+            "wait() should not complete while locks are held"
         );
 
-        // After release is called, no new locks can be acquired.
+        // After open is called, no new locks can be acquired.
         assert!(
             latch.acquire().is_none(),
             "No new locks should be acquired after release"
         );
 
         drop(lock1);
-        assert_eq!(latch.active.load(Ordering::Acquire), 2);
+        assert_eq!((latch.count()), 2);
 
         drop(lock2);
-        assert_eq!(latch.active.load(Ordering::Acquire), 1);
+        assert_eq!((latch.count()), 1);
 
         drop(lock3);
-        assert_eq!(latch.active.load(Ordering::Acquire), 0);
+        assert_eq!((latch.count()), 0);
 
-        let res = timeout(Duration::from_millis(100), latch.open()).await;
-        assert!(res.is_ok(), "release() should complete, no locks are held");
+        let res = timeout(Duration::from_millis(100), latch.wait()).await;
+        assert!(res.is_ok(), "open() should complete, no locks are held");
     }
 
     #[tokio::test]
-    async fn test_barrier_concurrent_lock_and_release_race() {
-        use std::sync::Arc;
-        use tokio::sync::Barrier;
-        use tokio::time::{Duration, sleep, timeout};
-
+    async fn test_latch_acquire_release_open() {
         let latch = Arc::new(DynamicLatch::new());
         let barrier = Arc::new(Barrier::new(2));
 
@@ -325,26 +578,28 @@ mod tests {
         let latch_2 = latch.clone();
         let barrier2 = barrier.clone();
 
-        // Task 2: Attempts to release while lock is held.
+        // Task 2: Attempts to open while lock is held.
         let t2 = tokio::spawn(async move {
             // Wait for t1 to acquire lock.
             barrier2.wait().await;
 
+            latch.open();
+
             // Must fail, lock must still be held.
-            let res = timeout(Duration::from_millis(100), latch_2.open()).await;
+            let res = timeout(Duration::from_millis(100), latch_2.wait()).await;
             assert!(
                 res.is_err(),
-                "release() should not complete while lock is held"
+                "open() should not complete while lock is held"
             );
 
             // Must complete, lock must have been dropped.
-            let res = timeout(Duration::from_millis(100), latch_2.open()).await;
-            assert!(res.is_ok(), "release() should complete, no locks are held");
+            let res = timeout(Duration::from_millis(50), latch_2.wait()).await;
+            assert!(res.is_ok(), "open() should complete, no locks are held");
 
             // No new locks after release.
             assert!(
                 latch_2.acquire().is_none(),
-                "No new locks should be acquired after release"
+                "No new locks should be acquired after open"
             );
         });
 

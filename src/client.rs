@@ -294,7 +294,8 @@ where
     ///
     /// Any attempts to send messages after this call will return `Broken pipe` I/O error.
     pub async fn shutdown(&mut self) -> RpcResult<()> {
-        self.state.abort_latch.open().await;
+        self.state.abort_latch.open();
+        self.state.abort_latch.wait().await;
         self.task.abort();
         self.state.sender.lock().await.close().await
     }

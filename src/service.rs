@@ -4,8 +4,9 @@ use crate::error::{ErrKind, RpcError, RpcResult};
 use crate::message::{Call, Notification, Reply};
 
 /// Trait for implementing RPC service handler.
-/// Implementations must assume responsibility for managing access to shared resources.
-pub trait RpcService: Send + Sync + Clone + 'static {
+///
+/// The host may impose restrictions on the service implementation according to its needs.
+pub trait RpcService {
     /// Handles a method call and returns the result.
     /// By default, it returns `NotImplemented` error.
     fn call(&self, _call: &Call) -> impl Future<Output = RpcResult<Reply>> + Send {
@@ -16,6 +17,12 @@ pub trait RpcService: Send + Sync + Clone + 'static {
     /// By default, it returns `NotImplemented` error.
     fn notify(&self, _notification: &Notification) -> impl Future<Output = RpcResult<()>> + Send {
         std::future::ready(Err(RpcError::error(ErrKind::Unimplemented)))
+    }
+
+    /// Informs the service to terminate its state machines and waits for completion.
+    /// By default, it returns immediately.
+    fn shutdown(&self) -> impl Future<Output = RpcResult<()>> + Send {
+        std::future::ready(Ok(()))
     }
 }
 

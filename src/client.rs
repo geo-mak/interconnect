@@ -66,7 +66,7 @@ where
     ) -> RpcResult<RpcClient<RpcSender<T::OwnedWriteHalf>>>
     where
         T: TransportLayer + 'static,
-        H: RpcService,
+        H: RpcService + Send + Sync + 'static,
     {
         negotiation::initiate(&mut transport, RpcCapability::new(1, false)).await?;
 
@@ -88,7 +88,7 @@ where
     ) -> RpcResult<RpcClient<EncryptedRpcSender<T::OwnedWriteHalf>>>
     where
         T: TransportLayer + 'static,
-        H: RpcService,
+        H: RpcService + Send + Sync + 'static,
     {
         negotiation::initiate(&mut transport, RpcCapability::new(1, true)).await?;
 
@@ -119,7 +119,7 @@ where
     where
         R: RpcAsyncReceiver + Send + 'static,
         W: RpcAsyncSender + Send + 'static,
-        H: RpcService + 'static,
+       H: RpcService + Send + Sync + 'static,
     {
         let state = Arc::new(ClientState::new(tx, cap));
         let c_state = Arc::clone(&state);

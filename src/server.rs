@@ -21,7 +21,7 @@ impl RpcServer {
     where
         A: 'static,
         L: TransportListener<A> + Send + 'static,
-        H: RpcService + 'static,
+        H: RpcService + Send + Sync + Clone + 'static,
     {
         let listener = L::bind(addr).await?;
 

@@ -1,132 +1,407 @@
-use tokio::task::JoinHandle;
+use std::cell::Cell;
+use std::fmt::Debug;
 
-use crate::capability::negotiation;
-use crate::error::RpcResult;
+use std::mem::ManuallyDrop;
+
+use std::pin::Pin;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::task::{Context, Poll};
+use std::time::Duration;
+
+use tokio::select;
+
+use tokio::task::JoinHandle;
+use tokio::time::timeout;
+
+use crate::capability::{EncryptionState, negotiation};
+use crate::error::{ErrKind, RpcError, RpcResult};
 use crate::message::{Message, MessageType};
 use crate::service::RpcService;
 use crate::stream::{
     EncryptedRpcReceiver, EncryptedRpcSender, RpcAsyncReceiver, RpcAsyncSender, RpcReceiver,
     RpcSender,
 };
+use crate::sync::{AtomicWaker, DynamicLatch, IList, INode};
 use crate::transport::{TransportLayer, TransportListener};
 
-/// RPC Server implementation.
-pub struct RpcServer {
-    // TODO: Track sessions.
-    task: JoinHandle<()>,
+thread_local! {
+    // Must be non-zero.
+    static RNG_STATE: Cell<u64> = const { Cell::new(0x12345678ABCDEF) };
 }
 
-impl RpcServer {
-    pub async fn serve<A, L, H>(addr: A, service: H, encryption_required: bool) -> RpcResult<Self>
+struct TaskControlState {
+    canceled: AtomicBool,
+    waiter: AtomicWaker,
+}
+
+impl TaskControlState {
+    const fn new() -> Self {
+        Self {
+            canceled: AtomicBool::new(false),
+            waiter: AtomicWaker::new(),
+        }
+    }
+
+    fn cancel(&self) {
+        self.canceled.store(true, Ordering::Relaxed);
+        self.waiter.wake();
+    }
+
+    fn is_canceled(&self) -> bool {
+        self.canceled.load(Ordering::Relaxed)
+    }
+}
+
+struct Tasks {
+    shards: Box<[parking_lot::Mutex<IList<TaskControlState>>]>,
+    observer: DynamicLatch,
+}
+
+unsafe impl Send for Tasks {}
+unsafe impl Sync for Tasks {}
+
+impl Tasks {
+    fn new(shards: usize) -> Self {
+        let shards: Vec<_> = (0..shards)
+            .map(|_| parking_lot::Mutex::new(IList::new()))
+            .collect();
+        Self {
+            shards: shards.into_boxed_slice(),
+            observer: DynamicLatch::new(),
+        }
+    }
+
+    /// Selects a shard between 0 and 63 randomly.
+    ///
+    /// The algorithm has distribution property to prevent clustering.
+    fn select_shard(&self) -> usize {
+        RNG_STATE.with(|s| {
+            let mut x = s.get();
+            // xorshift64s, variant (12, 25, 27).
+            x ^= x >> 12;
+            x ^= x << 25;
+            x ^= x >> 27;
+            s.set(x);
+            // Len must be power of two.
+            let mask = self.shards.len() - 1;
+            (x.wrapping_mul(0x2545F4914F6CDD1D) as usize) & mask
+        })
+    }
+
+    fn attach<'a, H>(
+        &'a self,
+        node: &'a mut TaskNode,
+        state: &'a Arc<ServerState<H>>,
+    ) -> AttachedTaskNode<'a, H> {
+        let shard = self.select_shard();
+        unsafe { self.shards[shard].lock().attach_first(&mut node.i_node) };
+        AttachedTaskNode {
+            t_node: node,
+            state,
+            shard,
+        }
+    }
+
+    fn detach<H>(&self, node: &mut AttachedTaskNode<'_, H>) {
+        unsafe {
+            self.shards[node.shard]
+                .lock()
+                .detach(&mut node.t_node.i_node)
+        };
+    }
+}
+
+struct TaskNode {
+    i_node: INode<TaskControlState>,
+}
+
+unsafe impl Send for TaskNode {}
+unsafe impl Sync for TaskNode {}
+
+impl TaskNode {
+    #[inline(always)]
+    fn new(state: TaskControlState) -> Self {
+        Self {
+            i_node: INode::new(state),
+        }
+    }
+}
+
+struct AttachedTaskNode<'a, H> {
+    // Must be by ref.
+    state: &'a Arc<ServerState<H>>,
+    t_node: &'a mut TaskNode,
+    shard: usize,
+}
+
+impl<'a, H> Drop for AttachedTaskNode<'a, H> {
+    fn drop(&mut self) {
+        self.state.tasks.detach(self);
+    }
+}
+
+impl<'a, H> AttachedTaskNode<'a, H> {
+    #[inline(always)]
+    fn notify_canceled(&self) -> NotifyCanceledFuture<'_, H> {
+        NotifyCanceledFuture { attached: self }
+    }
+}
+
+struct NotifyCanceledFuture<'a, H> {
+    attached: &'a AttachedTaskNode<'a, H>,
+}
+
+impl<'a, H> Future for NotifyCanceledFuture<'a, H> {
+    type Output = ();
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        if self.attached.t_node.i_node.is_canceled() {
+            return Poll::Ready(());
+        };
+        self.attached.t_node.i_node.waiter.set(cx.waker());
+        Poll::Pending
+    }
+}
+
+enum Session {
+    Unencrypted,
+    Encrypted {
+        r_key: EncryptionState,
+        w_key: EncryptionState,
+    },
+}
+
+struct ServerState<H> {
+    tasks: Tasks,
+    service: H,
+    timeout: Duration,
+}
+
+impl<H> ServerState<H> {
+    #[inline]
+    fn new(shards: usize, service: H, timeout: Duration) -> ServerState<H> {
+        ServerState {
+            tasks: Tasks::new(shards),
+            service,
+            timeout,
+        }
+    }
+}
+
+/// RPC Server implementation.
+pub struct RpcServer<H> {
+    state: Arc<ServerState<H>>,
+    listener: JoinHandle<()>,
+}
+
+impl<H> RpcServer<H>
+where
+    H: RpcService + Send + Sync + Clone + 'static,
+{
+    /// Initializes server state and starts accepting connections according to the given address and port.
+    ///
+    /// Shards' count is the count of concurrent lists used to track and manage its connections.
+    ///
+    /// Shards' count muse be power of two.
+    ///
+    /// A higher count allocates more memory, but reduces contention and contributes to higher total system throughput.
+    ///
+    /// # Policy
+    ///
+    /// Encryption:
+    /// If encryption is required, unencrypted sessions will be rejected during negotiation.
+    ///
+    /// If encryption is not required, encrypted sessions will still be served,
+    /// it is just that unencrypted sessions will now be served as well.
+    ///
+    /// Timeout:
+    /// timeout determines the allowed negotiation time before establishing session.
+    /// There is no default, the provided value is used as it is.
+    ///
+    /// # Service
+    ///
+    /// Each new session gets its own clone of the service.
+    ///
+    /// # Shutdown
+    ///
+    /// System shutdown is performed with these steps in order:
+    ///
+    /// 1 - Stops accepting new connections with immediate effect.
+    /// 2 - Signals termination to active sessions.
+    /// 4 - Waits for all active sessions to finish properly.
+    /// 4 - Calls shutdown on the service to inform it to terminates its state machines,
+    ///     and waits for its completion.
+    pub async fn serve<A, L>(
+        addr: A,
+        service: H,
+        shards: usize,
+        encryption_required: bool,
+        conn_timeout: Duration,
+    ) -> RpcResult<Self>
     where
         A: 'static,
         L: TransportListener<A> + Send + 'static,
-        H: RpcService + Send + Sync + Clone + 'static,
+        <L as TransportListener<A>>::Address: Debug + Send,
     {
+        assert!(
+            shards.is_power_of_two(),
+            "Shards' count must be power of two"
+        );
+
         let listener = L::bind(addr).await?;
 
-        let task = tokio::spawn(async move {
+        let state = Arc::new(ServerState::new(shards, service, conn_timeout));
+
+        let l_state = state.clone();
+        let listener = tokio::spawn(async move {
             loop {
                 match listener.accept().await {
-                    Ok((transport, _)) => {
-                        // TODO: Safe abort.
-                        tokio::spawn(Self::new_connection::<L::Transport, H>(
-                            transport,
-                            service.clone(),
-                            encryption_required,
-                        ));
+                    Ok((transport, addr)) => {
+                        let t_state = l_state.clone();
+                        tokio::spawn(async move {
+                            // TaskNode:
+                            // |--- i_node: INode<TaskControlState>
+                            //      |-- prev: ptr INode<TaskControlState>  | Pointers:
+                            //      |-- next: ptr INode<TaskControlState>  | Accessed locked when attaching and detaching.
+                            //      |-- data: TaskControlState
+                            //            |-- canceled: AtomicBool         | Data:
+                            //            |-- waiter: AtomicWaker          | Accessed directly by attached node and its future.
+                            //                                             | Accessed locked but concurrently by shutdown.
+                            // Safety:
+                            // - The node and its control state are stored on the future and valid only as long
+                            //   the future is still alive.
+                            // - The address of the node is "assumed" to be stable,
+                            //   because futures are constructed as "pinned" state machines.
+                            // - Updating the node's next/prev and accessing its data can be concurrent.
+                            // - The waker is atomic, set and wake can be concurrent.
+                            let ctrl_state = TaskControlState::new();
+                            let mut task_node = TaskNode::new(ctrl_state);
+
+                            // Token released on drop.
+                            if let Some(_token) = t_state.tasks.observer.acquire() {
+                                // Detached on drop.
+                                let attached = t_state.tasks.attach(&mut task_node, &t_state);
+
+                                // Can panic.
+                                let result = Self::connection::<L::Transport>(
+                                    &attached,
+                                    &t_state,
+                                    transport,
+                                    encryption_required,
+                                )
+                                .await;
+
+                                if let Err(e) = result {
+                                    match e.kind {
+                                        ErrKind::Canceled => {
+                                            log::info!(
+                                                "Session with {addr:?} canceled by shutdown",
+                                            );
+                                            // Already detached by shutdown.
+                                            let _ = ManuallyDrop::new(attached);
+                                        }
+                                        _ => log::error!(
+                                            "Session with {addr:?} finished with error: {e}",
+                                        ),
+                                    }
+                                }
+                            }
+                        });
                     }
-                    Err(e) => log::error!("Accept failed: {e}"),
+                    Err(e) => log::error!("Failed to accept connection: {e}"),
                 }
             }
         });
 
-        Ok(Self { task })
+        Ok(Self { state, listener })
     }
 
-    // Negotiates a new connection and starts a session over the transport layer upon success.
-    async fn new_connection<T, H>(mut transport: T, service: H, encryption_required: bool)
+    /// Tries to negotiate a new session and starts one over the transport layer upon success.
+    async fn connection<T>(
+        node: &AttachedTaskNode<'_, H>,
+        state: &Arc<ServerState<H>>,
+        mut transport: T,
+        encryption_required: bool,
+    ) -> RpcResult<()>
     where
         T: TransportLayer + 'static,
-        H: RpcService + 'static,
     {
-        let proposed = match negotiation::read_frame(&mut transport).await {
-            Ok(c) => c,
-            Err(e) => {
-                log::error!("Negotiation failed: {e}");
-                return;
+        let session = timeout(
+            state.timeout,
+            Self::negotiation(&mut transport, encryption_required),
+        )
+        .await??;
+
+        let (r, w) = transport.into_split();
+        let service = state.service.clone();
+        match session {
+            Session::Unencrypted => {
+                let s = RpcSender::new(w);
+                let r = RpcReceiver::new(r);
+                Self::session(node, service, s, r).await
             }
-        };
+            Session::Encrypted { r_key, w_key } => {
+                let s = EncryptedRpcSender::new(w, w_key);
+                let r = EncryptedRpcReceiver::new(r, r_key);
+                Self::session(node, service, s, r).await
+            }
+        }
+    }
+
+    async fn negotiation<T>(mut transport: &mut T, encryption_required: bool) -> RpcResult<Session>
+    where
+        T: TransportLayer + 'static,
+    {
+        let proposed = negotiation::read_frame(&mut transport).await?;
 
         if proposed.version != 1 {
-            let _ = negotiation::reject(&mut transport).await;
-            log::error!("Stream version mismatch");
-            return;
+            negotiation::reject(&mut transport).await?;
+            return Err(RpcError::error(ErrKind::CapabilityMismatch));
         };
 
-        // Always supported.
         if proposed.encryption {
-            if let Err(e) = negotiation::confirm(&mut transport).await {
-                log::error!("Failed to confirm: {e}");
-                return;
-            }
-
-            let (r_key, w_key) = match negotiation::accept_key_exchange(&mut transport).await {
-                Ok(keys) => keys,
-                Err(e) => {
-                    log::error!("Encryption session failed: {e}");
-                    return;
-                }
-            };
-
-            let (reader, writer) = transport.into_split();
-            Self::new_session(
-                EncryptedRpcReceiver::new(reader, r_key),
-                EncryptedRpcSender::new(writer, w_key),
-                service,
-            )
-            .await;
+            negotiation::confirm(&mut transport).await?;
+            let (r_key, w_key) = negotiation::accept_key_exchange(&mut transport).await?;
+            let session = Session::Encrypted { r_key, w_key };
+            Ok(session)
         } else {
-            // Policy-dependent.
             if encryption_required {
-                let _ = negotiation::reject(&mut transport).await;
-                log::error!("Unencrypted session rejected by policy");
-                return;
+                negotiation::reject(&mut transport).await?;
+                return Err(RpcError::error(ErrKind::CapabilityMismatch));
             }
-            if let Err(e) = negotiation::confirm(&mut transport).await {
-                log::error!("Failed to confirm: {e}");
-                return;
-            }
-            let (reader, writer) = transport.into_split();
-            Self::new_session(RpcReceiver::new(reader), RpcSender::new(writer), service).await;
+            negotiation::confirm(&mut transport).await?;
+            let session = Session::Unencrypted;
+            Ok(session)
         }
     }
 
-    async fn new_session<R, W, H>(mut rx: R, mut tx: W, service: H)
+    async fn session<S, R>(
+        node: &AttachedTaskNode<'_, H>,
+        service: H,
+        mut sender: S,
+        mut receiver: R,
+    ) -> RpcResult<()>
     where
+        S: RpcAsyncSender + 'static,
         R: RpcAsyncReceiver + 'static,
-        W: RpcAsyncSender + 'static,
-        H: RpcService + 'static,
     {
         loop {
-            match rx.receive().await {
-                Ok(message) => {
-                    if let Err(e) = Self::process_incoming(&message, &service, &mut tx).await {
-                        log::error!("Send error: {e}");
-                        break;
-                    }
-                }
-                Err(e) => {
-                    log::info!("Receive error: {e}");
-                    break;
-                }
-            }
+            select! {
+                biased;
+                 _ = node.notify_canceled() => return Err(RpcError::error(ErrKind::Canceled)),
+            result = receiver.receive() => {
+                 match result {
+                 Ok(message) => Self::process_message(&service, &mut sender, &message).await?,
+                 Err(e) => return Err(e),
+             };
+             }
+             }
         }
     }
 
-    async fn process_incoming<H, S>(message: &Message, service: &H, sender: &mut S) -> RpcResult<()>
+    async fn process_message<S>(service: &H, sender: &mut S, message: &Message) -> RpcResult<()>
     where
-        H: RpcService + 'static,
         S: RpcAsyncSender + 'static,
     {
         match &message.kind {
@@ -147,9 +422,27 @@ impl RpcServer {
         }
     }
 
-    /// Consumes the instance and aborts its background task.
-    pub fn shutdown(self) {
-        self.task.abort();
+    /// Returns the current count of active sessions.
+    #[inline(always)]
+    pub fn sessions(&self) -> usize {
+        self.state.tasks.observer.count()
+    }
+
+    /// Shutdowns the server and the service in planned mode.
+    ///
+    /// This call doesn't have immediate effect and may take longer time,
+    /// because it allows active sessions to complete processing the current received message.
+    pub async fn shutdown(&mut self) -> RpcResult<()> {
+        self.state.tasks.observer.open();
+        self.listener.abort();
+
+        for shard in &self.state.tasks.shards {
+            shard.lock().drain(|t| t.cancel());
+        }
+
+        self.state.tasks.observer.wait().await;
+
+        self.state.service.shutdown().await
     }
 }
 
@@ -157,8 +450,6 @@ impl RpcServer {
 mod tests {
     use super::*;
 
-    use std::sync::Arc;
-    use std::sync::atomic::{AtomicU32, Ordering};
     use std::time::Duration;
 
     use tokio::net::{TcpListener, TcpStream, UnixListener, UnixStream};
@@ -168,85 +459,35 @@ mod tests {
     use crate::message::{Call, Reply};
 
     #[derive(Clone)]
-    struct RpcTestService {
-        counter: Arc<AtomicU32>,
-    }
-
-    impl RpcTestService {
-        fn new() -> Self {
-            Self {
-                counter: Arc::new(AtomicU32::new(0)),
-            }
-        }
-    }
+    struct RpcTestService {}
 
     impl RpcService for RpcTestService {
         async fn call(&self, call: &Call) -> RpcResult<Reply> {
             match call.method {
                 1 => {
-                    let current = self.counter.fetch_add(1, Ordering::SeqCst);
-                    Ok(Reply::with(&(current + 1)).unwrap())
+                    let src = call.decode_as::<String>().unwrap();
+                    Ok(Reply::with(&format!("Reply to {src}")).unwrap())
                 }
                 _ => Err(RpcError::error(ErrKind::Unimplemented)),
             }
         }
     }
 
-    #[tokio::test]
-    async fn test_tcp_rpc_server() {
-        let service = RpcTestService::new();
-        let server =
-            RpcServer::serve::<&str, TcpListener, RpcTestService>("127.0.0.1:8000", service, false)
-                .await
-                .unwrap();
+    async fn make_tcp_rpc_channel(server: &str) -> (impl RpcAsyncSender, impl RpcAsyncReceiver) {
+        let mut transport = TcpStream::connect(server).await.unwrap();
 
-        let mut transport = TcpStream::connect("127.0.0.1:8000").await.unwrap();
-
-        // Perform capability negotiation on the client side.
         capability::negotiation::initiate(&mut transport, RpcCapability::new(1, false))
             .await
             .expect("client negotiation failed");
 
         let (reader, writer) = transport.into_split();
-        let mut rpc_reader = RpcReceiver::new(reader);
-        let mut rpc_writer = RpcSender::new(writer);
-
-        let call_msg = Message::call_with(1, ()).unwrap();
-        rpc_writer.send(&call_msg).await.unwrap();
-
-        let reply_msg = rpc_reader.receive().await.unwrap();
-        match reply_msg.kind {
-            MessageType::Reply(reply) => {
-                let response: u32 = crate::message::Message::decode_as(&reply.data).unwrap();
-                assert!(response == 1);
-            }
-            _ => panic!("Expected reply"),
-        }
-
-        server.shutdown();
+        (RpcSender::new(writer), RpcReceiver::new(reader))
     }
 
-    #[tokio::test]
-    async fn test_tcp_rpc_server_encryption_policy() {
-        let service = RpcTestService::new();
-
-        // Server with encryption-only policy.
-        let server =
-            RpcServer::serve::<&str, TcpListener, RpcTestService>("127.0.0.1:8001", service, true)
-                .await
-                .unwrap();
-
-        // Unencrypted session.
-        {
-            let mut transport = TcpStream::connect("127.0.0.1:8001").await.unwrap();
-            let response =
-                capability::negotiation::initiate(&mut transport, RpcCapability::new(1, false))
-                    .await;
-            assert!(response == Err(RpcError::error(ErrKind::CapabilityMismatch)));
-        };
-
-        // Encrypted session.
-        let mut transport = TcpStream::connect("127.0.0.1:8001").await.unwrap();
+    async fn make_encrypted_tcp_rpc_channel(
+        server: &str,
+    ) -> (impl RpcAsyncSender, impl RpcAsyncReceiver) {
+        let mut transport = TcpStream::connect(server).await.unwrap();
 
         capability::negotiation::initiate(&mut transport, RpcCapability::new(1, true))
             .await
@@ -257,32 +498,127 @@ mod tests {
             .expect("client encryption setup failed");
 
         let (r, w) = transport.into_split();
-        let mut rpc_rx = EncryptedRpcReceiver::new(r, r_key);
-        let mut rpc_tx = EncryptedRpcSender::new(w, w_key);
 
-        let call_msg = Message::call_with(1, ()).unwrap();
+        (
+            EncryptedRpcSender::new(w, w_key),
+            EncryptedRpcReceiver::new(r, r_key),
+        )
+    }
+
+    #[tokio::test]
+    async fn test_tcp_rpc_server_core() {
+        let srv_addr = "127.0.0.1:8000";
+        let service = RpcTestService {};
+        let mut server = RpcServer::serve::<&str, TcpListener>(
+            srv_addr,
+            service,
+            2,
+            false,
+            Duration::from_secs(1),
+        )
+        .await
+        .unwrap();
+
+        let (mut rpc_tx_1, mut rpc_rx_1) = make_tcp_rpc_channel(srv_addr).await;
+        let (mut rpc_tx_2, mut rpc_rx_2) = make_tcp_rpc_channel(srv_addr).await;
+        let (mut rpc_tx_3, mut rpc_rx_3) = make_tcp_rpc_channel(srv_addr).await;
+
+        let rpc_call_1 = Message::call_with(1, "C1").unwrap();
+        let rpc_call_2 = Message::call_with(1, "C2").unwrap();
+        let rpc_call_3 = Message::call_with(1, "C3").unwrap();
+
+        rpc_tx_1.send(&rpc_call_1).await.unwrap();
+        rpc_tx_2.send(&rpc_call_2).await.unwrap();
+        rpc_tx_3.send(&rpc_call_3).await.unwrap();
+
+        let t1 = tokio::spawn(async move {
+            let reply_msg = rpc_rx_1.receive().await.unwrap();
+            match reply_msg.kind {
+                MessageType::Reply(reply) => {
+                    let response: String = crate::message::Message::decode_as(&reply.data).unwrap();
+                    assert!(&response == "Reply to C1");
+                }
+                _ => panic!("Expected reply"),
+            }
+        });
+
+        let t2 = tokio::spawn(async move {
+            let reply_msg = rpc_rx_2.receive().await.unwrap();
+            match reply_msg.kind {
+                MessageType::Reply(reply) => {
+                    let response: String = crate::message::Message::decode_as(&reply.data).unwrap();
+                    assert!(&response == "Reply to C2");
+                }
+                _ => panic!("Expected reply"),
+            }
+        });
+
+        let t3 = tokio::spawn(async move {
+            let reply_msg = rpc_rx_3.receive().await.unwrap();
+            match reply_msg.kind {
+                MessageType::Reply(reply) => {
+                    let response: String = crate::message::Message::decode_as(&reply.data).unwrap();
+                    assert!(&response == "Reply to C3");
+                }
+                _ => panic!("Expected reply"),
+            }
+        });
+
+        tokio::try_join!(t1, t2, t3).expect("No panic expected");
+        server.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_tcp_rpc_server_encryption_policy() {
+        let srv_addr = "127.0.0.1:8001";
+        let service = RpcTestService {};
+
+        // Server with encryption-only policy.
+        let mut server = RpcServer::serve::<&str, TcpListener>(
+            srv_addr,
+            service,
+            2,
+            true,
+            Duration::from_secs(1),
+        )
+        .await
+        .unwrap();
+
+        // Unencrypted session.
+        {
+            let mut transport = TcpStream::connect(srv_addr).await.unwrap();
+            let response =
+                capability::negotiation::initiate(&mut transport, RpcCapability::new(1, false))
+                    .await;
+            assert!(response == Err(RpcError::error(ErrKind::CapabilityMismatch)));
+        };
+
+        let (mut rpc_tx, mut rpc_rx) = make_encrypted_tcp_rpc_channel(srv_addr).await;
+
+        let call_msg = Message::call_with(1, "C1").unwrap();
         rpc_tx.send(&call_msg).await.unwrap();
 
         let reply_msg = rpc_rx.receive().await.unwrap();
         match reply_msg.kind {
             MessageType::Reply(reply) => {
-                let response: u32 = crate::message::Message::decode_as(&reply.data).unwrap();
-                assert!(response == 1);
+                let response: String = crate::message::Message::decode_as(&reply.data).unwrap();
+                assert!(&response == "Reply to C1");
             }
             _ => panic!("Expected reply"),
         }
 
-        server.shutdown();
+        server.shutdown().await.unwrap();
     }
 
     #[tokio::test]
     async fn test_unix_rpc_server() {
         let path = "unix_server_test.sock";
 
-        let service = RpcTestService::new();
-        let server = RpcServer::serve::<&str, UnixListener, RpcTestService>(path, service, false)
-            .await
-            .unwrap();
+        let service = RpcTestService {};
+        let mut server =
+            RpcServer::serve::<&str, UnixListener>(path, service, 2, false, Duration::from_secs(1))
+                .await
+                .unwrap();
 
         let mut transport = UnixStream::connect(path).await.unwrap();
 
@@ -291,24 +627,24 @@ mod tests {
             .expect("client negotiation failed");
 
         let (reader, writer) = transport.into_split();
-        let mut rpc_reader = RpcReceiver::new(reader);
-        let mut rpc_writer = RpcSender::new(writer);
+        let mut rpc_rx = RpcReceiver::new(reader);
+        let mut rpc_tx = RpcSender::new(writer);
 
         tokio::time::sleep(Duration::from_millis(10)).await;
 
-        let call_msg = Message::call_with(1, ()).unwrap();
-        rpc_writer.send(&call_msg).await.unwrap();
+        let call_msg = Message::call_with(1, "C1").unwrap();
+        rpc_tx.send(&call_msg).await.unwrap();
 
-        let reply_msg = rpc_reader.receive().await.unwrap();
+        let reply_msg = rpc_rx.receive().await.unwrap();
         match reply_msg.kind {
             MessageType::Reply(reply) => {
-                let response: u32 = crate::message::Message::decode_as(&reply.data).unwrap();
-                assert!(response == 1);
+                let response: String = crate::message::Message::decode_as(&reply.data).unwrap();
+                assert!(&response == "Reply to C1");
             }
             _ => panic!("Expected reply"),
         }
 
-        server.shutdown();
+        server.shutdown().await.unwrap();
         std::fs::remove_file(path).unwrap();
     }
 }

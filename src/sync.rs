@@ -10,10 +10,6 @@ use std::sync::atomic::{
 };
 use std::task::{Context, Poll, Waker};
 
-const SET: usize = 0b01;
-const WAIT: usize = 0b00;
-const WAKE: usize = 0b10;
-
 /// A concurrent version of task's waker, protected via atomic operations.
 ///
 /// This implementation tracks changes with 3-state:
@@ -32,6 +28,10 @@ pub(crate) struct AtomicWaker {
     state: AtomicUsize,
     waker: UnsafeCell<Option<Waker>>,
 }
+
+const SET: usize = 0b01;
+const WAIT: usize = 0b00;
+const WAKE: usize = 0b10;
 
 unsafe impl Send for AtomicWaker {}
 unsafe impl Sync for AtomicWaker {}
@@ -64,8 +64,10 @@ impl AtomicWaker {
 
         match observed {
             WAIT => unsafe {
-                // Set.
-                *self.waker.get() = Some(waker.clone());
+                match &*self.waker.get() {
+                    Some(prev) if prev.will_wake(waker) => (),
+                    _ => *self.waker.get() = Some(waker.clone()),
+                }
 
                 // If the state transitioned to include the `WAKE` flag,
                 // this means that `self.wake()` has been called concurrently,
@@ -366,10 +368,9 @@ impl<T> IList<T> {
     pub(crate) unsafe fn attach_first(&mut self, node: &mut INode<T>) {
         node.next = self.first;
         node.prev = None;
-        match self.first {
-            Some(mut first) => first.as_mut().prev = Some(node.into()),
-            None => {}
-        };
+        if let Some(mut first) = self.first {
+            first.as_mut().prev = Some(node.into())
+        }
         self.first = Some(node.into());
         if self.last.is_none() {
             self.last = Some(node.into());
@@ -411,7 +412,7 @@ impl<T> IList<T> {
 
     /// Detaches the first node (i=0) from the list if the list.
     ///
-    /// Returns the unlinked node if any.
+    /// Returns the detached node if any.
     #[allow(dead_code)]
     pub(crate) fn detach_first(&mut self) -> Option<&mut INode<T>> {
         unsafe {
@@ -437,7 +438,7 @@ impl<T> IList<T> {
 
     /// Detaches the last node (i=n-1) from the list.
     ///
-    /// Returns the unlinked node if any.
+    /// Returns the detached node if any.
     #[allow(dead_code)]
     pub(crate) fn detach_last(&mut self) -> Option<&mut INode<T>> {
         unsafe {
@@ -462,7 +463,7 @@ impl<T> IList<T> {
     }
 
     /// Iterates over the nodes from first to last (0 -> n-1),
-    /// and applies `f` functions to each of them after detaching.
+    /// and applies `f` function to each of them after **detaching**.
     pub(crate) fn drain<F>(&mut self, mut f: F)
     where
         F: FnMut(&mut INode<T>),
@@ -485,7 +486,7 @@ impl<T> IList<T> {
     }
 
     /// Iterates over the nodes from last to first (n-1 -> 0),
-    /// and applies `f` functions to each of them after detaching.
+    /// and applies `f` function to each of them after **detaching**.
     #[allow(dead_code)]
     pub(crate) fn drain_rev<F>(&mut self, mut f: F)
     where

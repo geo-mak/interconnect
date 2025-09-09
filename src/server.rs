@@ -63,6 +63,10 @@ unsafe impl Sync for Tasks {}
 
 impl Tasks {
     fn new(shards: usize) -> Self {
+        assert!(
+            shards.is_power_of_two(),
+            "Shards' count must be power of two"
+        );
         let shards: Vec<_> = (0..shards)
             .map(|_| parking_lot::Mutex::new(IList::new()))
             .collect();
@@ -72,7 +76,7 @@ impl Tasks {
         }
     }
 
-    /// Selects a shard between 0 and 63 randomly.
+    /// Selects a shard within the range of allocated shards randomly.
     ///
     /// The algorithm has distribution property to prevent clustering.
     fn select_shard(&self) -> usize {
@@ -203,7 +207,7 @@ where
     ///
     /// Shards' count is the count of concurrent lists used to track and manage its connections.
     ///
-    /// Shards' count muse be power of two.
+    /// Shards' count must be power of two.
     ///
     /// A higher count allocates more memory, but reduces contention and contributes to higher total system throughput.
     ///
@@ -229,7 +233,7 @@ where
     ///
     /// 1 - Stops accepting new connections with immediate effect.
     /// 2 - Signals termination to active sessions.
-    /// 4 - Waits for all active sessions to finish properly.
+    /// 3 - Waits for all active sessions to finish properly.
     /// 4 - Calls shutdown on the service to inform it to terminates its state machines,
     ///     and waits for its completion.
     pub async fn serve<A, L>(
@@ -244,11 +248,6 @@ where
         L: TransportListener<A> + Send + 'static,
         <L as TransportListener<A>>::Address: Debug + Send,
     {
-        assert!(
-            shards.is_power_of_two(),
-            "Shards' count must be power of two"
-        );
-
         let listener = L::bind(addr).await?;
 
         let state = Arc::new(ServerState::new(shards, service, conn_timeout));
@@ -286,7 +285,6 @@ where
                                 // Can panic.
                                 let result = Self::connection::<L::Transport>(
                                     &attached,
-                                    &t_state,
                                     transport,
                                     encryption_required,
                                 )
@@ -320,7 +318,6 @@ where
     /// Tries to negotiate a new session and starts one over the transport layer upon success.
     async fn connection<T>(
         node: &AttachedTaskNode<'_, H>,
-        state: &Arc<ServerState<H>>,
         mut transport: T,
         encryption_required: bool,
     ) -> RpcResult<()>
@@ -328,13 +325,13 @@ where
         T: TransportLayer + 'static,
     {
         let session = timeout(
-            state.timeout,
+            node.state.timeout,
             Self::negotiation(&mut transport, encryption_required),
         )
         .await??;
 
         let (r, w) = transport.into_split();
-        let service = state.service.clone();
+        let service = node.state.service.clone();
         match session {
             Session::Unencrypted => {
                 let s = RpcSender::new(w);
@@ -391,12 +388,12 @@ where
                 biased;
                  _ = node.notify_canceled() => return Err(RpcError::error(ErrKind::Canceled)),
             result = receiver.receive() => {
-                 match result {
-                 Ok(message) => Self::process_message(&service, &mut sender, &message).await?,
-                 Err(e) => return Err(e),
-             };
-             }
-             }
+                    match result {
+                        Ok(message) => Self::process_message(&service, &mut sender, &message).await?,
+                        Err(e) => return Err(e),
+                    };
+                }
+            }
         }
     }
 

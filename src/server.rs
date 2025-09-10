@@ -277,11 +277,12 @@ where
                             let ctrl_state = TaskControlState::new();
                             let mut task_node = TaskNode::new(ctrl_state);
 
+                            // Detached on drop.
+                            // If it has stuck or it was late, acquiring a token will fail fur sure.
+                            let attached = t_state.tasks.attach(&mut task_node, &t_state);
+
                             // Token released on drop.
                             if let Some(_token) = t_state.tasks.observer.acquire() {
-                                // Detached on drop.
-                                let attached = t_state.tasks.attach(&mut task_node, &t_state);
-
                                 // Can panic.
                                 let result = Self::connection::<L::Transport>(
                                     &attached,
@@ -291,18 +292,13 @@ where
                                 .await;
 
                                 if let Err(e) = result {
-                                    match e.kind {
-                                        ErrKind::Canceled => {
-                                            log::info!(
-                                                "Session with {addr:?} canceled by shutdown",
-                                            );
-                                            // Already detached by shutdown.
-                                            let _ = ManuallyDrop::new(attached);
-                                        }
-                                        _ => log::error!(
-                                            "Session with {addr:?} finished with error: {e}",
-                                        ),
-                                    }
+                                    log::error!("Session with {addr:?} finished with error: {e}")
+                                };
+
+                                if attached.t_node.i_node.is_canceled() {
+                                    log::info!("Session with {addr:?} canceled by shutdown");
+                                    // Already detached by shutdown.
+                                    let _ = ManuallyDrop::new(attached);
                                 }
                             }
                         });
@@ -386,7 +382,8 @@ where
         loop {
             select! {
                 biased;
-                 _ = node.notify_canceled() => return Err(RpcError::error(ErrKind::Canceled)),
+                // Cancellation is an intended, so there is no error.
+                 _ = node.notify_canceled() => return Ok(()),
             result = receiver.receive() => {
                     match result {
                         Ok(message) => Self::process_message(&service, &mut sender, &message).await?,

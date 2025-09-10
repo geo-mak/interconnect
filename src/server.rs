@@ -278,7 +278,7 @@ where
                             let mut task_node = TaskNode::new(ctrl_state);
 
                             // Detached on drop.
-                            // If it has stuck or it was late, acquiring a token will fail fur sure.
+                            // If it has stuck or it was late, acquiring a token will fail for sure.
                             let attached = t_state.tasks.attach(&mut task_node, &t_state);
 
                             // Token released on drop.
@@ -382,7 +382,7 @@ where
         loop {
             select! {
                 biased;
-                // Cancellation is an intended, so there is no error.
+                // Cancellation is intended, so there is no error.
                  _ = node.notify_canceled() => return Ok(()),
             result = receiver.receive() => {
                     match result {
@@ -559,7 +559,13 @@ mod tests {
         });
 
         tokio::try_join!(t1, t2, t3).expect("No panic expected");
+
         server.shutdown().await.unwrap();
+
+        assert!(server.listener.is_finished());
+        assert!(server.sessions() == 0);
+        assert!(Arc::weak_count(&server.state) == 0);
+        assert!(Arc::strong_count(&server.state) == 1);
     }
 
     #[tokio::test]

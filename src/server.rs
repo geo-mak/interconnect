@@ -168,14 +168,6 @@ impl<'a, H> Future for NotifyCanceledFuture<'a, H> {
     }
 }
 
-enum Session {
-    Unencrypted,
-    Encrypted {
-        r_key: EncryptionState,
-        w_key: EncryptionState,
-    },
-}
-
 struct ServerState<H> {
     tasks: Tasks,
     service: H,
@@ -318,33 +310,36 @@ where
         encryption_required: bool,
     ) -> RpcResult<()>
     where
-        T: TransportLayer + 'static,
+        T: TransportLayer,
     {
-        let session = timeout(
+        let encrypted = timeout(
             node.state.timeout,
             Self::negotiation(&mut transport, encryption_required),
         )
         .await??;
 
         let (r, w) = transport.into_split();
-        let service = node.state.service.clone();
-        match session {
-            Session::Unencrypted => {
-                let s = RpcSender::new(w);
-                let r = RpcReceiver::new(r);
-                Self::session(node, service, s, r).await
+        match encrypted {
+            None => {
+                let mut s = RpcSender::new(w);
+                let mut r = RpcReceiver::new(r);
+                Self::session(node, &mut s, &mut r).await
             }
-            Session::Encrypted { r_key, w_key } => {
-                let s = EncryptedRpcSender::new(w, w_key);
-                let r = EncryptedRpcReceiver::new(r, r_key);
-                Self::session(node, service, s, r).await
+            Some((r_key, w_key)) => {
+                let mut s = EncryptedRpcSender::new(w, w_key);
+                let mut r = EncryptedRpcReceiver::new(r, r_key);
+                Self::session(node, &mut s, &mut r).await
             }
         }
     }
 
-    async fn negotiation<T>(mut transport: &mut T, encryption_required: bool) -> RpcResult<Session>
+    #[inline]
+    async fn negotiation<T>(
+        mut transport: &mut T,
+        encryption_required: bool,
+    ) -> RpcResult<Option<(EncryptionState, EncryptionState)>>
     where
-        T: TransportLayer + 'static,
+        T: TransportLayer,
     {
         let proposed = negotiation::read_frame(&mut transport).await?;
 
@@ -356,29 +351,27 @@ where
         if proposed.encryption {
             negotiation::confirm(&mut transport).await?;
             let (r_key, w_key) = negotiation::accept_key_exchange(&mut transport).await?;
-            let session = Session::Encrypted { r_key, w_key };
-            Ok(session)
+            Ok(Some((r_key, w_key)))
         } else {
             if encryption_required {
                 negotiation::reject(&mut transport).await?;
                 return Err(RpcError::error(ErrKind::CapabilityMismatch));
             }
             negotiation::confirm(&mut transport).await?;
-            let session = Session::Unencrypted;
-            Ok(session)
+            Ok(None)
         }
     }
 
     async fn session<S, R>(
         node: &AttachedTaskNode<'_, H>,
-        service: H,
-        mut sender: S,
-        mut receiver: R,
+        sender: &mut S,
+        receiver: &mut R,
     ) -> RpcResult<()>
     where
-        S: RpcAsyncSender + 'static,
-        R: RpcAsyncReceiver + 'static,
+        S: RpcAsyncSender,
+        R: RpcAsyncReceiver,
     {
+        let service = node.state.service.clone();
         loop {
             select! {
                 biased;
@@ -386,7 +379,7 @@ where
                  _ = node.notify_canceled() => return Ok(()),
             result = receiver.receive() => {
                     match result {
-                        Ok(message) => Self::process_message(&service, &mut sender, &message).await?,
+                        Ok(message) => Self::process_message(&service, sender, &message).await?,
                         Err(e) => return Err(e),
                     };
                 }
@@ -396,7 +389,7 @@ where
 
     async fn process_message<S>(service: &H, sender: &mut S, message: &Message) -> RpcResult<()>
     where
-        S: RpcAsyncSender + 'static,
+        S: RpcAsyncSender,
     {
         match &message.kind {
             MessageType::Call(call) => match service.call(call).await {

@@ -130,9 +130,7 @@ pub type WriteState = EncryptionState;
 
 /// Stores the cipher-state and provides encryption and decryption methods.
 pub struct EncryptionState {
-    // Indirection is necessary because it is too large
-    // to keep high volume of it on the stack.
-    cipher: Box<Aes128Gcm>,
+    cipher: Aes128Gcm,
     sequence: u64,
     nonce_base: [u8; 4],
 }
@@ -142,7 +140,7 @@ impl EncryptionState {
         let cipher =
             Aes128Gcm::new_from_slice(key).map_err(|_| RpcError::error(ErrKind::InvalidKey))?;
         Ok(Self {
-            cipher: Box::new(cipher),
+            cipher,
             sequence: 0,
             nonce_base,
         })

@@ -354,7 +354,7 @@ impl<T> IList<T> {
         node.next = None;
 
         match self.last {
-            Some(mut last) => last.as_mut().next = Some(node.into()),
+            Some(mut last) => unsafe { last.as_mut().next = Some(node.into()) },
             None => {
                 // list is empty, so first is now this node also.
                 self.first = Some(node.into());
@@ -369,7 +369,7 @@ impl<T> IList<T> {
         node.next = self.first;
         node.prev = None;
         if let Some(mut first) = self.first {
-            first.as_mut().prev = Some(node.into())
+            unsafe { first.as_mut().prev = Some(node.into()) }
         }
         self.first = Some(node.into());
         if self.last.is_none() {
@@ -387,10 +387,10 @@ impl<T> IList<T> {
                 }
                 self.first = node.next;
             }
-            Some(mut prev) => {
+            Some(mut prev) => unsafe {
                 debug_assert_eq!(prev.as_ref().next, Some(node.into()));
                 prev.as_mut().next = node.next;
-            }
+            },
         }
 
         match node.next {
@@ -398,10 +398,10 @@ impl<T> IList<T> {
                 debug_assert_eq!(self.last, Some(node.into()));
                 self.last = node.prev;
             }
-            Some(mut next) => {
+            Some(mut next) => unsafe {
                 debug_assert_eq!(next.as_mut().prev, Some(node.into()));
                 next.as_mut().prev = node.prev;
-            }
+            },
         }
 
         node.next = None;

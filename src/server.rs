@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::task::{Context, Poll};
 use std::time::Duration;
 
-use tokio::select;
+use pin_project_lite::pin_project;
 
 use tokio::task::JoinHandle;
 use tokio::time::timeout;
@@ -102,7 +102,7 @@ impl Tasks {
         unsafe { self.shards[shard].lock().attach_first(&mut node.i_node) };
         AttachedTaskNode {
             t_node: node,
-            state,
+            s_state: state,
             shard,
         }
     }
@@ -125,46 +125,74 @@ unsafe impl Sync for TaskNode {}
 
 impl TaskNode {
     #[inline(always)]
-    fn new(state: TaskControlState) -> Self {
+    const fn new() -> Self {
         Self {
-            i_node: INode::new(state),
+            i_node: INode::new(TaskControlState::new()),
         }
     }
 }
 
 struct AttachedTaskNode<'a, H> {
     // Must be by ref.
-    state: &'a Arc<ServerState<H>>,
+    s_state: &'a Arc<ServerState<H>>,
     t_node: &'a mut TaskNode,
     shard: usize,
 }
 
 impl<'a, H> Drop for AttachedTaskNode<'a, H> {
     fn drop(&mut self) {
-        self.state.tasks.detach(self);
+        self.s_state.tasks.detach(self);
     }
 }
 
 impl<'a, H> AttachedTaskNode<'a, H> {
     #[inline(always)]
-    fn notify_canceled(&self) -> NotifyCanceledFuture<'_, H> {
-        NotifyCanceledFuture { attached: self }
+    fn await_cancelable<F>(&self, future: F) -> CancelableFuture<'_, F> {
+        CancelableFuture {
+            state: &self.t_node.i_node,
+            future,
+        }
     }
 }
 
-struct NotifyCanceledFuture<'a, H> {
-    attached: &'a AttachedTaskNode<'a, H>,
+struct Canceled;
+
+pin_project! {
+    struct CancelableFuture<'a, F> {
+        state: &'a TaskControlState,
+        #[pin]
+        future: F,
+    }
 }
 
-impl<'a, H> Future for NotifyCanceledFuture<'a, H> {
-    type Output = ();
+impl<'a, F> CancelableFuture<'a, F> {
+    fn try_poll<I>(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        poll: impl Fn(Pin<&mut F>, &mut Context<'_>) -> Poll<I>,
+    ) -> Poll<Result<I, Canceled>> {
+        if self.state.is_canceled() {
+            return Poll::Ready(Err(Canceled));
+        }
+        if let Poll::Ready(x) = poll(self.as_mut().project().future, cx) {
+            return Poll::Ready(Ok(x));
+        }
+        self.state.waiter.set(cx.waker());
+        if self.state.is_canceled() {
+            return Poll::Ready(Err(Canceled));
+        }
+        Poll::Pending
+    }
+}
+
+impl<'a, F> Future for CancelableFuture<'a, F>
+where
+    F: Future,
+{
+    type Output = Result<F::Output, Canceled>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        if self.attached.t_node.i_node.is_canceled() {
-            return Poll::Ready(());
-        };
-        self.attached.t_node.i_node.waiter.set(cx.waker());
-        Poll::Pending
+        self.try_poll(cx, |fut, cx| fut.poll(cx))
     }
 }
 
@@ -266,11 +294,10 @@ where
                             //   because futures are constructed as "pinned" state machines.
                             // - Updating the node's next/prev and accessing its data can be concurrent.
                             // - The waker is atomic, set and wake can be concurrent.
-                            let ctrl_state = TaskControlState::new();
-                            let mut task_node = TaskNode::new(ctrl_state);
+                            let mut task_node = TaskNode::new();
 
                             // Detached on drop.
-                            // If it has stuck or it was late, acquiring a token will fail for sure.
+                            // In case of "late-binding", acquiring a token will fail for sure.
                             let attached = t_state.tasks.attach(&mut task_node, &t_state);
 
                             // Token released on drop.
@@ -283,15 +310,18 @@ where
                                 )
                                 .await;
 
-                                if let Err(e) = result {
+                                if let Err(e) = result
+                                    && e.kind != ErrKind::Disconnected
+                                {
                                     log::error!("Session with {addr:?} finished with error: {e}")
                                 };
+                            }
 
-                                if attached.t_node.i_node.is_canceled() {
-                                    log::info!("Session with {addr:?} canceled by shutdown");
-                                    // Already detached by shutdown.
-                                    let _ = ManuallyDrop::new(attached);
-                                }
+                            // Detaching again is safe, but we try to avoid the "thundering herd" problem.
+                            // This allows shutdown to access locks smoothly without contention.
+                            if attached.t_node.i_node.is_canceled() {
+                                log::info!("Session with {addr:?} canceled by shutdown");
+                                let _ = ManuallyDrop::new(attached);
                             }
                         });
                     }
@@ -312,8 +342,9 @@ where
     where
         T: TransportLayer,
     {
+        // TODO: Is it worth cancellation logic?
         let encrypted = timeout(
-            node.state.timeout,
+            node.s_state.timeout,
             Self::negotiation(&mut transport, encryption_required),
         )
         .await??;
@@ -371,40 +402,29 @@ where
         S: RpcAsyncSender,
         R: RpcAsyncReceiver,
     {
-        let service = node.state.service.clone();
+        let service = node.s_state.service.clone();
         loop {
-            select! {
-                biased;
-                // Cancellation is intended, so there is no error.
-                 _ = node.notify_canceled() => return Ok(()),
-            result = receiver.receive() => {
-                    match result {
-                        Ok(message) => Self::process_message(&service, sender, &message).await?,
-                        Err(e) => return Err(e),
-                    };
+            match node.await_cancelable(receiver.receive()).await {
+                Ok(result) => {
+                    let message = result?;
+                    match &message.kind {
+                        MessageType::Call(call) => match service.call(call).await {
+                            Ok(result) => sender.send(&Message::reply(message.id, result)).await?,
+                            Err(err) => sender.send(&Message::error(message.id, err)).await?,
+                        },
+                        MessageType::Notification(notify) => {
+                            // Notification, no reply.
+                            service.notify(notify).await?;
+                            continue;
+                        }
+                        MessageType::Ping => sender.send(&Message::pong(message.id)).await?,
+                        _ => {
+                            log::warn!("Received unexpected message type: {:?}", message.kind);
+                            continue;
+                        }
+                    }
                 }
-            }
-        }
-    }
-
-    async fn process_message<S>(service: &H, sender: &mut S, message: &Message) -> RpcResult<()>
-    where
-        S: RpcAsyncSender,
-    {
-        match &message.kind {
-            MessageType::Call(call) => match service.call(call).await {
-                Ok(result) => sender.send(&Message::reply(message.id, result)).await,
-                Err(err) => sender.send(&Message::error(message.id, err)).await,
-            },
-            MessageType::Notification(notify) => {
-                // Notification, no reply.
-                let _ = service.notify(notify).await;
-                Ok(())
-            }
-            MessageType::Ping => sender.send(&Message::pong(message.id)).await,
-            _ => {
-                log::warn!("Received unexpected message type: {:?}", message.kind);
-                Ok(())
+                Err(Canceled) => return Ok(()),
             }
         }
     }

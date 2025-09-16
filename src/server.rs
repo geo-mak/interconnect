@@ -4,7 +4,7 @@ use std::mem::ManuallyDrop;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU8;
-use std::sync::atomic::Ordering::{AcqRel, Acquire, Release};
+use std::sync::atomic::Ordering::{AcqRel, Acquire};
 use std::task::{Context, Poll, Waker};
 use std::time::Duration;
 
@@ -121,9 +121,8 @@ impl TaskControlState {
     fn cancel(&self) {
         match self.state.fetch_or(CANCEL, AcqRel) {
             WAIT => {
-                let data = unsafe { (*self.waker.get()).take() };
-                self.state.swap(CANCEL, Release);
-                if let Some(waker) = data {
+                // Cancellation is checked based on `CANCEL` flag.
+                if let Some(waker) = unsafe { (*self.waker.get()).take() } {
                     waker.wake();
                 }
             }
@@ -469,12 +468,10 @@ where
                         MessageType::Notification(notify) => {
                             // Notification, no reply.
                             service.notify(notify).await?;
-                            continue;
                         }
                         MessageType::Ping => sender.send(&Message::pong(message.id)).await?,
                         _ => {
                             log::warn!("Received unexpected message type: {:?}", message.kind);
-                            continue;
                         }
                     }
                 }

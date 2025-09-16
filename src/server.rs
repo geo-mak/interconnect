@@ -1,12 +1,11 @@
-use std::cell::Cell;
+use std::cell::{Cell, UnsafeCell};
 use std::fmt::Debug;
-
 use std::mem::ManuallyDrop;
-
 use std::pin::Pin;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::task::{Context, Poll};
+use std::sync::atomic::AtomicU8;
+use std::sync::atomic::Ordering::{AcqRel, Acquire, Release};
+use std::task::{Context, Poll, Waker};
 use std::time::Duration;
 
 use pin_project_lite::pin_project;
@@ -22,35 +21,12 @@ use crate::stream::{
     EncryptedRpcReceiver, EncryptedRpcSender, RpcAsyncReceiver, RpcAsyncSender, RpcReceiver,
     RpcSender,
 };
-use crate::sync::{AtomicWaker, DynamicLatch, IList, INode};
+use crate::sync::{DynamicLatch, IList, INode};
 use crate::transport::{TransportLayer, TransportListener};
 
 thread_local! {
     // Must be non-zero.
     static RNG_STATE: Cell<u64> = const { Cell::new(0x12345678ABCDEF) };
-}
-
-struct TaskControlState {
-    canceled: AtomicBool,
-    waiter: AtomicWaker,
-}
-
-impl TaskControlState {
-    const fn new() -> Self {
-        Self {
-            canceled: AtomicBool::new(false),
-            waiter: AtomicWaker::new(),
-        }
-    }
-
-    fn cancel(&self) {
-        self.canceled.store(true, Ordering::Relaxed);
-        self.waiter.wake();
-    }
-
-    fn is_canceled(&self) -> bool {
-        self.canceled.load(Ordering::Relaxed)
-    }
 }
 
 struct Tasks {
@@ -116,6 +92,125 @@ impl Tasks {
     }
 }
 
+struct TaskControlState {
+    state: AtomicU8,
+    waker: UnsafeCell<Option<Waker>>,
+}
+
+const WAIT: u8 = 0b00;
+const SET: u8 = 0b01;
+const CANCEL: u8 = 0b10;
+const SET_CANCEL: u8 = SET | CANCEL;
+
+unsafe impl Send for TaskControlState {}
+unsafe impl Sync for TaskControlState {}
+
+impl TaskControlState {
+    #[inline]
+    fn new() -> Self {
+        Self {
+            state: AtomicU8::new(WAIT),
+            waker: UnsafeCell::new(None),
+        }
+    }
+
+    /// Sets the state to canceled and wakes the stored waker if any.
+    ///
+    /// Safe to call concurrently while polling.
+    #[inline]
+    fn cancel(&self) {
+        match self.state.fetch_or(CANCEL, AcqRel) {
+            WAIT => {
+                let data = unsafe { (*self.waker.get()).take() };
+                self.state.swap(CANCEL, Release);
+                if let Some(waker) = data {
+                    waker.wake();
+                }
+            }
+            other => {
+                // A concurrent thread is doing `POLL`, `CANCEL` flag has been set,
+                debug_assert!(other == SET || other == SET | CANCEL || other == CANCEL);
+            }
+        }
+    }
+
+    #[inline(always)]
+    fn is_canceled(&self) -> bool {
+        self.state.load(Acquire) & CANCEL != 0
+    }
+}
+
+struct Canceled;
+
+pin_project! {
+    struct TaskControlFuture<'a, F> {
+        control: &'a TaskControlState,
+        #[pin]
+        future: F,
+    }
+}
+
+impl<'a, F> TaskControlFuture<'a, F> {
+    fn try_poll<I>(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        poll: impl Fn(Pin<&mut F>, &mut Context<'_>) -> Poll<I>,
+    ) -> Poll<Result<I, Canceled>> {
+        if self.control.is_canceled() {
+            return Poll::Ready(Err(Canceled));
+        }
+
+        if let Poll::Ready(x) = poll(self.as_mut().project().future, cx) {
+            return Poll::Ready(Ok(x));
+        }
+
+        let observed = match self
+            .control
+            .state
+            .compare_exchange(WAIT, SET, AcqRel, Acquire)
+        {
+            Ok(prev) => prev,
+            Err(current) => current,
+        };
+
+        match observed {
+            WAIT => unsafe {
+                match &*self.control.waker.get() {
+                    Some(prev) if prev.will_wake(cx.waker()) => (),
+                    _ => *self.control.waker.get() = Some(cx.waker().clone()),
+                }
+                // If the state transitioned to include the `CANCEL` flag,
+                // this means that `cancel()` has been called concurrently,
+                if let Err(current) = self
+                    .control
+                    .state
+                    .compare_exchange(SET, WAIT, AcqRel, Acquire)
+                {
+                    debug_assert_eq!(current, SET_CANCEL);
+                    return Poll::Ready(Err(Canceled));
+                }
+            },
+            CANCEL | SET_CANCEL => {
+                return Poll::Ready(Err(Canceled));
+            }
+            // No multiple pollers.
+            _ => unreachable!("Task is being polled concurrently"),
+        }
+        Poll::Pending
+    }
+}
+
+impl<'a, F> Future for TaskControlFuture<'a, F>
+where
+    F: Future,
+{
+    type Output = Result<F::Output, Canceled>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        self.try_poll(cx, |fut, cx| fut.poll(cx))
+    }
+}
+
 struct TaskNode {
     i_node: INode<TaskControlState>,
 }
@@ -125,7 +220,7 @@ unsafe impl Sync for TaskNode {}
 
 impl TaskNode {
     #[inline(always)]
-    const fn new() -> Self {
+    fn new() -> Self {
         Self {
             i_node: INode::new(TaskControlState::new()),
         }
@@ -147,52 +242,11 @@ impl<'a, H> Drop for AttachedTaskNode<'a, H> {
 
 impl<'a, H> AttachedTaskNode<'a, H> {
     #[inline(always)]
-    fn await_cancelable<F>(&self, future: F) -> CancelableFuture<'_, F> {
-        CancelableFuture {
-            state: &self.t_node.i_node,
+    fn wait_cancelable<F>(&self, future: F) -> TaskControlFuture<'_, F> {
+        TaskControlFuture {
+            control: &self.t_node.i_node,
             future,
         }
-    }
-}
-
-struct Canceled;
-
-pin_project! {
-    struct CancelableFuture<'a, F> {
-        state: &'a TaskControlState,
-        #[pin]
-        future: F,
-    }
-}
-
-impl<'a, F> CancelableFuture<'a, F> {
-    fn try_poll<I>(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        poll: impl Fn(Pin<&mut F>, &mut Context<'_>) -> Poll<I>,
-    ) -> Poll<Result<I, Canceled>> {
-        if self.state.is_canceled() {
-            return Poll::Ready(Err(Canceled));
-        }
-        if let Poll::Ready(x) = poll(self.as_mut().project().future, cx) {
-            return Poll::Ready(Ok(x));
-        }
-        self.state.waiter.set(cx.waker());
-        if self.state.is_canceled() {
-            return Poll::Ready(Err(Canceled));
-        }
-        Poll::Pending
-    }
-}
-
-impl<'a, F> Future for CancelableFuture<'a, F>
-where
-    F: Future,
-{
-    type Output = Result<F::Output, Canceled>;
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        self.try_poll(cx, |fut, cx| fut.poll(cx))
     }
 }
 
@@ -404,7 +458,7 @@ where
     {
         let service = node.s_state.service.clone();
         loop {
-            match node.await_cancelable(receiver.receive()).await {
+            match node.wait_cancelable(receiver.receive()).await {
                 Ok(result) => {
                     let message = result?;
                     match &message.kind {

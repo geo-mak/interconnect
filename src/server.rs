@@ -326,17 +326,17 @@ where
                             // |--- i_node: INode<TaskControlState>
                             //      |-- prev: ptr INode<TaskControlState>  | Pointers:
                             //      |-- next: ptr INode<TaskControlState>  | Accessed locked when attaching and detaching.
-                            //      |-- data: TaskControlState
-                            //            |-- canceled: AtomicBool         | Data:
-                            //            |-- waiter: AtomicWaker          | Accessed directly by attached node and its future.
+                            //      |-- data: TaskControlState             | Data:
+                            //                                             | Accessed directly by attached node and its future.
                             //                                             | Accessed locked but concurrently by shutdown.
+                            //
                             // Safety:
                             // - The node and its control state are stored on the future and valid only as long
                             //   the future is still alive.
                             // - The address of the node is "assumed" to be stable,
                             //   because futures are constructed as "pinned" state machines.
                             // - Updating the node's next/prev and accessing its data can be concurrent.
-                            // - The waker is atomic, set and wake can be concurrent.
+                            // - The state is atomic, updating and canceling can be concurrent.
                             let mut task_node = TaskNode::new();
 
                             // Detached on drop.

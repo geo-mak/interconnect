@@ -128,38 +128,39 @@ impl TaskControlState {
             }
             other => {
                 // A concurrent thread is doing `POLL`, `CANCEL` flag has been set,
-                debug_assert!(other == SET || other == SET | CANCEL || other == CANCEL);
+                debug_assert!(other == SET || other == CANCEL || other == SET_CANCEL);
             }
         }
     }
 
     #[inline(always)]
     fn is_canceled(&self) -> bool {
-        self.state.load(Acquire) & CANCEL != 0
+        self.state.load(Acquire) > SET
     }
 }
 
 struct Canceled;
 
 pin_project! {
-    struct TaskControlFuture<'a, F> {
+    struct CancelableTask<'a, F> {
         control: &'a TaskControlState,
         #[pin]
         future: F,
     }
 }
 
-impl<'a, F> TaskControlFuture<'a, F> {
-    fn try_poll<I>(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        poll: impl Fn(Pin<&mut F>, &mut Context<'_>) -> Poll<I>,
-    ) -> Poll<Result<I, Canceled>> {
+impl<'a, F> Future for CancelableTask<'a, F>
+where
+    F: Future,
+{
+    type Output = Result<F::Output, Canceled>;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         if self.control.is_canceled() {
             return Poll::Ready(Err(Canceled));
         }
 
-        if let Poll::Ready(x) = poll(self.as_mut().project().future, cx) {
+        if let Poll::Ready(x) = self.as_mut().project().future.poll(cx) {
             return Poll::Ready(Ok(x));
         }
 
@@ -199,17 +200,6 @@ impl<'a, F> TaskControlFuture<'a, F> {
     }
 }
 
-impl<'a, F> Future for TaskControlFuture<'a, F>
-where
-    F: Future,
-{
-    type Output = Result<F::Output, Canceled>;
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        self.try_poll(cx, |fut, cx| fut.poll(cx))
-    }
-}
-
 struct TaskNode {
     i_node: INode<TaskControlState>,
 }
@@ -241,8 +231,8 @@ impl<'a, H> Drop for AttachedTaskNode<'a, H> {
 
 impl<'a, H> AttachedTaskNode<'a, H> {
     #[inline(always)]
-    fn wait_cancelable<F>(&self, future: F) -> TaskControlFuture<'_, F> {
-        TaskControlFuture {
+    fn wait_cancelable<F>(&self, future: F) -> CancelableTask<'_, F> {
+        CancelableTask {
             control: &self.t_node.i_node,
             future,
         }

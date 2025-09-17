@@ -31,6 +31,7 @@ thread_local! {
 
 struct Tasks {
     shards: Box<[parking_lot::Mutex<IList<TaskControlState>>]>,
+    mask: usize,
     observer: DynamicLatch,
 }
 
@@ -38,16 +39,17 @@ unsafe impl Send for Tasks {}
 unsafe impl Sync for Tasks {}
 
 impl Tasks {
-    fn new(shards: usize) -> Self {
+    fn new(n_shards: usize) -> Self {
         assert!(
-            shards.is_power_of_two(),
+            n_shards.is_power_of_two(),
             "Shards' count must be power of two"
         );
-        let shards: Vec<_> = (0..shards)
+        let shards: Vec<_> = (0..n_shards)
             .map(|_| parking_lot::Mutex::new(IList::new()))
             .collect();
         Self {
             shards: shards.into_boxed_slice(),
+            mask: n_shards - 1,
             observer: DynamicLatch::new(),
         }
     }
@@ -63,9 +65,7 @@ impl Tasks {
             x ^= x << 25;
             x ^= x >> 27;
             s.set(x);
-            // Len must be power of two.
-            let mask = self.shards.len() - 1;
-            (x.wrapping_mul(0x2545F4914F6CDD1D) as usize) & mask
+            (x.wrapping_mul(0x2545F4914F6CDD1D) as usize) & self.mask
         })
     }
 

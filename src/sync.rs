@@ -149,9 +149,9 @@ impl fmt::Debug for AtomicWaker {
 /// and the scheduled `wait` future will resolve automatically,
 /// when the count of active locks has reached `0`.
 pub struct DynamicLatch {
-    /// Bits array: [ ... lock count ... | open bit ].
-    /// Lock count: usize value.
-    /// Open bit: 1 is open, 0 is closed.
+    /// Bits array:
+    /// Lower bit: 1 is open, 0 is closed.
+    /// Higher bits: locks count as usize value.
     state: AtomicUsize,
     waiter: AtomicWaker,
 }

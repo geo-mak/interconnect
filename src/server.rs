@@ -71,18 +71,18 @@ impl Tasks {
 
     fn attach<'a, H>(
         &'a self,
-        node: &'a mut TaskNode,
+        task: &'a mut Task,
         state: &'a Arc<ServerState<H>>,
-    ) -> Option<AttachedTaskNode<'a, H>> {
+    ) -> Option<AttachedTask<'a, H>> {
         let shard = self.select_shard();
         let mut shard_lock = self.shards[shard].lock();
         if self.observer.acquire_manual() {
             unsafe {
-                shard_lock.attach_first(&mut node.i_node);
+                shard_lock.attach_first(&mut task.i_node);
                 drop(shard_lock);
             };
-            return Some(AttachedTaskNode {
-                t_node: node,
+            return Some(AttachedTask {
+                task,
                 s_state: state,
                 shard,
             });
@@ -90,12 +90,8 @@ impl Tasks {
         None
     }
 
-    fn detach<H>(&self, node: &mut AttachedTaskNode<'_, H>) {
-        unsafe {
-            self.shards[node.shard]
-                .lock()
-                .detach(&mut node.t_node.i_node)
-        };
+    fn detach<H>(&self, node: &mut AttachedTask<'_, H>) {
+        unsafe { self.shards[node.shard].lock().detach(&mut node.task.i_node) };
     }
 }
 
@@ -207,14 +203,14 @@ where
     }
 }
 
-struct TaskNode {
+struct Task {
     i_node: INode<TaskControlState>,
 }
 
-unsafe impl Send for TaskNode {}
-unsafe impl Sync for TaskNode {}
+unsafe impl Send for Task {}
+unsafe impl Sync for Task {}
 
-impl TaskNode {
+impl Task {
     #[inline(always)]
     const fn new() -> Self {
         Self {
@@ -223,25 +219,25 @@ impl TaskNode {
     }
 }
 
-struct AttachedTaskNode<'a, H> {
+struct AttachedTask<'a, H> {
     // Must be by ref.
     s_state: &'a Arc<ServerState<H>>,
-    t_node: &'a mut TaskNode,
+    task: &'a mut Task,
     shard: usize,
 }
 
-impl<'a, H> Drop for AttachedTaskNode<'a, H> {
+impl<'a, H> Drop for AttachedTask<'a, H> {
     fn drop(&mut self) {
         self.s_state.tasks.detach(self);
         self.s_state.tasks.observer.release();
     }
 }
 
-impl<'a, H> AttachedTaskNode<'a, H> {
+impl<'a, H> AttachedTask<'a, H> {
     #[inline(always)]
     fn wait_cancelable<F>(&self, future: F) -> CancelableTask<'_, F> {
         CancelableTask {
-            control: &self.t_node.i_node,
+            control: &self.task.i_node,
             future,
         }
     }
@@ -336,25 +332,25 @@ where
                     Ok((transport, addr)) => {
                         let t_state = l_state.clone();
                         tokio::spawn(async move {
-                            // TaskNode:
+                            // Task:
                             // |--- i_node: INode<TaskControlState>
                             //      |-- prev: ptr INode<TaskControlState>  | Pointers:
                             //      |-- next: ptr INode<TaskControlState>  | Accessed locked when attaching and detaching.
                             //      |-- data: TaskControlState             | Data:
-                            //                                             | Accessed directly by attached node and its future.
+                            //                                             | Accessed directly by attached task and its future.
                             //                                             | Accessed locked but concurrently by shutdown.
                             //
                             // Safety:
-                            // - The node and its control state are stored on the future and valid only as long
+                            // - The task and its control state are stored on the future and valid only as long
                             //   the future is still alive.
-                            // - The address of the node is "assumed" to be stable,
+                            // - The address of the task is "assumed" to be stable,
                             //   because futures are constructed as "pinned" state machines.
-                            // - Updating the node's next/prev and accessing its data can be concurrent.
+                            // - Updating the task's node and accessing its data can be concurrent.
                             // - The state is atomic, updating and canceling can be concurrent.
-                            let mut task_node = TaskNode::new();
+                            let mut task = Task::new();
 
                             // Detached on drop with release effect.
-                            if let Some(attached) = t_state.tasks.attach(&mut task_node, &t_state) {
+                            if let Some(attached) = t_state.tasks.attach(&mut task, &t_state) {
                                 // Can panic.
                                 let result = Self::connection::<L::Transport>(
                                     &attached,
@@ -371,7 +367,7 @@ where
 
                                 // Detaching again is safe, but we try to avoid the "thundering herd" problem.
                                 // This allows shutdown to access locks smoothly without contention.
-                                if attached.t_node.i_node.is_canceled() {
+                                if attached.task.i_node.is_canceled() {
                                     log::info!("Session with {addr:?} canceled by shutdown");
                                     attached.release_undetached();
                                 }
@@ -388,7 +384,7 @@ where
 
     /// Tries to negotiate a new session and starts one over the transport layer upon success.
     async fn connection<T>(
-        node: &AttachedTaskNode<'_, H>,
+        task: &AttachedTask<'_, H>,
         mut transport: T,
         encryption_required: bool,
     ) -> RpcResult<()>
@@ -397,7 +393,7 @@ where
     {
         // TODO: Is it worth cancellation logic?
         let encrypted = timeout(
-            node.s_state.timeout,
+            task.s_state.timeout,
             Self::negotiation(&mut transport, encryption_required),
         )
         .await??;
@@ -407,12 +403,12 @@ where
             None => {
                 let mut s = RpcSender::new(w);
                 let mut r = RpcReceiver::new(r);
-                Self::session(node, &mut s, &mut r).await
+                Self::session(task, &mut s, &mut r).await
             }
             Some((r_key, w_key)) => {
                 let mut s = EncryptedRpcSender::new(w, w_key);
                 let mut r = EncryptedRpcReceiver::new(r, r_key);
-                Self::session(node, &mut s, &mut r).await
+                Self::session(task, &mut s, &mut r).await
             }
         }
     }
@@ -447,7 +443,7 @@ where
     }
 
     async fn session<S, R>(
-        node: &AttachedTaskNode<'_, H>,
+        task: &AttachedTask<'_, H>,
         sender: &mut S,
         receiver: &mut R,
     ) -> RpcResult<()>
@@ -455,9 +451,9 @@ where
         S: RpcAsyncSender,
         R: RpcAsyncReceiver,
     {
-        let service = node.s_state.service.clone();
+        let service = task.s_state.service.clone();
         loop {
-            match node.wait_cancelable(receiver.receive()).await {
+            match task.wait_cancelable(receiver.receive()).await {
                 Ok(result) => {
                     let message = result?;
                     match &message.kind {

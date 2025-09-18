@@ -131,12 +131,12 @@ where
                 match rx.receive().await {
                     Ok(message) => {
                         if let Err(e) = Self::process_incoming(&c_state, message).await {
-                            log::error!("Handling error: {e}");
+                            eprintln!("Handling error: {e}");
                             break;
                         }
                     }
                     Err(e) => {
-                        log::warn!("Receiving error: {e}");
+                        eprintln!("Receiving error: {e}");
                         break;
                     }
                 }
@@ -188,7 +188,7 @@ where
                 return state.sender.lock().await.send(&pong).await;
             }
             _ => {
-                log::warn!("Received unexpected message type: {:?}", message.kind);
+                eprintln!("Received unexpected message type: {:?}", message.kind);
             }
         }
         Ok(())

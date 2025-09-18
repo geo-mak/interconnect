@@ -362,19 +362,19 @@ where
                                 if let Err(e) = result
                                     && e.kind != ErrKind::Disconnected
                                 {
-                                    log::error!("Session with {addr:?} finished with error: {e}")
+                                    eprintln!("Session with {addr:?} finished with error: {e}")
                                 };
 
                                 // Detaching again is safe, but we try to avoid the "thundering herd" problem.
                                 // This allows shutdown to access locks smoothly without contention.
                                 if attached.task.i_node.is_canceled() {
-                                    log::info!("Session with {addr:?} canceled by shutdown");
+                                    println!("Session with {addr:?} canceled by shutdown");
                                     attached.release_undetached();
                                 }
                             }
                         });
                     }
-                    Err(e) => log::error!("Failed to accept connection: {e}"),
+                    Err(e) => eprintln!("Failed to accept connection: {e}"),
                 }
             }
         });
@@ -467,7 +467,7 @@ where
                         }
                         MessageType::Ping => sender.send(&Message::pong(message.id)).await?,
                         _ => {
-                            log::warn!("Received unexpected message type: {:?}", message.kind);
+                            eprintln!("Received unexpected message type: {:?}", message.kind);
                         }
                     }
                 }

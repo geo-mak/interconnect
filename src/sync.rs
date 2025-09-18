@@ -195,8 +195,18 @@ impl DynamicLatch {
         })
     }
 
+    #[inline]
+    pub(crate) fn acquire_manual(&self) -> bool {
+        let current = self.state.fetch_add(2, Ordering::Acquire);
+        if (current & 1) != 0 {
+            self.release();
+            return false;
+        }
+        true
+    }
+
     #[inline(always)]
-    fn release(&self) {
+    pub(crate) fn release(&self) {
         // If last state was open and has exactly one last lock.
         if self.state.fetch_sub(2, Ordering::Release) == 3 {
             self.waiter.wake();

@@ -73,14 +73,21 @@ impl Tasks {
         &'a self,
         node: &'a mut TaskNode,
         state: &'a Arc<ServerState<H>>,
-    ) -> AttachedTaskNode<'a, H> {
+    ) -> Option<AttachedTaskNode<'a, H>> {
         let shard = self.select_shard();
-        unsafe { self.shards[shard].lock().attach_first(&mut node.i_node) };
-        AttachedTaskNode {
-            t_node: node,
-            s_state: state,
-            shard,
+        let mut shard_lock = self.shards[shard].lock();
+        if self.observer.acquire_manual() {
+            unsafe {
+                shard_lock.attach_first(&mut node.i_node);
+                drop(shard_lock);
+            };
+            return Some(AttachedTaskNode {
+                t_node: node,
+                s_state: state,
+                shard,
+            });
         }
+        None
     }
 
     fn detach<H>(&self, node: &mut AttachedTaskNode<'_, H>) {
@@ -107,7 +114,7 @@ unsafe impl Sync for TaskControlState {}
 
 impl TaskControlState {
     #[inline]
-    fn new() -> Self {
+    const fn new() -> Self {
         Self {
             state: AtomicU8::new(WAIT),
             waker: UnsafeCell::new(None),
@@ -209,7 +216,7 @@ unsafe impl Sync for TaskNode {}
 
 impl TaskNode {
     #[inline(always)]
-    fn new() -> Self {
+    const fn new() -> Self {
         Self {
             i_node: INode::new(TaskControlState::new()),
         }
@@ -226,6 +233,7 @@ struct AttachedTaskNode<'a, H> {
 impl<'a, H> Drop for AttachedTaskNode<'a, H> {
     fn drop(&mut self) {
         self.s_state.tasks.detach(self);
+        self.s_state.tasks.observer.release();
     }
 }
 
@@ -236,6 +244,12 @@ impl<'a, H> AttachedTaskNode<'a, H> {
             control: &self.t_node.i_node,
             future,
         }
+    }
+
+    #[inline(always)]
+    fn release_undetached(self) {
+        self.s_state.tasks.observer.release();
+        let _ = ManuallyDrop::new(self);
     }
 }
 
@@ -339,12 +353,8 @@ where
                             // - The state is atomic, updating and canceling can be concurrent.
                             let mut task_node = TaskNode::new();
 
-                            // Detached on drop.
-                            // In case of "late-binding", acquiring a token will fail for sure.
-                            let attached = t_state.tasks.attach(&mut task_node, &t_state);
-
-                            // Token released on drop.
-                            if let Some(_token) = t_state.tasks.observer.acquire() {
+                            // Detached on drop with release effect.
+                            if let Some(attached) = t_state.tasks.attach(&mut task_node, &t_state) {
                                 // Can panic.
                                 let result = Self::connection::<L::Transport>(
                                     &attached,
@@ -358,13 +368,13 @@ where
                                 {
                                     log::error!("Session with {addr:?} finished with error: {e}")
                                 };
-                            }
 
-                            // Detaching again is safe, but we try to avoid the "thundering herd" problem.
-                            // This allows shutdown to access locks smoothly without contention.
-                            if attached.t_node.i_node.is_canceled() {
-                                log::info!("Session with {addr:?} canceled by shutdown");
-                                let _ = ManuallyDrop::new(attached);
+                                // Detaching again is safe, but we try to avoid the "thundering herd" problem.
+                                // This allows shutdown to access locks smoothly without contention.
+                                if attached.t_node.i_node.is_canceled() {
+                                    log::info!("Session with {addr:?} canceled by shutdown");
+                                    attached.release_undetached();
+                                }
                             }
                         });
                     }
@@ -613,6 +623,9 @@ mod tests {
         });
 
         tokio::try_join!(t1, t2, t3).expect("No panic expected");
+
+        assert!(server.sessions() == 3);
+        assert!(Arc::strong_count(&server.state) == 5);
 
         server.shutdown().await.unwrap();
 

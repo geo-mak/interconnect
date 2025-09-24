@@ -415,29 +415,29 @@ where
 
     #[inline]
     async fn negotiation<T>(
-        mut transport: &mut T,
+        transport: &mut T,
         encryption_required: bool,
     ) -> RpcResult<Option<(EncryptionState, EncryptionState)>>
     where
         T: TransportLayer,
     {
-        let proposed = negotiation::read_frame(&mut transport).await?;
+        let proposed = negotiation::read_frame(transport).await?;
 
         if proposed.version != 1 {
-            negotiation::reject(&mut transport).await?;
+            negotiation::reject(transport).await?;
             return Err(RpcError::error(ErrKind::CapabilityMismatch));
         };
 
         if proposed.encryption {
-            negotiation::confirm(&mut transport).await?;
-            let (r_key, w_key) = negotiation::accept_key_exchange(&mut transport).await?;
+            negotiation::confirm(transport).await?;
+            let (r_key, w_key) = negotiation::accept_key_exchange(transport).await?;
             Ok(Some((r_key, w_key)))
         } else {
             if encryption_required {
-                negotiation::reject(&mut transport).await?;
+                negotiation::reject(transport).await?;
                 return Err(RpcError::error(ErrKind::CapabilityMismatch));
             }
-            negotiation::confirm(&mut transport).await?;
+            negotiation::confirm(transport).await?;
             Ok(None)
         }
     }

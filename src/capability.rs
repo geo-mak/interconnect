@@ -1,7 +1,5 @@
 use std::io;
 
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-
 use aead::{AeadInPlace, Buffer, KeyInit, Nonce, OsRng};
 use aes_gcm::Aes128Gcm;
 use hkdf::Hkdf;
@@ -182,12 +180,12 @@ impl EncryptionState {
 
 pub mod negotiation {
     use super::*;
-    use tokio::io::{AsyncRead, AsyncWrite};
+    use crate::TransportLayer;
     use x25519_dalek::{EphemeralSecret, PublicKey};
 
     pub async fn read_frame<T>(transport: &mut T) -> io::Result<RpcCapability>
     where
-        T: AsyncReadExt + Send + Sync + Unpin,
+        T: TransportLayer,
     {
         let mut buf = [0u8; CAPABILITY_FRAME_LEN];
         transport.read_exact(&mut buf).await?;
@@ -211,7 +209,7 @@ pub mod negotiation {
 
     pub async fn write_frame<T>(transport: &mut T, capability: &RpcCapability) -> io::Result<()>
     where
-        T: AsyncWriteExt + Send + Sync + Unpin,
+        T: TransportLayer,
     {
         let mut buf = [0u8; CAPABILITY_FRAME_LEN];
         buf[0..4].copy_from_slice(PROTO);
@@ -225,7 +223,7 @@ pub mod negotiation {
     #[inline(always)]
     pub async fn confirm<T>(transport: &mut T) -> io::Result<()>
     where
-        T: AsyncWriteExt + Send + Sync + Unpin,
+        T: TransportLayer,
     {
         transport.write_all(&[0x01]).await
     }
@@ -234,7 +232,7 @@ pub mod negotiation {
     #[inline(always)]
     pub async fn reject<T>(transport: &mut T) -> io::Result<()>
     where
-        T: AsyncWriteExt + Send + Sync + Unpin,
+        T: TransportLayer,
     {
         transport.write_all(&[0x00]).await
     }
@@ -242,7 +240,7 @@ pub mod negotiation {
     /// Initiates a capability negotiation.
     pub async fn initiate<T>(transport: &mut T, capability: RpcCapability) -> RpcResult<()>
     where
-        T: AsyncRead + AsyncWrite + Unpin + Send + Sync,
+        T: TransportLayer,
     {
         self::write_frame(transport, &capability).await?;
 
@@ -259,7 +257,7 @@ pub mod negotiation {
     /// Initiates an expected cryptographic key-exchange session.
     pub async fn initiate_key_exchange<T>(transport: &mut T) -> RpcResult<(ReadState, WriteState)>
     where
-        T: AsyncRead + AsyncWrite + Unpin + Send + Sync,
+        T: TransportLayer,
     {
         let client_secret = EphemeralSecret::random_from_rng(OsRng);
         let client_public = PublicKey::from(&client_secret);
@@ -281,7 +279,7 @@ pub mod negotiation {
     /// Accepts an expected cryptographic key-exchange session.
     pub async fn accept_key_exchange<T>(transport: &mut T) -> RpcResult<(ReadState, WriteState)>
     where
-        T: AsyncRead + AsyncWrite + Unpin + Send + Sync,
+        T: TransportLayer,
     {
         let mut client_pub_bytes = [0u8; 32];
         transport.read_exact(&mut client_pub_bytes).await?;
@@ -325,7 +323,10 @@ pub mod negotiation {
 mod test {
     use super::*;
     use std::time::Duration;
-    use tokio::net::{TcpListener, TcpStream};
+    use tokio::{
+        io::{AsyncReadExt, AsyncWriteExt},
+        net::{TcpListener, TcpStream},
+    };
 
     #[tokio::test]
     async fn test_negotiation_with_encryption() {

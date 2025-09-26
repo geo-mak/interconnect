@@ -424,7 +424,7 @@ mod tests {
                                 assert_eq!(params, "call");
 
                                 let response =
-                                    Message::reply_with(message.id, "reply".to_string()).unwrap();
+                                    Message::reply_with(message.id, "reply").unwrap();
                                 let _ = rpc_writer.send(&response).await;
                             }
                             2 => {
@@ -508,7 +508,7 @@ mod tests {
                         assert_eq!(params, "call");
 
                         let response =
-                            Message::reply_with(message.id, "reply".to_string()).unwrap();
+                            Message::reply_with(message.id, "reply").unwrap();
                         let _ = rpc_writer.send(&response).await;
                     }
                     _ => panic!("Expected call message"),
@@ -532,7 +532,7 @@ mod tests {
             .unwrap();
 
         let reply = client.call::<&str, String>(1, "call").await.unwrap();
-        assert_eq!(reply, "reply".to_string());
+        assert_eq!(reply, "reply");
 
         server_task.await.unwrap();
         client.shutdown().await.unwrap();

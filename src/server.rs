@@ -13,10 +13,12 @@ use pin_project_lite::pin_project;
 use tokio::task::JoinHandle;
 use tokio::time::timeout;
 
+use uuid::Uuid;
+
 use crate::capability::{EncryptionState, negotiation};
 use crate::error::{ErrKind, RpcError, RpcResult};
-use crate::message::{Message, MessageType};
-use crate::service::RpcService;
+use crate::message::{Call, Message, MessageType, Reply};
+use crate::service::{CallContext, RpcService};
 use crate::stream::{
     EncryptedRpcReceiver, EncryptedRpcSender, RpcAsyncReceiver, RpcAsyncSender, RpcReceiver,
     RpcSender,
@@ -266,6 +268,57 @@ impl<H> ServerState<H> {
     }
 }
 
+struct ServerContext<'a, S> {
+    id: &'a Uuid,
+    sender: &'a mut S,
+}
+
+impl<'a, S> ServerContext<'a, S>
+where
+    S: RpcAsyncSender + Send,
+{
+    #[inline(always)]
+    const fn new(id: &'a Uuid, sender: &'a mut S) -> Self {
+        Self { id, sender }
+    }
+}
+
+impl<'a, S> CallContext for ServerContext<'a, S>
+where
+    S: RpcAsyncSender + Send,
+{
+    type ID = Uuid;
+
+    #[inline(always)]
+    fn id(&self) -> &Self::ID {
+        self.id
+    }
+
+    #[inline]
+    async fn send_reply(&mut self, reply: Reply) -> RpcResult<()> {
+        self.sender.send(&Message::reply(*self.id, reply)).await
+    }
+
+    #[inline]
+    async fn send_error(&mut self, err: RpcError) -> RpcResult<()> {
+        self.sender.send(&Message::error(*self.id, err)).await
+    }
+
+    #[inline]
+    async fn call(&mut self, call: Call) -> RpcResult<()> {
+        self.sender
+            .send(&Message::new(*self.id, MessageType::Call(call)))
+            .await
+    }
+
+    #[inline]
+    async fn nullary_call(&mut self, method: u16) -> RpcResult<()> {
+        self.sender
+            .send(&Message::new(*self.id, MessageType::NullaryCall(method)))
+            .await
+    }
+}
+
 /// RPC Server implementation.
 pub struct RpcServer<H> {
     state: Arc<ServerState<H>>,
@@ -448,7 +501,7 @@ where
         receiver: &mut R,
     ) -> RpcResult<()>
     where
-        S: RpcAsyncSender,
+        S: RpcAsyncSender + Send,
         R: RpcAsyncReceiver,
     {
         let service = task.s_state.service.clone();
@@ -457,20 +510,13 @@ where
                 Ok(result) => {
                     let message = result?;
                     match &message.kind {
-                        MessageType::Call(call) => match service.call(call).await {
-                            Ok(result) => sender.send(&Message::reply(message.id, result)).await?,
-                            Err(err) => sender.send(&Message::error(message.id, err)).await?,
-                        },
-                        MessageType::NullaryCall(method) => match service
-                            .nullary_call(*method)
-                            .await
-                        {
-                            Ok(result) => sender.send(&Message::reply(message.id, result)).await?,
-                            Err(err) => sender.send(&Message::error(message.id, err)).await?,
-                        },
-                        MessageType::Notification(notify) => {
-                            // Notification, no reply.
-                            service.notify(notify).await?;
+                        MessageType::Call(call) => {
+                            let mut ctx = ServerContext::new(&message.id, sender);
+                            service.call(call, &mut ctx).await?
+                        }
+                        MessageType::NullaryCall(method) => {
+                            let mut ctx = ServerContext::new(&message.id, sender);
+                            service.nullary_call(*method, &mut ctx).await?
                         }
                         MessageType::Ping => sender.send(&Message::pong(message.id)).await?,
                         _ => {
@@ -523,11 +569,16 @@ mod tests {
     struct RpcTestService {}
 
     impl RpcService for RpcTestService {
-        async fn call(&self, call: &Call) -> RpcResult<Reply> {
+        async fn call<C>(&self, call: &Call, context: &mut C) -> RpcResult<()>
+        where
+            C: CallContext + Send,
+        {
             match call.method {
                 1 => {
                     let src = call.decode_as::<String>().unwrap();
-                    Ok(Reply::with(&format!("Reply to {src}")).unwrap())
+                    context
+                        .send_reply(Reply::with(&format!("Reply to {src}")).unwrap())
+                        .await
                 }
                 _ => Err(RpcError::error(ErrKind::Unimplemented)),
             }

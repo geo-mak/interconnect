@@ -24,9 +24,6 @@ impl Call {
     }
 }
 
-/// RPC notification message.
-pub type Notification = Call;
-
 /// RPC reply message.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Reply {
@@ -63,9 +60,6 @@ pub enum MessageType {
     /// Rich and detailed errors are considered part of the service design,
     /// and subject to the documented reply type of a particular method.
     Error(RpcError),
-
-    /// A notification message (no response expected).
-    Notification(Notification),
 
     /// A heartbeat/ping message.
     Ping,
@@ -117,11 +111,6 @@ impl Message {
     /// Creates an error message.
     pub fn error(id: Uuid, err: RpcError) -> Self {
         Self::new(id, MessageType::Error(err))
-    }
-
-    /// Creates a notification message.
-    pub fn notification(method: u16, data: Vec<u8>) -> Self {
-        Self::new_with_id(MessageType::Notification(Call { method, data }))
     }
 
     /// Creates a ping message with auto-generated id.
@@ -180,12 +169,6 @@ impl Message {
         Ok(Self::reply(id, Reply { data }))
     }
 
-    /// Creates a notification message with typed parameters.
-    pub fn notification_with<P: Serialize>(method: u16, params: P) -> RpcResult<Self> {
-        let data = Self::encode_to_bytes(&params)?;
-        Ok(Self::notification(method, data))
-    }
-
     /// Checks if this message is a response.
     pub fn is_response(&self) -> bool {
         matches!(
@@ -203,30 +186,75 @@ mod tests {
 
     #[test]
     fn test_message_encoding_decoding() {
-        let original_msg = Message::call(1, vec![10, 20, 30]);
+        let id = Uuid::new_v4();
+        let data = vec![10, 20, 30];
 
-        let serialized = original_msg.encode().unwrap();
-        let deserialized_msg = Message::decode(&serialized).unwrap();
-
-        assert_eq!(original_msg.id, original_msg.id);
-
-        match (&original_msg.kind, &deserialized_msg.kind) {
+        let call = Message::call(1, data.clone());
+        let enc_call = call.encode().unwrap();
+        let dec_call = Message::decode(&enc_call).unwrap();
+        assert_eq!(call.id, dec_call.id);
+        match (&call.kind, &dec_call.kind) {
             (MessageType::Call(orig_call), MessageType::Call(decoded_call)) => {
                 assert_eq!(orig_call.method, decoded_call.method);
                 assert_eq!(orig_call.data, decoded_call.data);
             }
             _ => panic!("Expected call"),
         }
+
+        let nullary_call = Message::nullary_call(1);
+        let enc_nullary_call = nullary_call.encode().unwrap();
+        let dec_nullary_call = Message::decode(&enc_nullary_call).unwrap();
+        assert_eq!(nullary_call.id, dec_nullary_call.id);
+        match (&nullary_call.kind, &dec_nullary_call.kind) {
+            (MessageType::NullaryCall(orig_method), MessageType::NullaryCall(decoded_method)) => {
+                assert_eq!(orig_method, decoded_method);
+            }
+            _ => panic!("Expected nullary call"),
+        }
+
+        let reply_msg = Message::reply(id, Reply { data });
+        let enc_reply = reply_msg.encode().unwrap();
+        let dec_reply = Message::decode(&enc_reply).unwrap();
+        assert_eq!(reply_msg.id, dec_reply.id);
+        match (&reply_msg.kind, &dec_reply.kind) {
+            (MessageType::Reply(orig_reply), MessageType::Reply(decoded_reply)) => {
+                assert_eq!(orig_reply.data, decoded_reply.data);
+            }
+            _ => panic!("Expected reply"),
+        }
+
+        let err_msg = Message::error(id, RpcError::error(ErrKind::Timeout));
+        let enc_err = err_msg.encode().unwrap();
+        let dec_err = Message::decode(&enc_err).unwrap();
+        assert_eq!(err_msg.id, dec_err.id);
+        match (&err_msg.kind, &dec_err.kind) {
+            (MessageType::Error(orig_err), MessageType::Error(decoded_err)) => {
+                assert_eq!(orig_err, decoded_err);
+            }
+            _ => panic!("Expected error"),
+        }
+
+        let ping_msg = Message::ping();
+        let enc_ping = ping_msg.encode().unwrap();
+        let dec_ping = Message::decode(&enc_ping).unwrap();
+        assert_eq!(ping_msg.id, dec_ping.id);
+        assert_eq!(dec_ping.kind, MessageType::Ping, "Expected ping");
+
+        let pong_msg = Message::pong(id);
+        let enc_pong = pong_msg.encode().unwrap();
+        let dec_pong = Message::decode(&enc_pong).unwrap();
+        assert_eq!(pong_msg.id, dec_pong.id);
+        assert_eq!(dec_pong.kind, MessageType::Pong, "Expected pong");
     }
 
     #[test]
     fn test_call_with() {
-        let message = Message::call_with(1, (5u8, 3u8)).unwrap();
+        let message = Message::call_with(1, "parameters").unwrap();
         match &message.kind {
             MessageType::Call(call) => {
                 assert_eq!(call.method, 1);
-                let params: (u8, u8) = Message::decode_as(&call.data).unwrap();
-                assert_eq!(params, (5, 3));
+                let params: String = Message::decode_as(&call.data).unwrap();
+                assert_eq!(params, "parameters");
             }
             _ => panic!("Expected call"),
         }
@@ -235,63 +263,13 @@ mod tests {
     #[test]
     fn test_reply_with() {
         let id = Uuid::new_v4();
-        let message = Message::reply_with(id, 8u8).unwrap();
+        let message = Message::reply_with(id, "some reply").unwrap();
         match &message.kind {
             MessageType::Reply(reply) => {
-                let value: u8 = Message::decode_as(&reply.data).unwrap();
-                assert_eq!(value, 8);
+                let value: String = Message::decode_as(&reply.data).unwrap();
+                assert_eq!(value, "some reply");
             }
             _ => panic!("Expected reply"),
-        }
-    }
-
-    #[test]
-    fn test_notification_with() {
-        let message = Message::notification_with(1, (22u8, 1u8)).unwrap();
-        match &message.kind {
-            MessageType::Notification(notify) => {
-                assert_eq!(notify.method, 1);
-                let params: (u8, u8) = Message::decode_as(&notify.data).unwrap();
-                assert_eq!(params, (22, 1));
-            }
-            _ => panic!("Expected notification"),
-        }
-    }
-
-    #[test]
-    fn test_error() {
-        let id = Uuid::new_v4();
-        let err = RpcError::error(ErrKind::Timeout);
-        let message = Message::error(id, err);
-        match &message.kind {
-            MessageType::Error(e) => {
-                assert_eq!(e.kind, ErrKind::Timeout);
-            }
-            _ => panic!("Expected error"),
-        }
-    }
-
-    #[test]
-    fn test_ping() {
-        let message = Message::ping();
-        match &message.kind {
-            MessageType::Ping => {
-                assert!(!message.is_response());
-            }
-            _ => panic!("Expected ping"),
-        }
-    }
-
-    #[test]
-    fn test_pong() {
-        let id = Uuid::new_v4();
-        let message = Message::pong(id);
-        match &message.kind {
-            MessageType::Pong => {
-                assert!(message.is_response());
-                assert_eq!(message.id, id);
-            }
-            _ => panic!("Expected pong"),
         }
     }
 }

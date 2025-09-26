@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::sync::Arc;
-
 use std::time::Duration;
 
 use tokio::sync::Mutex;
@@ -9,35 +8,93 @@ use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 use tokio::time::timeout;
 
-use uuid::Uuid;
-
 use serde::{Deserialize, Serialize};
+
+use uuid::Uuid;
 
 use crate::capability::{RpcCapability, negotiation};
 use crate::error::{ErrKind, RpcError, RpcResult};
-use crate::message::{Message, MessageType, Reply};
+use crate::message::{Call, Message, MessageType, Reply};
+use crate::service::{CallContext, RpcService};
 use crate::stream::{
     EncryptedRpcReceiver, EncryptedRpcSender, RpcAsyncReceiver, RpcAsyncSender, RpcReceiver,
     RpcSender,
 };
+use crate::sync::DynamicLatch;
 use crate::transport::TransportLayer;
+
+struct ClientContext<'a, S, H> {
+    id: &'a Uuid,
+    state: &'a ClientState<S, H>,
+}
+
+impl<'a, S, H> ClientContext<'a, S, H>
+where
+    S: RpcAsyncSender + Send,
+{
+    #[inline(always)]
+    const fn new(id: &'a Uuid, sender: &'a ClientState<S, H>) -> Self {
+        Self { id, state: sender }
+    }
+}
+
+impl<'a, S, H> CallContext for ClientContext<'a, S, H>
+where
+    S: RpcAsyncSender + Send,
+    H: RpcService + Sync,
+{
+    type ID = Uuid;
+
+    #[inline(always)]
+    fn id(&self) -> &Self::ID {
+        self.id
+    }
+
+    #[inline]
+    async fn send_reply(&mut self, reply: Reply) -> RpcResult<()> {
+        let message = Message::reply(*self.id, reply);
+        self.state.sender.lock().await.send(&message).await
+    }
+
+    #[inline]
+    async fn send_error(&mut self, err: RpcError) -> RpcResult<()> {
+        let message = Message::error(*self.id, err);
+        self.state.sender.lock().await.send(&message).await
+    }
+
+    #[inline]
+    async fn call(&mut self, call: Call) -> RpcResult<()> {
+        let message = Message::new(*self.id, MessageType::Call(call));
+        self.state.sender.lock().await.send(&message).await
+    }
+
+    #[inline]
+    async fn nullary_call(&mut self, method: u16) -> RpcResult<()> {
+        let message = Message::new(*self.id, MessageType::NullaryCall(method));
+        self.state.sender.lock().await.send(&message).await
+    }
+}
 
 enum Response {
     Pong,
     Reply(Reply),
 }
 
-struct ClientState<S> {
+struct ClientState<S, H> {
+    abort_lock: DynamicLatch,
     pending: Mutex<HashMap<Uuid, Sender<RpcResult<Response>>>>,
     sender: Mutex<S>,
+    service: H,
 }
 
-impl<S> ClientState<S> {
+impl<S, H> ClientState<S, H> {
     #[inline(always)]
-    fn new(sender: S, cap: usize) -> ClientState<S> {
+    fn new(service: H, sender: S, cap: usize) -> ClientState<S, H> {
         ClientState {
+            abort_lock: DynamicLatch::new(),
             pending: Mutex::const_new(HashMap::with_capacity(cap)),
             sender: Mutex::const_new(sender),
+            service,
         }
     }
 }
@@ -45,34 +102,43 @@ impl<S> ClientState<S> {
 /// RPC Client implementation.
 /// This implementation utilizes single shared transport instance,
 /// which makes it very lightweight at the cost of some synchronization overhead.
-pub struct RpcClient<S> {
-    state: Arc<ClientState<S>>,
+pub struct RpcClient<S, H> {
+    state: Arc<ClientState<S, H>>,
     task: JoinHandle<()>,
 }
 
-impl<S> RpcClient<S>
+impl<S, H> RpcClient<S, H>
 where
-    S: RpcAsyncSender + 'static,
+    S: RpcAsyncSender + Send + 'static,
+    H: RpcService + Send + Sync + 'static,
 {
     #[inline]
     pub async fn connect<T>(
         mut transport: T,
+        call_handler: H,
         capacity: usize,
-    ) -> RpcResult<RpcClient<RpcSender<T::OwnedWriteHalf>>>
+    ) -> RpcResult<RpcClient<RpcSender<T::OwnedWriteHalf>, H>>
     where
         T: TransportLayer + 'static,
     {
         negotiation::initiate(&mut transport, RpcCapability::new(1, false)).await?;
 
         let (r, w) = transport.into_split();
-        Self::connect_with_parts(RpcReceiver::new(r), RpcSender::new(w), capacity).await
+        RpcClient::connect_with_parts(
+            RpcSender::new(w),
+            RpcReceiver::new(r),
+            call_handler,
+            capacity,
+        )
+        .await
     }
 
     #[inline]
     pub async fn connect_encrypted<T>(
         mut transport: T,
+        call_handler: H,
         capacity: usize,
-    ) -> RpcResult<RpcClient<EncryptedRpcSender<T::OwnedWriteHalf>>>
+    ) -> RpcResult<RpcClient<EncryptedRpcSender<T::OwnedWriteHalf>, H>>
     where
         T: TransportLayer + 'static,
     {
@@ -82,30 +148,36 @@ where
 
         let (r, w) = transport.into_split();
 
-        Self::connect_with_parts(
-            EncryptedRpcReceiver::new(r, r_key),
+        RpcClient::connect_with_parts(
             EncryptedRpcSender::new(w, w_key),
+            EncryptedRpcReceiver::new(r, r_key),
+            call_handler,
             capacity,
         )
         .await
     }
 
     #[inline(always)]
-    const fn new(state: Arc<ClientState<S>>, task: tokio::task::JoinHandle<()>) -> Self {
+    const fn new(state: Arc<ClientState<S, H>>, task: tokio::task::JoinHandle<()>) -> Self {
         Self { state, task }
     }
 
-    async fn connect_with_parts<R, W>(mut rx: R, tx: W, cap: usize) -> RpcResult<RpcClient<W>>
+    async fn connect_with_parts<R>(
+        sender: S,
+        mut receiver: R,
+        call_handler: H,
+        cap: usize,
+    ) -> RpcResult<RpcClient<S, H>>
     where
+        S: RpcAsyncSender + Send + 'static,
         R: RpcAsyncReceiver + Send + 'static,
-        W: RpcAsyncSender + Send + 'static,
     {
-        let state = Arc::new(ClientState::new(tx, cap));
+        let state = Arc::new(ClientState::new(call_handler, sender, cap));
         let c_state = Arc::clone(&state);
 
         let task = tokio::spawn(async move {
             loop {
-                match rx.receive().await {
+                match receiver.receive().await {
                     Ok(message) => {
                         if let Err(e) = Self::process_message(&c_state, message).await {
                             eprintln!("Handling error: {e}");
@@ -123,10 +195,7 @@ where
         Ok(RpcClient::new(state, task))
     }
 
-    async fn process_message<W>(state: &ClientState<W>, message: Message) -> RpcResult<()>
-    where
-        W: RpcAsyncSender + 'static,
-    {
+    async fn process_message(state: &Arc<ClientState<S, H>>, message: Message) -> RpcResult<()> {
         match message.kind {
             MessageType::Reply(reply) => {
                 let mut pending = state.pending.lock().await;
@@ -146,12 +215,21 @@ where
                     let _ = sender.send(Ok(Response::Pong));
                 }
             }
+            MessageType::Call(call) => {
+                if let Some(_lock) = state.abort_lock.acquire() {
+                    let mut ctx = ClientContext::new(&message.id, state);
+                    return state.service.call(&call, &mut ctx).await;
+                }
+            }
+            MessageType::NullaryCall(method) => {
+                if let Some(_lock) = state.abort_lock.acquire() {
+                    let mut ctx = ClientContext::new(&message.id, state);
+                    return state.service.nullary_call(method, &mut ctx).await;
+                }
+            }
             MessageType::Ping => {
                 let pong = Message::pong(message.id);
                 return state.sender.lock().await.send(&pong).await;
-            }
-            _ => {
-                eprintln!("Received unexpected message: {:?}", message.kind);
             }
         }
         Ok(())
@@ -192,7 +270,13 @@ where
             _ => unreachable!(),
         }
     }
+}
 
+impl<S, H> RpcClient<S, H>
+where
+    S: RpcAsyncSender + Send + 'static,
+    H: RpcService + Send + Sync + 'static,
+{
     /// Makes a remote procedure call.
     /// Default timeout is `30` seconds.
     pub async fn call<P, R>(&self, method: u16, params: P) -> RpcResult<R>
@@ -228,6 +312,18 @@ where
         }
     }
 
+    /// Sends a one-way call without response.
+    ///
+    /// This call is untracked, if the target method returns response,
+    /// the response will be discarded.
+    pub async fn call_one_way<P>(&self, method: u16, params: P) -> RpcResult<()>
+    where
+        P: Serialize,
+    {
+        let message = Message::call_with(method, params)?;
+        self.state.sender.lock().await.send(&message).await
+    }
+
     /// Makes a remote procedure call.
     /// Default timeout is `30` seconds.
     pub async fn nullary_call<R>(&self, method: u16) -> RpcResult<R>
@@ -244,9 +340,7 @@ where
         R: for<'de> Deserialize<'de>,
     {
         let message = Message::nullary_call(method);
-
         let response = self.send_message(&message, timeout).await?;
-
         match response {
             Response::Reply(reply) => {
                 let result: R = Message::decode_as(&reply.data)?;
@@ -256,12 +350,15 @@ where
         }
     }
 
-    /// Sends a notification without response.
-    pub async fn notify<P>(&self, method: u16, params: P) -> RpcResult<()>
+    /// Sends a one-way nullary call without response.
+    ///
+    /// This call is untracked, if the target method returns response,
+    /// the response will be discarded.
+    pub async fn nullary_call_one_way<P>(&self, method: u16) -> RpcResult<()>
     where
         P: Serialize,
     {
-        let message = Message::notification_with(method, params)?;
+        let message = Message::nullary_call(method);
         self.state.sender.lock().await.send(&message).await
     }
 
@@ -280,9 +377,15 @@ where
     ///
     /// Any attempts to send messages after this call will return `Broken pipe` I/O error.
     pub async fn shutdown(&mut self) -> RpcResult<()> {
+        self.state.abort_lock.open();
+
+        self.state.abort_lock.wait().await;
+
         self.task.abort();
 
-        self.state.sender.lock().await.close().await
+        self.state.sender.lock().await.close().await?;
+
+        self.state.service.shutdown().await
     }
 }
 
@@ -293,7 +396,7 @@ mod tests {
     use tokio::net::{TcpStream, tcp};
 
     #[tokio::test]
-    async fn test_client_call_reply() {
+    async fn test_client_calls() {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
 
@@ -314,22 +417,33 @@ mod tests {
 
             loop {
                 match rpc_reader.receive().await {
-                    Ok(message) => {
-                        match &message.kind {
-                            MessageType::Call(call) => {
-                                assert_eq!(call.method, 1);
+                    Ok(message) => match &message.kind {
+                        MessageType::Call(call) => match call.method {
+                            1 => {
                                 let params: String = Message::decode_as(&call.data).unwrap();
-                                assert_eq!(params, "call".to_string());
+                                assert_eq!(params, "call");
 
-                                // Send a response.
                                 let response =
                                     Message::reply_with(message.id, "reply".to_string()).unwrap();
                                 let _ = rpc_writer.send(&response).await;
                             }
-                            _ => panic!("Expected call"),
+                            2 => {
+                                let error = Message::error(
+                                    message.id,
+                                    RpcError::error(ErrKind::Unimplemented),
+                                );
+                                let _ = rpc_writer.send(&error).await;
+                            }
+                            _ => panic!("undefined method"),
+                        },
+                        MessageType::NullaryCall(method) => {
+                            assert_eq!(*method, 1);
+                            let response =
+                                Message::reply_with(message.id, "nullary call reply").unwrap();
+                            let _ = rpc_writer.send(&response).await;
                         }
-                        break;
-                    }
+                        _ => panic!("Expected call"),
+                    },
                     Err(e) => {
                         println!("Server error: {e}");
                         break;
@@ -341,75 +455,21 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(10)).await;
 
         let transport = TcpStream::connect(addr).await.unwrap();
-        let mut client = RpcClient::<RpcSender<tcp::OwnedWriteHalf>>::connect(transport, 1)
+        let mut client = RpcClient::<RpcSender<tcp::OwnedWriteHalf>, ()>::connect(transport, (), 1)
             .await
             .unwrap();
 
         let reply = client.call::<&str, String>(1, "call").await.unwrap();
-        assert_eq!(reply, "reply".to_string());
+        assert_eq!(reply, "reply");
 
-        server_task.await.unwrap();
+        let reply_nullary = client.nullary_call::<String>(1).await.unwrap();
+        assert_eq!(reply_nullary, "nullary call reply");
+
+        let err: RpcError = client.call::<&str, String>(2, "call").await.unwrap_err();
+        assert!(err.kind == ErrKind::Unimplemented);
+
         client.shutdown().await.unwrap();
-    }
-
-    #[tokio::test]
-    async fn test_client_nullary_call_reply() {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let addr = listener.local_addr().unwrap();
-
-        let server_task = tokio::spawn(async move {
-            let (mut transport, _) = listener.accept().await.unwrap();
-
-            negotiation::read_frame(&mut transport)
-                .await
-                .expect("server negotiation failed");
-
-            negotiation::confirm(&mut transport)
-                .await
-                .expect("Failed to send confirmation");
-
-            let (r, w) = transport.into_split();
-            let mut rpc_reader = RpcReceiver::new(r);
-            let mut rpc_writer = RpcSender::new(w);
-
-            loop {
-                match rpc_reader.receive().await {
-                    Ok(message) => {
-                        match &message.kind {
-                            MessageType::NullaryCall(method) => {
-                                assert_eq!(*method, 1);
-                                // Send a response.
-                                let response = Message::reply_with(
-                                    message.id,
-                                    "reply to nullary call".to_string(),
-                                )
-                                .unwrap();
-                                let _ = rpc_writer.send(&response).await;
-                            }
-                            _ => panic!("Expected nullary call"),
-                        }
-                        break;
-                    }
-                    Err(e) => {
-                        println!("Server error: {e}");
-                        break;
-                    }
-                }
-            }
-        });
-
-        tokio::time::sleep(Duration::from_millis(10)).await;
-
-        let transport = TcpStream::connect(addr).await.unwrap();
-        let mut client = RpcClient::<RpcSender<tcp::OwnedWriteHalf>>::connect(transport, 1)
-            .await
-            .unwrap();
-
-        let reply = client.nullary_call::<String>(1).await.unwrap();
-        assert_eq!(reply, "reply to nullary call".to_string());
-
-        server_task.await.unwrap();
-        client.shutdown().await.unwrap();
+        server_task.await.unwrap()
     }
 
     #[tokio::test]
@@ -440,25 +500,21 @@ mod tests {
             let mut rpc_reader = EncryptedRpcReceiver::new(r, r_key);
             let mut rpc_writer = EncryptedRpcSender::new(w, w_key);
 
-            loop {
-                match rpc_reader.receive().await {
-                    Ok(message) => match &message.kind {
-                        MessageType::Call(call) => {
-                            assert_eq!(call.method, 1);
-                            let params: String = Message::decode_as(&call.data).unwrap();
-                            assert_eq!(params, "call");
+            match rpc_reader.receive().await {
+                Ok(message) => match &message.kind {
+                    MessageType::Call(call) => {
+                        assert_eq!(call.method, 1);
+                        let params: String = Message::decode_as(&call.data).unwrap();
+                        assert_eq!(params, "call");
 
-                            let response =
-                                Message::reply_with(message.id, "reply".to_string()).unwrap();
-                            let _ = rpc_writer.send(&response).await;
-                            break;
-                        }
-                        _ => panic!("Expected call message"),
-                    },
-                    Err(e) => {
-                        println!("Server error: {e}");
-                        break;
+                        let response =
+                            Message::reply_with(message.id, "reply".to_string()).unwrap();
+                        let _ = rpc_writer.send(&response).await;
                     }
+                    _ => panic!("Expected call message"),
+                },
+                Err(e) => {
+                    println!("Server error: {e}");
                 }
             }
         });
@@ -467,135 +523,16 @@ mod tests {
 
         let transport = TcpStream::connect(addr).await.unwrap();
         let mut client =
-            RpcClient::<EncryptedRpcSender<tcp::OwnedWriteHalf>>::connect_encrypted(transport, 1)
-                .await
-                .unwrap();
+            RpcClient::<EncryptedRpcSender<tcp::OwnedWriteHalf>, ()>::connect_encrypted(
+                transport,
+                (),
+                1,
+            )
+            .await
+            .unwrap();
 
         let reply = client.call::<&str, String>(1, "call").await.unwrap();
         assert_eq!(reply, "reply".to_string());
-
-        server_task.await.unwrap();
-        client.shutdown().await.unwrap();
-    }
-
-    #[tokio::test]
-    async fn test_client_error_response() {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let addr = listener.local_addr().unwrap();
-
-        let server_task = tokio::spawn(async move {
-            let (mut transport, _) = listener.accept().await.unwrap();
-
-            negotiation::read_frame(&mut transport)
-                .await
-                .expect("server negotiation failed");
-
-            negotiation::confirm(&mut transport)
-                .await
-                .expect("Failed to send confirmation");
-
-            let (r, w) = transport.into_split();
-            let mut rpc_reader = RpcReceiver::new(r);
-            let mut rpc_writer = RpcSender::new(w);
-
-            loop {
-                match rpc_reader.receive().await {
-                    Ok(message) => {
-                        match &message.kind {
-                            MessageType::Call(call) => {
-                                assert_eq!(call.method, 2);
-                                let error = Message::error(
-                                    message.id,
-                                    RpcError::error(ErrKind::Unimplemented),
-                                );
-                                let _ = rpc_writer.send(&error).await;
-                            }
-                            _ => panic!("Expected call"),
-                        }
-                        break;
-                    }
-                    Err(e) => {
-                        println!("Server error: {e}");
-                        break;
-                    }
-                }
-            }
-        });
-
-        tokio::time::sleep(Duration::from_millis(10)).await;
-
-        let transport = TcpStream::connect(addr).await.unwrap();
-        let mut client = RpcClient::<RpcSender<tcp::OwnedWriteHalf>>::connect(transport, 1)
-            .await
-            .unwrap();
-
-        let result: Result<(), RpcError> = client.call(2, "call").await;
-
-        match result {
-            Ok(_) => panic!("Expected error result"),
-            Err(e) => {
-                assert!(e.kind == ErrKind::Unimplemented);
-            }
-        }
-
-        server_task.await.unwrap();
-        client.shutdown().await.unwrap();
-    }
-
-    #[tokio::test]
-    async fn test_send_notification() {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let addr = listener.local_addr().unwrap();
-
-        let received_notification = Arc::new(tokio::sync::Mutex::new(false));
-        let received_clone = Arc::clone(&received_notification);
-
-        let server_task = tokio::spawn(async move {
-            let (mut transport, _) = listener.accept().await.unwrap();
-
-            negotiation::read_frame(&mut transport)
-                .await
-                .expect("server negotiation failed");
-
-            negotiation::confirm(&mut transport)
-                .await
-                .expect("Failed to send confirmation");
-
-            let (r, _) = transport.into_split();
-            let mut rpc_reader = RpcReceiver::new(r);
-
-            loop {
-                match rpc_reader.receive().await {
-                    Ok(message) => {
-                        match &message.kind {
-                            MessageType::Notification(n) => {
-                                assert_eq!(n.method, 1);
-                                let message: String = Message::decode_as(&n.data).unwrap();
-                                assert_eq!(message, "some event");
-                                *received_clone.lock().await = true;
-                            }
-                            _ => panic!("Expected notification"),
-                        }
-                        break;
-                    }
-                    Err(e) => {
-                        println!("Server error: {e}");
-                        break;
-                    }
-                }
-            }
-        });
-
-        let transport = TcpStream::connect(addr).await.unwrap();
-        let mut client = RpcClient::<RpcSender<tcp::OwnedWriteHalf>>::connect(transport, 0)
-            .await
-            .unwrap();
-
-        client.notify(1, "some event").await.unwrap();
-
-        tokio::time::sleep(Duration::from_millis(50)).await;
-
-        assert!(*received_notification.lock().await);
 
         server_task.await.unwrap();
         client.shutdown().await.unwrap();

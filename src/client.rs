@@ -228,6 +228,34 @@ where
         }
     }
 
+    /// Makes a remote procedure call.
+    /// Default timeout is `30` seconds.
+    pub async fn nullary_call<R>(&self, method: u16) -> RpcResult<R>
+    where
+        R: for<'de> Deserialize<'de>,
+    {
+        self.nullary_call_with_timeout(method, Duration::from_secs(30))
+            .await
+    }
+
+    /// Makes a remote procedure call with custom timeout.
+    pub async fn nullary_call_with_timeout<R>(&self, method: u16, timeout: Duration) -> RpcResult<R>
+    where
+        R: for<'de> Deserialize<'de>,
+    {
+        let message = Message::nullary_call(method);
+
+        let response = self.send_message(&message, timeout).await?;
+
+        match response {
+            Response::Reply(reply) => {
+                let result: R = Message::decode_as(&reply.data)?;
+                Ok(result)
+            }
+            _ => Err(RpcError::error(ErrKind::UnexpectedMsg)),
+        }
+    }
+
     /// Sends a notification without response.
     pub async fn notify<P>(&self, method: u16, params: P) -> RpcResult<()>
     where
@@ -319,6 +347,66 @@ mod tests {
 
         let reply = client.call::<&str, String>(1, "call").await.unwrap();
         assert_eq!(reply, "reply".to_string());
+
+        server_task.await.unwrap();
+        client.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_client_nullary_call_reply() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let server_task = tokio::spawn(async move {
+            let (mut transport, _) = listener.accept().await.unwrap();
+
+            negotiation::read_frame(&mut transport)
+                .await
+                .expect("server negotiation failed");
+
+            negotiation::confirm(&mut transport)
+                .await
+                .expect("Failed to send confirmation");
+
+            let (r, w) = transport.into_split();
+            let mut rpc_reader = RpcReceiver::new(r);
+            let mut rpc_writer = RpcSender::new(w);
+
+            loop {
+                match rpc_reader.receive().await {
+                    Ok(message) => {
+                        match &message.kind {
+                            MessageType::NullaryCall(method) => {
+                                assert_eq!(*method, 1);
+                                // Send a response.
+                                let response = Message::reply_with(
+                                    message.id,
+                                    "reply to nullary call".to_string(),
+                                )
+                                .unwrap();
+                                let _ = rpc_writer.send(&response).await;
+                            }
+                            _ => panic!("Expected nullary call"),
+                        }
+                        break;
+                    }
+                    Err(e) => {
+                        println!("Server error: {e}");
+                        break;
+                    }
+                }
+            }
+        });
+
+        tokio::time::sleep(Duration::from_millis(10)).await;
+
+        let transport = TcpStream::connect(addr).await.unwrap();
+        let mut client = RpcClient::<RpcSender<tcp::OwnedWriteHalf>>::connect(transport, 1)
+            .await
+            .unwrap();
+
+        let reply = client.nullary_call::<String>(1).await.unwrap();
+        assert_eq!(reply, "reply to nullary call".to_string());
 
         server_task.await.unwrap();
         client.shutdown().await.unwrap();

@@ -461,6 +461,13 @@ where
                             Ok(result) => sender.send(&Message::reply(message.id, result)).await?,
                             Err(err) => sender.send(&Message::error(message.id, err)).await?,
                         },
+                        MessageType::NullaryCall(method) => match service
+                            .nullary_call(*method)
+                            .await
+                        {
+                            Ok(result) => sender.send(&Message::reply(message.id, result)).await?,
+                            Err(err) => sender.send(&Message::error(message.id, err)).await?,
+                        },
                         MessageType::Notification(notify) => {
                             // Notification, no reply.
                             service.notify(notify).await?;

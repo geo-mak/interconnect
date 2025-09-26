@@ -46,8 +46,15 @@ impl Reply {
 /// Message types of the RPC protocol.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum MessageType {
-    /// A bidirectional call (can be initiated by either side).
+    /// A call message that may or may not have reply.
+    ///
+    /// This call targets methods that take extra parameters.
     Call(Call),
+
+    /// A call message that may or may not have reply.
+    ///
+    /// This call targets methods that don't take any extra parameters.
+    NullaryCall(u16),
 
     /// A response message (can be returned by either side).
     Reply(Reply),
@@ -92,9 +99,14 @@ impl Message {
         }
     }
 
-    /// Creates a call message (bidirectional) with auto-generated id.
+    /// Creates a call message with auto-generated id.
     pub fn call(method: u16, data: Vec<u8>) -> Self {
         Self::new_with_id(MessageType::Call(Call { method, data }))
+    }
+
+    /// Creates a nullary call message with auto-generated id.
+    pub fn nullary_call(method: u16) -> Self {
+        Self::new_with_id(MessageType::NullaryCall(method))
     }
 
     /// Creates a response message.
@@ -174,11 +186,6 @@ impl Message {
         Ok(Self::notification(method, data))
     }
 
-    /// Checks if this message expects a response.
-    pub fn expects_response(&self) -> bool {
-        matches!(self.kind, MessageType::Call(_) | MessageType::Ping)
-    }
-
     /// Checks if this message is a response.
     pub fn is_response(&self) -> bool {
         matches!(
@@ -220,7 +227,6 @@ mod tests {
                 assert_eq!(call.method, 1);
                 let params: (u8, u8) = Message::decode_as(&call.data).unwrap();
                 assert_eq!(params, (5, 3));
-                assert!(message.expects_response());
             }
             _ => panic!("Expected call"),
         }
@@ -234,7 +240,6 @@ mod tests {
             MessageType::Reply(reply) => {
                 let value: u8 = Message::decode_as(&reply.data).unwrap();
                 assert_eq!(value, 8);
-                assert!(!message.expects_response());
             }
             _ => panic!("Expected reply"),
         }
@@ -248,7 +253,6 @@ mod tests {
                 assert_eq!(notify.method, 1);
                 let params: (u8, u8) = Message::decode_as(&notify.data).unwrap();
                 assert_eq!(params, (22, 1));
-                assert!(!message.expects_response());
             }
             _ => panic!("Expected notification"),
         }
@@ -262,7 +266,6 @@ mod tests {
         match &message.kind {
             MessageType::Error(e) => {
                 assert_eq!(e.kind, ErrKind::Timeout);
-                assert!(!message.expects_response());
             }
             _ => panic!("Expected error"),
         }
@@ -273,7 +276,6 @@ mod tests {
         let message = Message::ping();
         match &message.kind {
             MessageType::Ping => {
-                assert!(message.expects_response());
                 assert!(!message.is_response());
             }
             _ => panic!("Expected ping"),
@@ -286,7 +288,6 @@ mod tests {
         let message = Message::pong(id);
         match &message.kind {
             MessageType::Pong => {
-                assert!(!message.expects_response());
                 assert!(message.is_response());
                 assert_eq!(message.id, id);
             }

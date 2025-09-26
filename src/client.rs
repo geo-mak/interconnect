@@ -354,9 +354,7 @@ where
     ///
     /// This call is untracked, if the target method returns response,
     /// the response will be discarded.
-    pub async fn nullary_call_one_way<P>(&self, method: u16) -> RpcResult<()>
-    where
-        P: Serialize,
+    pub async fn nullary_call_one_way(&self, method: u16) -> RpcResult<()>
     {
         let message = Message::nullary_call(method);
         self.state.sender.lock().await.send(&message).await

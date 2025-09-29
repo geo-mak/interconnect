@@ -19,6 +19,20 @@ pub struct Call {
 
 impl Call {
     #[inline(always)]
+    pub const fn new(method: u16, data: Vec<u8>) -> Self {
+        Self { method, data }
+    }
+
+    #[inline(always)]
+    pub fn with<T: Serialize>(method: u16, value: &T) -> RpcResult<Self> {
+        let instance = Self {
+            method,
+            data: Message::encode_to_bytes(value)?,
+        };
+        Ok(instance)
+    }
+
+    #[inline(always)]
     pub fn decode_as<T: for<'de> Deserialize<'de>>(&self) -> RpcResult<T> {
         Message::decode_as(&self.data)
     }
@@ -32,11 +46,21 @@ pub struct Reply {
 
 impl Reply {
     #[inline(always)]
+    pub const fn new(data: Vec<u8>) -> Self {
+        Self { data }
+    }
+
+    #[inline(always)]
     pub fn with<T: Serialize>(value: &T) -> RpcResult<Self> {
         let instance = Self {
             data: Message::encode_to_bytes(value)?,
         };
         Ok(instance)
+    }
+
+    #[inline(always)]
+    pub fn decode_as<T: for<'de> Deserialize<'de>>(&self) -> RpcResult<T> {
+        Message::decode_as(&self.data)
     }
 }
 
@@ -94,8 +118,8 @@ impl Message {
     }
 
     /// Creates a call message with auto-generated id.
-    pub fn call(method: u16, data: Vec<u8>) -> Self {
-        Self::new_with_id(MessageType::Call(Call { method, data }))
+    pub fn call(call: Call) -> Self {
+        Self::new_with_id(MessageType::Call(call))
     }
 
     /// Creates a nullary call message with auto-generated id.
@@ -158,13 +182,13 @@ impl Message {
     }
 
     /// Creates a request message with typed parameters.
-    pub fn call_with<P: Serialize>(method: u16, params: P) -> RpcResult<Self> {
+    pub fn call_with<P: Serialize>(method: u16, params: &P) -> RpcResult<Self> {
         let data = Self::encode_to_bytes(&params)?;
-        Ok(Self::call(method, data))
+        Ok(Self::call(Call { method, data }))
     }
 
     /// Creates a response message with typed value.
-    pub fn reply_with<R: Serialize>(id: Uuid, value: R) -> RpcResult<Self> {
+    pub fn reply_with<R: Serialize>(id: Uuid, value: &R) -> RpcResult<Self> {
         let data = Self::encode_to_bytes(&value)?;
         Ok(Self::reply(id, Reply { data }))
     }
@@ -187,9 +211,10 @@ mod tests {
     #[test]
     fn test_message_encoding_decoding() {
         let id = Uuid::new_v4();
+        let method = 1;
         let data = vec![10, 20, 30];
 
-        let call = Message::call(1, data.clone());
+        let call = Message::call(Call::new(method, data.clone()));
         let enc_call = call.encode().unwrap();
         let dec_call = Message::decode(&enc_call).unwrap();
         assert_eq!(call.id, dec_call.id);
@@ -201,7 +226,7 @@ mod tests {
             _ => panic!("Expected call"),
         }
 
-        let nullary_call = Message::nullary_call(1);
+        let nullary_call = Message::nullary_call(method);
         let enc_nullary_call = nullary_call.encode().unwrap();
         let dec_nullary_call = Message::decode(&enc_nullary_call).unwrap();
         assert_eq!(nullary_call.id, dec_nullary_call.id);
@@ -249,7 +274,7 @@ mod tests {
 
     #[test]
     fn test_call_with() {
-        let message = Message::call_with(1, "parameters").unwrap();
+        let message = Message::call_with(1, &"parameters").unwrap();
         match &message.kind {
             MessageType::Call(call) => {
                 assert_eq!(call.method, 1);
@@ -263,7 +288,7 @@ mod tests {
     #[test]
     fn test_reply_with() {
         let id = Uuid::new_v4();
-        let message = Message::reply_with(id, "some reply").unwrap();
+        let message = Message::reply_with(id, &"some reply").unwrap();
         match &message.kind {
             MessageType::Reply(reply) => {
                 let value: String = Message::decode_as(&reply.data).unwrap();

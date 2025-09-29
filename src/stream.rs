@@ -293,7 +293,7 @@ mod tests {
 
     use tokio::net::{TcpStream, UnixListener, UnixStream};
 
-    use crate::message::MessageType;
+    use crate::message::{Call, MessageType};
 
     #[tokio::test]
     async fn test_read_write_tcp_rpc() {
@@ -329,7 +329,7 @@ mod tests {
         let mut rpc_reader = RpcReceiver::new(io_reader);
         let mut rpc_writer = RpcSender::new(io_writer);
 
-        let call_msg = Message::call(1, b"hi there".to_vec());
+        let call_msg = Message::call(Call::new(1, b"hi there".to_vec()));
         rpc_writer.send(&call_msg).await.unwrap();
 
         let reply_msg = rpc_reader.receive().await.unwrap();
@@ -381,7 +381,7 @@ mod tests {
         let mut rpc_reader = RpcReceiver::new(t_reader);
         let mut rpc_writer = RpcSender::new(t_writer);
 
-        let call_msg = Message::call(1, b"hi there".to_vec());
+        let call_msg = Message::call(Call::new(1, b"hi there".to_vec()));
         rpc_writer.send(&call_msg).await.unwrap();
 
         let reply_msg = rpc_reader.receive().await.unwrap();

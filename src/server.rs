@@ -635,9 +635,9 @@ mod tests {
         let (mut rpc_tx_2, mut rpc_rx_2) = make_tcp_rpc_channel(srv_addr).await;
         let (mut rpc_tx_3, mut rpc_rx_3) = make_tcp_rpc_channel(srv_addr).await;
 
-        let rpc_call_1 = Message::call_with(1, "C1").unwrap();
-        let rpc_call_2 = Message::call_with(1, "C2").unwrap();
-        let rpc_call_3 = Message::call_with(1, "C3").unwrap();
+        let rpc_call_1 = Message::call_with(1, &"C1").unwrap();
+        let rpc_call_2 = Message::call_with(1, &"C2").unwrap();
+        let rpc_call_3 = Message::call_with(1, &"C3").unwrap();
 
         rpc_tx_1.send(&rpc_call_1).await.unwrap();
         rpc_tx_2.send(&rpc_call_2).await.unwrap();
@@ -716,7 +716,7 @@ mod tests {
 
         let (mut rpc_tx, mut rpc_rx) = make_encrypted_tcp_rpc_channel(srv_addr).await;
 
-        let call_msg = Message::call_with(1, "C1").unwrap();
+        let call_msg = Message::call_with(1, &"C1").unwrap();
         rpc_tx.send(&call_msg).await.unwrap();
 
         let reply_msg = rpc_rx.receive().await.unwrap();
@@ -753,7 +753,7 @@ mod tests {
 
         tokio::time::sleep(Duration::from_millis(10)).await;
 
-        let call_msg = Message::call_with(1, "C1").unwrap();
+        let call_msg = Message::call_with(1, &"C1").unwrap();
         rpc_tx.send(&call_msg).await.unwrap();
 
         let reply_msg = rpc_rx.receive().await.unwrap();

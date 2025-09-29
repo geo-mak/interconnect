@@ -279,7 +279,7 @@ where
 {
     /// Makes a remote procedure call.
     /// Default timeout is `30` seconds.
-    pub async fn call<P, R>(&self, method: u16, params: P) -> RpcResult<R>
+    pub async fn call<P, R>(&self, method: u16, params: &P) -> RpcResult<R>
     where
         P: Serialize,
         R: for<'de> Deserialize<'de>,
@@ -292,7 +292,7 @@ where
     pub async fn call_with_timeout<P, R>(
         &self,
         method: u16,
-        params: P,
+        params: &P,
         timeout: Duration,
     ) -> RpcResult<R>
     where
@@ -316,7 +316,7 @@ where
     ///
     /// This call is untracked, if the target method returns response,
     /// the response will be discarded.
-    pub async fn call_one_way<P>(&self, method: u16, params: P) -> RpcResult<()>
+    pub async fn call_one_way<P>(&self, method: u16, params: &P) -> RpcResult<()>
     where
         P: Serialize,
     {
@@ -354,8 +354,7 @@ where
     ///
     /// This call is untracked, if the target method returns response,
     /// the response will be discarded.
-    pub async fn nullary_call_one_way(&self, method: u16) -> RpcResult<()>
-    {
+    pub async fn nullary_call_one_way(&self, method: u16) -> RpcResult<()> {
         let message = Message::nullary_call(method);
         self.state.sender.lock().await.send(&message).await
     }
@@ -421,8 +420,7 @@ mod tests {
                                 let params: String = Message::decode_as(&call.data).unwrap();
                                 assert_eq!(params, "call");
 
-                                let response =
-                                    Message::reply_with(message.id, "reply").unwrap();
+                                let response = Message::reply_with(message.id, &"reply").unwrap();
                                 let _ = rpc_writer.send(&response).await;
                             }
                             2 => {
@@ -437,7 +435,7 @@ mod tests {
                         MessageType::NullaryCall(method) => {
                             assert_eq!(*method, 1);
                             let response =
-                                Message::reply_with(message.id, "nullary call reply").unwrap();
+                                Message::reply_with(message.id, &"nullary call reply").unwrap();
                             let _ = rpc_writer.send(&response).await;
                         }
                         _ => panic!("Expected call"),
@@ -457,13 +455,13 @@ mod tests {
             .await
             .unwrap();
 
-        let reply = client.call::<&str, String>(1, "call").await.unwrap();
+        let reply = client.call::<&str, String>(1, &"call").await.unwrap();
         assert_eq!(reply, "reply");
 
         let reply_nullary = client.nullary_call::<String>(1).await.unwrap();
         assert_eq!(reply_nullary, "nullary call reply");
 
-        let err: RpcError = client.call::<&str, String>(2, "call").await.unwrap_err();
+        let err: RpcError = client.call::<&str, String>(2, &"call").await.unwrap_err();
         assert!(err.kind == ErrKind::Unimplemented);
 
         client.shutdown().await.unwrap();
@@ -505,8 +503,7 @@ mod tests {
                         let params: String = Message::decode_as(&call.data).unwrap();
                         assert_eq!(params, "call");
 
-                        let response =
-                            Message::reply_with(message.id, "reply").unwrap();
+                        let response = Message::reply_with(message.id, &"reply").unwrap();
                         let _ = rpc_writer.send(&response).await;
                     }
                     _ => panic!("Expected call message"),
@@ -529,7 +526,7 @@ mod tests {
             .await
             .unwrap();
 
-        let reply = client.call::<&str, String>(1, "call").await.unwrap();
+        let reply = client.call::<&str, String>(1, &"call").await.unwrap();
         assert_eq!(reply, "reply");
 
         server_task.await.unwrap();

@@ -647,7 +647,7 @@ mod tests {
             let reply_msg = rpc_rx_1.receive().await.unwrap();
             match reply_msg.kind {
                 MessageType::Reply(reply) => {
-                    let response: String = crate::message::Message::decode_as(&reply.data).unwrap();
+                    let response: String = Message::decode_from_slice(&reply.data).unwrap();
                     assert!(&response == "Reply to C1");
                 }
                 _ => panic!("Expected reply"),
@@ -658,7 +658,7 @@ mod tests {
             let reply_msg = rpc_rx_2.receive().await.unwrap();
             match reply_msg.kind {
                 MessageType::Reply(reply) => {
-                    let response: String = crate::message::Message::decode_as(&reply.data).unwrap();
+                    let response: String = Message::decode_from_slice(&reply.data).unwrap();
                     assert!(&response == "Reply to C2");
                 }
                 _ => panic!("Expected reply"),
@@ -669,7 +669,7 @@ mod tests {
             let reply_msg = rpc_rx_3.receive().await.unwrap();
             match reply_msg.kind {
                 MessageType::Reply(reply) => {
-                    let response: String = crate::message::Message::decode_as(&reply.data).unwrap();
+                    let response: String = Message::decode_from_slice(&reply.data).unwrap();
                     assert!(&response == "Reply to C3");
                 }
                 _ => panic!("Expected reply"),
@@ -722,7 +722,7 @@ mod tests {
         let reply_msg = rpc_rx.receive().await.unwrap();
         match reply_msg.kind {
             MessageType::Reply(reply) => {
-                let response: String = crate::message::Message::decode_as(&reply.data).unwrap();
+                let response: String = Message::decode_from_slice(&reply.data).unwrap();
                 assert!(&response == "Reply to C1");
             }
             _ => panic!("Expected reply"),
@@ -759,7 +759,7 @@ mod tests {
         let reply_msg = rpc_rx.receive().await.unwrap();
         match reply_msg.kind {
             MessageType::Reply(reply) => {
-                let response: String = crate::message::Message::decode_as(&reply.data).unwrap();
+                let response: String = Message::decode_from_slice(&reply.data).unwrap();
                 assert!(&response == "Reply to C1");
             }
             _ => panic!("Expected reply"),

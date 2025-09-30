@@ -345,7 +345,7 @@ where
 
         match response {
             Response::Reply(reply) => {
-                let result: R = Message::decode_as(&reply.data)?;
+                let result: R = Message::decode_from_slice(&reply.data)?;
                 Ok(result)
             }
             _ => Err(RpcError::error(ErrKind::UnexpectedMsg)),
@@ -383,7 +383,7 @@ where
         let response = self.send_message(&message, timeout).await?;
         match response {
             Response::Reply(reply) => {
-                let result: R = Message::decode_as(&reply.data)?;
+                let result: R = Message::decode_from_slice(&reply.data)?;
                 Ok(result)
             }
             _ => Err(RpcError::error(ErrKind::UnexpectedMsg)),
@@ -457,7 +457,8 @@ mod tests {
                     Ok(message) => match &message.kind {
                         MessageType::Call(call) => match call.method {
                             1 => {
-                                let params: String = Message::decode_as(&call.data).unwrap();
+                                let params: String =
+                                    Message::decode_from_slice(&call.data).unwrap();
                                 assert_eq!(params, "call");
 
                                 let response = Message::reply_with(message.id, &"reply").unwrap();
@@ -540,7 +541,7 @@ mod tests {
                 Ok(message) => match &message.kind {
                     MessageType::Call(call) => {
                         assert_eq!(call.method, 1);
-                        let params: String = Message::decode_as(&call.data).unwrap();
+                        let params: String = Message::decode_from_slice(&call.data).unwrap();
                         assert_eq!(params, "call");
 
                         let response = Message::reply_with(message.id, &"reply").unwrap();

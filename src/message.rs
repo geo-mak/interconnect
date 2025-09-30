@@ -27,14 +27,14 @@ impl Call {
     pub fn with<T: Serialize>(method: u16, value: &T) -> RpcResult<Self> {
         let instance = Self {
             method,
-            data: Message::encode_to_bytes(value)?,
+            data: Message::encode_value_to_vec(value)?,
         };
         Ok(instance)
     }
 
     #[inline(always)]
     pub fn decode_as<T: for<'de> Deserialize<'de>>(&self) -> RpcResult<T> {
-        Message::decode_as(&self.data)
+        Message::decode_from_slice(&self.data)
     }
 }
 
@@ -53,14 +53,14 @@ impl Reply {
     #[inline(always)]
     pub fn with<T: Serialize>(value: &T) -> RpcResult<Self> {
         let instance = Self {
-            data: Message::encode_to_bytes(value)?,
+            data: Message::encode_value_to_vec(value)?,
         };
         Ok(instance)
     }
 
     #[inline(always)]
     pub fn decode_as<T: for<'de> Deserialize<'de>>(&self) -> RpcResult<T> {
-        Message::decode_as(&self.data)
+        Message::decode_from_slice(&self.data)
     }
 }
 
@@ -169,13 +169,21 @@ impl Message {
         bincode::serde::decode_from_reader(src, CONFIG).map_err(Into::into)
     }
 
-    /// Encodes a value into binary format.
-    pub fn encode_to_bytes<T: Serialize>(value: &T) -> RpcResult<Vec<u8>> {
+    /// Encodes a value to binary format.
+    pub fn encode_value_to_vec<T: Serialize>(value: &T) -> RpcResult<Vec<u8>> {
         bincode::serde::encode_to_vec(value, CONFIG).map_err(Into::into)
     }
 
-    /// Decodes data from bytes into a value.
-    pub fn decode_as<T: for<'de> Deserialize<'de>>(data: &[u8]) -> RpcResult<T> {
+    /// Encodes a value to binary format into writer.
+    pub fn encode_value_into_writer<T: Serialize, W: Writer>(
+        value: &T,
+        dst: &mut W,
+    ) -> RpcResult<()> {
+        bincode::serde::encode_into_writer(value, dst, CONFIG).map_err(Into::into)
+    }
+
+    /// Decodes data from slice of bytes into a value.
+    pub fn decode_from_slice<T: for<'de> Deserialize<'de>>(data: &[u8]) -> RpcResult<T> {
         bincode::serde::borrow_decode_from_slice(data, CONFIG)
             .map(|(value, _)| value)
             .map_err(Into::into)
@@ -183,13 +191,13 @@ impl Message {
 
     /// Creates a request message with typed parameters.
     pub fn call_with<P: Serialize>(method: u16, params: &P) -> RpcResult<Self> {
-        let data = Self::encode_to_bytes(&params)?;
+        let data = Self::encode_value_to_vec(&params)?;
         Ok(Self::call(Call { method, data }))
     }
 
     /// Creates a response message with typed value.
     pub fn reply_with<R: Serialize>(id: Uuid, value: &R) -> RpcResult<Self> {
-        let data = Self::encode_to_bytes(&value)?;
+        let data = Self::encode_value_to_vec(&value)?;
         Ok(Self::reply(id, Reply { data }))
     }
 
@@ -278,7 +286,7 @@ mod tests {
         match &message.kind {
             MessageType::Call(call) => {
                 assert_eq!(call.method, 1);
-                let params: String = Message::decode_as(&call.data).unwrap();
+                let params: String = Message::decode_from_slice(&call.data).unwrap();
                 assert_eq!(params, "parameters");
             }
             _ => panic!("Expected call"),
@@ -291,7 +299,7 @@ mod tests {
         let message = Message::reply_with(id, &"some reply").unwrap();
         match &message.kind {
             MessageType::Reply(reply) => {
-                let value: String = Message::decode_as(&reply.data).unwrap();
+                let value: String = Message::decode_from_slice(&reply.data).unwrap();
                 assert_eq!(value, "some reply");
             }
             _ => panic!("Expected reply"),

@@ -23,6 +23,46 @@ use crate::stream::{
 use crate::sync::DynamicLatch;
 use crate::transport::TransportLayer;
 
+/// The common RPC client interface of async clients.
+pub trait RpcAsyncClient {
+    fn call<P, R>(&self, method: u16, params: &P) -> impl Future<Output = RpcResult<R>>
+    where
+        P: Serialize,
+        R: for<'de> Deserialize<'de>;
+
+    fn call_with_timeout<P, R>(
+        &self,
+        method: u16,
+        params: &P,
+        timeout: Duration,
+    ) -> impl Future<Output = RpcResult<R>>
+    where
+        P: Serialize,
+        R: for<'de> Deserialize<'de>;
+
+    fn call_one_way<P>(&self, method: u16, params: &P) -> impl Future<Output = RpcResult<()>>
+    where
+        P: Serialize;
+
+    fn nullary_call<R>(&self, method: u16) -> impl Future<Output = RpcResult<R>>
+    where
+        R: for<'de> Deserialize<'de>;
+
+    fn nullary_call_with_timeout<R>(
+        &self,
+        method: u16,
+        timeout: Duration,
+    ) -> impl Future<Output = RpcResult<R>>
+    where
+        R: for<'de> Deserialize<'de>;
+
+    fn nullary_call_one_way(&self, method: u16) -> impl Future<Output = RpcResult<()>>;
+
+    fn ping(&self, timeout: Duration) -> impl Future<Output = RpcResult<()>>;
+
+    fn shutdown(&mut self) -> impl Future<Output = RpcResult<()>>;
+}
+
 struct ClientContext<'a, S, H> {
     id: &'a Uuid,
     state: &'a ClientState<S, H>,
@@ -272,14 +312,14 @@ where
     }
 }
 
-impl<S, H> RpcClient<S, H>
+impl<S, H> RpcAsyncClient for RpcClient<S, H>
 where
     S: RpcAsyncSender + Send + 'static,
     H: RpcService + Send + Sync + 'static,
 {
     /// Makes a remote procedure call.
     /// Default timeout is `30` seconds.
-    pub async fn call<P, R>(&self, method: u16, params: &P) -> RpcResult<R>
+    async fn call<P, R>(&self, method: u16, params: &P) -> RpcResult<R>
     where
         P: Serialize,
         R: for<'de> Deserialize<'de>,
@@ -289,7 +329,7 @@ where
     }
 
     /// Makes a remote procedure call with custom timeout.
-    pub async fn call_with_timeout<P, R>(
+    async fn call_with_timeout<P, R>(
         &self,
         method: u16,
         params: &P,
@@ -316,7 +356,7 @@ where
     ///
     /// This call is untracked, if the target method returns response,
     /// the response will be discarded.
-    pub async fn call_one_way<P>(&self, method: u16, params: &P) -> RpcResult<()>
+    async fn call_one_way<P>(&self, method: u16, params: &P) -> RpcResult<()>
     where
         P: Serialize,
     {
@@ -326,7 +366,7 @@ where
 
     /// Makes a remote procedure call.
     /// Default timeout is `30` seconds.
-    pub async fn nullary_call<R>(&self, method: u16) -> RpcResult<R>
+    async fn nullary_call<R>(&self, method: u16) -> RpcResult<R>
     where
         R: for<'de> Deserialize<'de>,
     {
@@ -335,7 +375,7 @@ where
     }
 
     /// Makes a remote procedure call with custom timeout.
-    pub async fn nullary_call_with_timeout<R>(&self, method: u16, timeout: Duration) -> RpcResult<R>
+    async fn nullary_call_with_timeout<R>(&self, method: u16, timeout: Duration) -> RpcResult<R>
     where
         R: for<'de> Deserialize<'de>,
     {
@@ -354,13 +394,13 @@ where
     ///
     /// This call is untracked, if the target method returns response,
     /// the response will be discarded.
-    pub async fn nullary_call_one_way(&self, method: u16) -> RpcResult<()> {
+    async fn nullary_call_one_way(&self, method: u16) -> RpcResult<()> {
         let message = Message::nullary_call(method);
         self.state.sender.lock().await.send(&message).await
     }
 
     /// Sends a `ping`` message.
-    pub async fn ping(&self, timeout: Duration) -> RpcResult<()> {
+    async fn ping(&self, timeout: Duration) -> RpcResult<()> {
         let _ = self.send_message(&Message::ping(), timeout).await?;
         Ok(())
     }
@@ -373,7 +413,7 @@ where
     /// Buffered data will be sent followed by FIN message.
     ///
     /// Any attempts to send messages after this call will return `Broken pipe` I/O error.
-    pub async fn shutdown(&mut self) -> RpcResult<()> {
+    async fn shutdown(&mut self) -> RpcResult<()> {
         self.state.abort_lock.open();
 
         self.state.abort_lock.wait().await;

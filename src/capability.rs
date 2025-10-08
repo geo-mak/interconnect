@@ -8,49 +8,49 @@ use sha2::Sha256;
 use crate::error::{ErrKind, RpcError, RpcResult};
 use crate::opt::branch_prediction::unlikely;
 
-// ┌────────────────────────────────────────────┐
-// │         RPC CAPABILITY PROTOCOL            │
-// └────────────────────────────────────────────┘
+// ----------------------------------------------
+// |         RPC CAPABILITY PROTOCOL            |
+// ----------------------------------------------
 //
 // Currently, the client initiates capability negotiation by sending an 8-byte
 // capability frame. The server either accepts it or rejects it with a 1-byte
 // confirmation:
 //
-//                         ┌──────────────┐
-//                         │  DATA FLOW   │
-//                         └──────────────┘
+//                         ----------------
+//                         |  DATA FLOW   |
+//                         ----------------
 //
 //              CLIENT                           SERVER
-//                │                                 │
-//                │ Capability Frame (8 bytes)      │
-//                ├───────────────────────────────► │
-//                │                                 │
-//                │ Server applies its policy then: │
-//                │                                 │
-//                │ 1-byte Confirmation             │
-//                │    0x01 = Accepted              │
-//                │    0x00 = Rejected              │
-//                │ ◄───────────────────────────────┤
-//                │                                 │
+//                |                                 |
+//                | Capability Frame (8 bytes)      |
+//                |-------------------------------> |
+//                |                                 |
+//                | Server applies its policy then: |
+//                |                                 |
+//                | 1-byte Confirmation             |
+//                |    0x01 = Accepted              |
+//                |    0x00 = Rejected              |
+//                | <-------------------------------|
+//                |                                 |
 //
 //                If encryption is enabled:
 //
-//                │ Ephemeral X25519 Public Key     │
-//                ├───────────────────────────────► │
-//                │ Ephemeral X25519 Public Key     │
-//                │ ◄───────────────────────────────┤
+//                | Ephemeral X25519 Public Key     |
+//                |-------------------------------> |
+//                | Ephemeral X25519 Public Key     |
+//                | <-------------------------------|
 //
-// ┌──────────────────────┐                 ┌──────────────────────┐
-// │ derive shared secret │                 │ derive shared secret │
-// │ via x25519 + HKDF    │                 │ via x25519 + HKDF    │
-// └──────────────────────┘                 └──────────────────────┘
+// ------------------------                 ------------------------
+// | derive shared secret |                 | derive shared secret |
+// | via x25519 + HKDF    |                 | via x25519 + HKDF    |
+// ------------------------                 ------------------------
 //
 //                       ENCRYPTED SESSION BEGINS
 //
 
-// ┌────────────────────────────────────────────┐
-// │           CAPABILITY FRAME DATA            │
-// └────────────────────────────────────────────┘
+// ----------------------------------------------
+// |           CAPABILITY FRAME DATA            |
+// ----------------------------------------------
 //
 // Capability frame (8 bytes)
 // [0..4]   protocol signature (and version)

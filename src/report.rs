@@ -1,10 +1,6 @@
 use std::cell::RefCell;
 use std::fmt::{self, Display};
 use std::io::Write;
-use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
-
-use crate::sync::{IORing, ThreadNotify};
 
 pub mod colors {
     pub const RESET: &str = "\x1b[0m";
@@ -142,107 +138,20 @@ thread_local! {
     static REPORT_LOCAL_CACHE: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) };
 }
 
-pub const STDIO_BUF_SIZE: usize = 2 * 1024 * 1024;
-
-struct STDIOState {
-    io_ring: IORing,
-    notify: ThreadNotify,
-    canceled: AtomicBool,
-}
-
-impl STDIOState {
-    #[inline]
-    fn new(cap: usize) -> Self {
-        Self {
-            io_ring: IORing::new(cap),
-            notify: ThreadNotify::new(),
-            canceled: AtomicBool::new(false),
-        }
-    }
-
-    #[inline(always)]
-    fn is_canceled(&self) -> bool {
-        self.canceled.load(std::sync::atomic::Ordering::Acquire)
-    }
-
-    #[inline(always)]
-    fn set_canceled(&self) {
-        self.canceled
-            .store(true, std::sync::atomic::Ordering::Release);
-    }
-}
-
 /// A reporting agent that uses the standard output of the current process as its reporting medium.
-///
-/// It spawns a dedicated thread for receiving reports' data.
-///
-/// All clones are by reference, where the underlying state is shared among them all.
-#[derive(Clone)]
 pub struct STDIOReporter {
-    state: Arc<STDIOState>,
+    out: std::io::Stdout,
+    err: std::io::Stderr,
 }
 
 impl STDIOReporter {
-    /// Creates new `STDIOReporter` with default capacity.
-    ///
-    /// See `STDIO_BUF_SIZE` for more details.
+    /// Creates new `STDIOReporter`.
     #[inline]
     pub fn new() -> Self {
-        Self::with_capacity(STDIO_BUF_SIZE)
-    }
-
-    /// Creates new `STDIOReporter` with custom capacity in **bytes**.
-    ///
-    /// Reporter is bounded and it will drop reports when it runs out of capacity.
-    ///
-    /// Capacity must be a power of two and >= 8.
-    #[inline]
-    pub fn with_capacity(cap: usize) -> Self {
-        let state = Arc::new(STDIOState::new(cap));
-        Self::run(state.clone());
-        Self { state }
-    }
-
-    fn run(state: Arc<STDIOState>) {
-        std::thread::spawn(move || {
-            let mut stdout = std::io::stdout();
-            let io_ring = &state.io_ring;
-            let notify = &state.notify;
-            loop {
-                match io_ring.read_published(&mut stdout) {
-                    Ok(0) => {
-                        // No cancellation checking without locking.
-                        let mut lock = state.notify.lock();
-                        if !state.is_canceled() {
-                           notify.wait(&mut lock)
-                        } else {
-                            break;
-                        }
-                    }
-                    Err(_) => break,
-                    _ => {}
-                }
-            }
-            // Attempt to alert.
-            let _ = stdout.write_fmt(format_args!(
-                "{}ALERT: STDIOReporter has been terminated{}\n",
-                colors::ORANGE,
-                colors::RESET,
-            ));
-        });
-    }
-
-    /// Initiates a global shutdown of the reporter instance.
-    ///
-    /// Shutdown is cooperative, and doesn't interrupt the ongoing writing.
-    ///
-    /// It will be completed when the current writing ends.
-    #[inline]
-    pub fn shutdown(&self) {
-        // No change to cancellation state without locking.
-        let mut _lock = self.state.notify.lock();
-        self.state.set_canceled();
-        self.state.notify.notify_one();
+        Self {
+            out: std::io::stdout(),
+            err: std::io::stderr(),
+        }
     }
 }
 
@@ -258,8 +167,7 @@ impl Reporter for STDIOReporter {
                 colors::BLUE,
                 colors::RESET
             ));
-            self.state.io_ring.try_write(&cache);
-            self.state.notify.notify_one();
+            let _ = self.out.lock().write_all(&cache);
             cache.clear();
         });
     }
@@ -275,8 +183,7 @@ impl Reporter for STDIOReporter {
                 colors::GREEN,
                 colors::RESET
             ));
-            self.state.io_ring.try_write(&cache);
-            self.state.notify.notify_one();
+            let _ = self.out.lock().write_all(&cache);
             cache.clear();
         });
     }
@@ -292,8 +199,7 @@ impl Reporter for STDIOReporter {
                 colors::ORANGE,
                 colors::RESET
             ));
-            self.state.io_ring.try_write(&cache);
-            self.state.notify.notify_one();
+            let _ = self.out.lock().write_all(&cache);
             cache.clear();
         });
     }
@@ -309,8 +215,7 @@ impl Reporter for STDIOReporter {
                 colors::BRIGHT_RED,
                 colors::RESET
             ));
-            self.state.io_ring.try_write(&cache);
-            self.state.notify.notify_one();
+            let _ = self.err.lock().write_all(&cache);
             cache.clear();
         });
     }
@@ -327,7 +232,5 @@ mod tests {
         instance.info("Test info report", &"Test materials");
         instance.alert("Test alert report", &"Test materials");
         instance.error("Test error report", &"Test materials");
-        instance.shutdown();
-        assert!(instance.state.is_canceled());
     }
 }

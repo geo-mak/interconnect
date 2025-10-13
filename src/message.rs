@@ -92,6 +92,19 @@ pub enum MessageType {
     Pong,
 }
 
+impl core::fmt::Display for MessageType {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            MessageType::Call(_) => f.write_str("Variadic Call"),
+            MessageType::NullaryCall(_) => f.write_str("Niladic Call"),
+            MessageType::Reply(_) => f.write_str("Reply"),
+            MessageType::Error(_) => f.write_str("Error"),
+            MessageType::Ping => f.write_str("Ping"),
+            MessageType::Pong => f.write_str("Pong"),
+        }
+    }
+}
+
 /// High-level message structure of the RPC protocol.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Message {

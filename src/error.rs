@@ -90,7 +90,7 @@ impl RpcError {
 
 impl fmt::Display for RpcError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Error: {:?}, Reference: {}", self.kind, self.refer)
+        write!(f, "Error: {:?}. Reference: {}", self.kind, self.refer)
     }
 }
 

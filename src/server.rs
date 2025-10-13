@@ -18,6 +18,7 @@ use uuid::Uuid;
 use crate::capability::{EncryptionState, negotiation};
 use crate::error::{ErrKind, RpcError, RpcResult};
 use crate::message::{Call, Message, MessageType, Reply};
+use crate::report::Reporter;
 use crate::service::{CallContext, RpcService};
 use crate::stream::{
     EncryptedRpcReceiver, EncryptedRpcSender, RpcAsyncReceiver, RpcAsyncSender, RpcReceiver,
@@ -71,11 +72,11 @@ impl Tasks {
         })
     }
 
-    fn attach<'a, H>(
+    fn attach<'a, H, E>(
         &'a self,
         task: &'a mut Task,
-        state: &'a Arc<ServerState<H>>,
-    ) -> Option<AttachedTask<'a, H>> {
+        state: &'a Arc<ServerState<H, E>>,
+    ) -> Option<AttachedTask<'a, H, E>> {
         let shard = self.select_shard();
         let mut shard_lock = self.shards[shard].lock();
         if self.observer.acquire_manual() {
@@ -92,7 +93,7 @@ impl Tasks {
         None
     }
 
-    fn detach<H>(&self, node: &mut AttachedTask<'_, H>) {
+    fn detach<H, E>(&self, node: &mut AttachedTask<'_, H, E>) {
         unsafe { self.shards[node.shard].lock().detach(&mut node.task.i_node) };
     }
 }
@@ -221,21 +222,21 @@ impl Task {
     }
 }
 
-struct AttachedTask<'a, H> {
+struct AttachedTask<'a, H, E> {
     // Must be by ref.
-    s_state: &'a Arc<ServerState<H>>,
+    s_state: &'a Arc<ServerState<H, E>>,
     task: &'a mut Task,
     shard: usize,
 }
 
-impl<'a, H> Drop for AttachedTask<'a, H> {
+impl<'a, H, E> Drop for AttachedTask<'a, H, E> {
     fn drop(&mut self) {
         self.s_state.tasks.detach(self);
         self.s_state.tasks.observer.release();
     }
 }
 
-impl<'a, H> AttachedTask<'a, H> {
+impl<'a, H, E> AttachedTask<'a, H, E> {
     #[inline(always)]
     fn wait_cancelable<F>(&self, future: F) -> CancelableTask<'_, F> {
         CancelableTask {
@@ -251,18 +252,20 @@ impl<'a, H> AttachedTask<'a, H> {
     }
 }
 
-struct ServerState<H> {
+struct ServerState<H, E> {
     tasks: Tasks,
     service: H,
+    reporter: E,
     timeout: Duration,
 }
 
-impl<H> ServerState<H> {
+impl<H, E> ServerState<H, E> {
     #[inline]
-    fn new(shards: usize, service: H, timeout: Duration) -> ServerState<H> {
+    fn new(shards: usize, service: H, timeout: Duration, reporter: E) -> ServerState<H, E> {
         ServerState {
             tasks: Tasks::new(shards),
             service,
+            reporter,
             timeout,
         }
     }
@@ -320,14 +323,15 @@ where
 }
 
 /// RPC Server implementation.
-pub struct RpcServer<H> {
-    state: Arc<ServerState<H>>,
+pub struct RpcServer<H, E> {
+    state: Arc<ServerState<H, E>>,
     listener: JoinHandle<()>,
 }
 
-impl<H> RpcServer<H>
+impl<H, E> RpcServer<H, E>
 where
     H: RpcService + Send + Sync + Clone + 'static,
+    E: Reporter + Send + Sync + 'static,
 {
     /// Initializes server state and starts accepting connections according to the given address and port.
     ///
@@ -353,6 +357,16 @@ where
     ///
     /// Each new session gets its own clone of the service.
     ///
+    /// # Reporting
+    ///
+    /// Reporting requires a reporter instance, that must be passed explicitly as parameter.
+    ///
+    /// Reporter is the component responsible for the "logging" of server events.
+    ///
+    /// If reporting is not needed, the no-op implementation `()` can be passed as value.
+    ///
+    /// The server reports `errors` and `alerts` of unexpected messages only.
+    ///
     /// # Shutdown
     ///
     /// System shutdown is performed with these steps in order:
@@ -368,6 +382,7 @@ where
         shards: usize,
         encryption_required: bool,
         conn_timeout: Duration,
+        reporter: E,
     ) -> RpcResult<Self>
     where
         A: 'static,
@@ -376,7 +391,7 @@ where
     {
         let listener = L::bind(addr).await?;
 
-        let state = Arc::new(ServerState::new(shards, service, conn_timeout));
+        let state = Arc::new(ServerState::new(shards, service, conn_timeout, reporter));
 
         let l_state = state.clone();
         let listener = tokio::spawn(async move {
@@ -415,19 +430,25 @@ where
                                 if let Err(e) = result
                                     && e.kind != ErrKind::Disconnected
                                 {
-                                    eprintln!("Session with {addr:?} finished with error: {e}")
+                                    t_state.reporter.error(
+                                        "Session finished with error",
+                                        &format_args!("{e}. Peer: {addr:?}"),
+                                    )
                                 };
 
                                 // Detaching again is safe, but we try to avoid the "thundering herd" problem.
                                 // This allows shutdown to access locks smoothly without contention.
                                 if attached.task.i_node.is_canceled() {
-                                    println!("Session with {addr:?} canceled by shutdown");
                                     attached.release_undetached();
+                                    t_state.reporter.info(
+                                        "Session canceled by shutdown",
+                                        &format_args!("Peer: {addr:?}"),
+                                    );
                                 }
                             }
                         });
                     }
-                    Err(e) => eprintln!("Failed to accept connection: {e}"),
+                    Err(e) => l_state.reporter.error("Failed to accept connection", &e),
                 }
             }
         });
@@ -437,7 +458,7 @@ where
 
     /// Tries to negotiate a new session and starts one over the transport layer upon success.
     async fn connection<T>(
-        task: &AttachedTask<'_, H>,
+        task: &AttachedTask<'_, H, E>,
         mut transport: T,
         encryption_required: bool,
     ) -> RpcResult<()>
@@ -496,7 +517,7 @@ where
     }
 
     async fn session<S, R>(
-        task: &AttachedTask<'_, H>,
+        task: &AttachedTask<'_, H, E>,
         sender: &mut S,
         receiver: &mut R,
     ) -> RpcResult<()>
@@ -520,7 +541,9 @@ where
                         }
                         MessageType::Ping => sender.send(&Message::pong(message.id)).await?,
                         _ => {
-                            eprintln!("Received unexpected message type: {:?}", message.kind);
+                            task.s_state
+                                .reporter
+                                .alert("Received unexpected message type: ", &message.kind);
                         }
                     }
                 }
@@ -564,6 +587,7 @@ mod tests {
     use crate::capability::{self, RpcCapability};
     use crate::error::{ErrKind, RpcError};
     use crate::message::{Call, Reply};
+    use crate::report::STDIOReporter;
 
     #[derive(Clone)]
     struct RpcTestService {}
@@ -627,6 +651,7 @@ mod tests {
             2,
             false,
             Duration::from_secs(1),
+            STDIOReporter::new(),
         )
         .await
         .unwrap();
@@ -701,6 +726,7 @@ mod tests {
             2,
             true,
             Duration::from_secs(1),
+            STDIOReporter::new(),
         )
         .await
         .unwrap();
@@ -736,10 +762,16 @@ mod tests {
         let path = "unix_server_test.sock";
 
         let service = RpcTestService {};
-        let mut server =
-            RpcServer::serve::<&str, UnixListener>(path, service, 2, false, Duration::from_secs(1))
-                .await
-                .unwrap();
+        let mut server = RpcServer::serve::<&str, UnixListener>(
+            path,
+            service,
+            2,
+            false,
+            Duration::from_secs(1),
+            STDIOReporter::new(),
+        )
+        .await
+        .unwrap();
 
         let mut transport = UnixStream::connect(path).await.unwrap();
 

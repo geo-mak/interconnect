@@ -5,6 +5,7 @@ pub mod capability;
 pub mod client;
 pub mod error;
 pub mod message;
+pub mod report;
 pub mod server;
 pub mod service;
 pub mod stream;

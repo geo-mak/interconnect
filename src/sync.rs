@@ -1,11 +1,12 @@
 use std::cell::UnsafeCell;
 use std::fmt;
+use std::io::Write;
 use std::marker::PhantomPinned;
 use std::pin::Pin;
 use std::ptr::NonNull;
 use std::sync::Arc;
 use std::sync::atomic::{
-    AtomicUsize, Ordering,
+    AtomicU8, AtomicUsize, Ordering,
     Ordering::{AcqRel, Acquire, Release},
 };
 use std::task::{Context, Poll, Waker};
@@ -520,8 +521,318 @@ impl<T> IList<T> {
     }
 }
 
+pub type ThreadNotifyLock<'a> = parking_lot::lock_api::MutexGuard<'a, parking_lot::RawMutex, ()>;
+
+/// A thread notification construct that can be used as signaling mechanism between threads.
+///
+/// This implementation is very lightweight, with user-space synchronization as first option.
+pub struct ThreadNotify {
+    sync: parking_lot::Mutex<()>,
+    parker: parking_lot::Condvar,
+}
+
+impl ThreadNotify {
+    #[inline]
+    pub fn new() -> Self {
+        Self {
+            sync: parking_lot::Mutex::new(()),
+            parker: parking_lot::Condvar::new(),
+        }
+    }
+
+    #[inline]
+    pub fn lock(&self) -> ThreadNotifyLock<'_> {
+        self.sync.lock()
+    }
+
+    #[inline]
+    pub fn is_locked(&self) -> bool {
+        self.sync.is_locked()
+    }
+
+    /// Waits with a pre-acquired lock until a notification is received.
+    #[inline]
+    pub fn wait(&self, lock: &mut ThreadNotifyLock<'_>) {
+        self.parker.wait(lock)
+    }
+
+    /// Waits with a pre-acquired lock until a notification is received or timeout occurs.
+    ///
+    /// Returns `true` in the case of timeout, and `false` otherwise´.
+    #[inline]
+    pub fn wait_with_timeout(&self, lock: &mut ThreadNotifyLock<'_>, timeout: std::time::Duration) -> bool {
+        self.parker
+            .wait_for(lock, timeout)
+            .timed_out()
+    }
+
+    /// Notifies a **waiting** thread to wake.
+    ///
+    /// If there is no waiter, this call does nothing.
+    #[inline]
+    pub fn notify_one(&self) {
+        self.parker.notify_one();
+    }
+
+    /// Notifies all **waiting** threads to wake.
+    ///
+    /// If there is no waiter, this call does nothing.
+    #[inline]
+    pub fn notify_all(&self) {
+        self.parker.notify_all();
+    }
+}
+
+/// A multi-producer **single-consumer** ring buffer for variable-length bytes-messages.
+///
+/// This buffer acts as a bounded communication channel, where each message is written framed.
+///
+/// The bounded implementation means that it will block writing when it reaches its full capacity.
+pub struct IORing {
+    buf: Box<[u8]>,
+    cap: usize,
+    mask: usize,
+    write: AtomicUsize,
+    read: AtomicUsize,
+}
+
+impl IORing {
+    /// Creates a ring buffer with capacity `cap` in **bytes**.
+    ///
+    /// The buffer is bounded, and will block writing when it reaches its full capacity.
+    ///
+    /// Capacity must be a power of two and >= 8.
+    #[inline]
+    pub fn new(cap: usize) -> Self {
+        assert!(cap.is_power_of_two(), "cap must be power of two");
+        assert!(cap >= 8, "cap too small");
+
+        let buf = vec![0u8; cap].into_boxed_slice();
+
+        Self {
+            buf,
+            cap,
+            mask: cap - 1,
+            write: AtomicUsize::new(0),
+            read: AtomicUsize::new(0),
+        }
+    }
+
+    /// Tries to write a message.
+    ///
+    /// Each message is written as single whole with control metadata.
+    ///
+    /// Returns `true` on success.
+    ///
+    /// Returns `false` if there isn't enough capacity for the message currently.
+    pub fn try_write(&self, message: &[u8]) -> bool {
+        let payload_len = message.len();
+        // Header = 4 bytes for length (u32 le-bytes).
+        // We reserve header + payload.
+        let frame_size = 4usize + payload_len;
+        if frame_size > self.cap {
+            // Message too large for this ring at all.
+            return false;
+        }
+
+        loop {
+            let head = self.write.load(Ordering::Relaxed);
+            let tail = self.read.load(Ordering::Acquire);
+            let used = head.wrapping_sub(tail);
+            if used + frame_size > self.cap {
+                // Not enough space right now.
+                return false;
+            }
+
+            // Try advance head by `total`.
+            let new_head = head.wrapping_add(frame_size);
+            match self.write.compare_exchange_weak(
+                head,
+                new_head,
+                Ordering::AcqRel,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => {
+                    // Reserved region at 'head' of `total` length.
+                    self.write(head, message);
+                    return true;
+                }
+                Err(_) => {
+                    // Another producer got that region.
+                    continue;
+                }
+            }
+        }
+    }
+
+    fn write(&self, from: usize, message: &[u8]) {
+        let mask = self.mask;
+        let buf_ptr = self.buf.as_ptr() as *mut u8;
+
+        let header_pos = from & mask;
+        let payload_pos = (header_pos + 4) & mask;
+        let len = message.len() as u32;
+        let len_bytes = len.to_le_bytes();
+
+        unsafe {
+            // 1- write payload bytes into ring (may wrap).
+            for i in 0..message.len() {
+                let idx = (payload_pos + i) & mask;
+                let dst = buf_ptr.add(idx);
+                std::ptr::write(dst, message[i]);
+            }
+            // 2- Publish header bytes (4 bytes) **after** payload writes.
+            for i in 0..4 {
+                let idx = (header_pos + i) & mask;
+                let atomic_ptr = (buf_ptr.add(idx)) as *const AtomicU8;
+                // Safety: AtomicU8 has alignment 1, so transmuting pointer is OK.
+                let a = &*(atomic_ptr);
+                a.store(len_bytes[i], Ordering::Release);
+            }
+        }
+    }
+
+    /// Tries to read all currently available messages and writes them into `dst`.
+    ///
+    /// Returns number of bytes written to `dst`.
+    ///
+    /// If no complete message is available, it returns Ok(0).
+    pub fn read_published<W>(&self, dst: &mut W) -> std::io::Result<usize>
+    where
+        W: Write,
+    {
+        let mut written = 0usize;
+        loop {
+            let tail = self.read.load(Ordering::Relaxed);
+            let head = self.write.load(Ordering::Acquire);
+            if tail == head {
+                // Empty.
+                break;
+            }
+
+            let pos = tail & self.mask;
+            let cap = self.cap;
+            let mask = self.mask;
+            let buf = &*self.buf;
+
+            // Read header bytes atomically and assemble len.
+            // A header value of 0 means "not yet published".
+            let mut len_bytes = [0u8; 4];
+            let mut header_zero = true;
+            for i in 0..4 {
+                let idx = (pos + i) & mask;
+                // Safety: Using AtomicU8 loads by transmuting pointer is safe.
+                let atomic_ptr = (&buf[idx] as *const u8) as *const AtomicU8;
+                let a = unsafe { &*atomic_ptr };
+                let b = a.load(Ordering::Acquire);
+                len_bytes[i] = b;
+                if b != 0 {
+                    header_zero = false;
+                }
+            }
+
+            if header_zero {
+                // No complete message is published.
+                break;
+            }
+
+            // Read payload (may wrap).
+            let payload_pos = (pos + 4) & mask;
+            let msg_len = u32::from_le_bytes(len_bytes) as usize;
+
+            // Write directly to dst in possibly two parts (wrap).
+            let slice = std::cmp::min(msg_len, cap - payload_pos);
+            if slice > 0 {
+                dst.write_all(&buf[payload_pos..payload_pos + slice])?;
+                written += slice;
+            }
+            if slice < msg_len {
+                // Wrapped remaining.
+                let rem = msg_len - slice;
+                dst.write_all(&buf[0..rem])?;
+                written += rem;
+            }
+
+            // Advance read cursor by header + payload.
+            let advance = 4 + msg_len;
+            self.read
+                .store(tail.wrapping_add(advance), Ordering::Release);
+        }
+
+        Ok(written)
+    }
+
+    /// Tries to read exactly one complete message into `dst`.
+    ///
+    /// Returns number of bytes written to `dst`.
+    ///
+    /// If no complete message is available, it returns Ok(0).
+    pub fn read_next<W>(&self, dst: &mut W) -> std::io::Result<usize>
+    where
+        W: Write,
+    {
+        let tail = self.read.load(Ordering::Relaxed);
+        let head = self.write.load(Ordering::Acquire);
+        if tail == head {
+            // Empty.
+            return Ok(0);
+        }
+
+        let pos = tail & self.mask;
+        let cap = self.cap;
+        let mask = self.mask;
+        let buf = &*self.buf;
+
+        // Read header bytes atomically and assemble len.
+        // A header value of 0 means "not yet published".
+        let mut len_bytes = [0u8; 4];
+        let mut header_zero = true;
+        for i in 0..4 {
+            let idx = (pos + i) & mask;
+            // Safety: Using AtomicU8 loads by transmuting pointer is safe.
+            let atomic_ptr = (&buf[idx] as *const u8) as *const AtomicU8;
+            let a = unsafe { &*atomic_ptr };
+            let b = a.load(Ordering::Acquire);
+            len_bytes[i] = b;
+            if b != 0 {
+                header_zero = false;
+            }
+        }
+
+        if header_zero {
+            // No complete message is published.
+            return Ok(0);
+        }
+
+        // Read payload (may wrap).
+        let payload_pos = (pos + 4) & mask;
+        let msg_len = u32::from_le_bytes(len_bytes) as usize;
+
+        // Write directly to dst in possibly two parts (wrap).
+        let slice = std::cmp::min(msg_len, cap - payload_pos);
+        let mut written = 0;
+        if slice > 0 {
+            dst.write_all(&buf[payload_pos..payload_pos + slice])?;
+            written += slice;
+        }
+        if slice < msg_len {
+            // Wrapped remaining.
+            let rem = msg_len - slice;
+            dst.write_all(&buf[0..rem])?;
+            written += rem;
+        }
+
+        // Advance read cursor by header + payload.
+        let advance = 4 + msg_len;
+        self.read
+            .store(tail.wrapping_add(advance), Ordering::Release);
+
+        Ok(written)
+    }
+}
+
 #[cfg(test)]
-mod tests {
+mod tests_dynamic_latch {
     use super::*;
 
     use std::sync::Arc;
@@ -615,5 +926,95 @@ mod tests {
         });
 
         let ((), ()) = tokio::try_join!(t1, t2).expect("Tasks should not panic");
+    }
+}
+
+#[cfg(test)]
+mod tests_io_ring {
+    use super::*;
+    use std::sync::{Arc, Barrier};
+    use std::thread;
+
+    #[test]
+    fn test_io_ring_read_empty() {
+        let ring = IORing::new(16);
+        let mut dst = Vec::new();
+        let n = ring.read_next(&mut dst).unwrap();
+        assert_eq!(n, 0);
+        let n = ring.read_published(&mut dst).unwrap();
+        assert_eq!(n, 0);
+        assert!(dst.is_empty());
+    }
+
+    #[test]
+    fn test_io_ring_no_space() {
+        let ring = IORing::new(8);
+        let msg = b"12345678";
+        assert!(!ring.try_write(msg));
+    }
+
+    #[test]
+    fn test_io_ring_read_next() {
+        let ring = IORing::new(32);
+        let msgs = [b"Alpha", b"Betaa", b"Gamma"];
+        for m in msgs {
+            assert!(ring.try_write(m));
+        }
+        let mut dst = [0u8; 15];
+        let mut pos = 0;
+        for _ in 0..3 {
+            let n = ring.read_next(&mut dst[pos..].as_mut()).unwrap();
+            assert_eq!(n, 5);
+            pos += 5;
+        }
+        assert_eq!(&dst, b"AlphaBetaaGamma");
+    }
+
+    #[test]
+    fn test_io_ring_read_published() {
+        let ring = IORing::new(32);
+        let msgs = [b"Alpha", b"Betaa", b"Gamma"];
+        for m in msgs {
+            assert!(ring.try_write(m));
+        }
+        let mut dst = [0u8; 15];
+        let n = ring.read_published(&mut dst.as_mut_slice()).unwrap();
+        assert_eq!(n, 15);
+        assert_eq!(&dst, b"AlphaBetaaGamma");
+    }
+
+    #[test]
+    fn test_io_ring_data_race() {
+        let ring = Arc::new(IORing::new(1024));
+        let barrier = Arc::new(Barrier::new(2));
+
+        let ring_1 = ring.clone();
+        let barrier_1 = barrier.clone();
+        let t1 = thread::spawn(move || {
+            barrier_1.wait();
+            for _ in 0..30 {
+                assert!(ring_1.try_write("thread1".as_bytes()));
+            }
+        });
+
+        let ring_2 = ring.clone();
+        let barrier_2 = barrier.clone();
+        let t2 = thread::spawn(move || {
+            barrier_2.wait();
+            for _ in 0..30 {
+                assert!(ring_2.try_write("thread2".as_bytes()))
+            }
+        });
+
+        t1.join().unwrap();
+        t2.join().unwrap();
+
+        let mut dst = [0u8; 420];
+        ring.read_published(&mut dst.as_mut_slice()).unwrap();
+
+        for chunk in dst.chunks(7) {
+            let s = std::str::from_utf8(chunk).unwrap();
+            assert!(s == "thread1" || s == "thread2");
+        }
     }
 }

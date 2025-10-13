@@ -15,6 +15,7 @@ use uuid::Uuid;
 use crate::capability::{RpcCapability, negotiation};
 use crate::error::{ErrKind, RpcError, RpcResult};
 use crate::message::{Call, Message, MessageType, Reply};
+use crate::report::Reporter;
 use crate::service::{CallContext, RpcService};
 use crate::stream::{
     EncryptedRpcReceiver, EncryptedRpcSender, RpcAsyncReceiver, RpcAsyncSender, RpcReceiver,
@@ -63,25 +64,52 @@ pub trait RpcAsyncClient {
     fn shutdown(&mut self) -> impl Future<Output = RpcResult<()>>;
 }
 
-struct ClientContext<'a, S, H> {
-    id: &'a Uuid,
-    state: &'a ClientState<S, H>,
+enum Response {
+    Pong,
+    Reply(Reply),
 }
 
-impl<'a, S, H> ClientContext<'a, S, H>
+struct ClientState<S, H, E> {
+    reporter: E,
+    abort_lock: DynamicLatch,
+    pending: Mutex<HashMap<Uuid, Sender<RpcResult<Response>>>>,
+    sender: Mutex<S>,
+    service: H,
+}
+
+impl<S, H, E> ClientState<S, H, E> {
+    #[inline(always)]
+    fn new(service: H, sender: S, cap: usize, reporter: E) -> ClientState<S, H, E> {
+        ClientState {
+            reporter,
+            abort_lock: DynamicLatch::new(),
+            pending: Mutex::const_new(HashMap::with_capacity(cap)),
+            sender: Mutex::const_new(sender),
+            service,
+        }
+    }
+}
+
+struct ClientContext<'a, S, H, E> {
+    id: &'a Uuid,
+    state: &'a ClientState<S, H, E>,
+}
+
+impl<'a, S, H, E> ClientContext<'a, S, H, E>
 where
     S: RpcAsyncSender + Send,
 {
     #[inline(always)]
-    const fn new(id: &'a Uuid, sender: &'a ClientState<S, H>) -> Self {
+    const fn new(id: &'a Uuid, sender: &'a ClientState<S, H, E>) -> Self {
         Self { id, state: sender }
     }
 }
 
-impl<'a, S, H> CallContext for ClientContext<'a, S, H>
+impl<'a, S, H, E> CallContext for ClientContext<'a, S, H, E>
 where
     S: RpcAsyncSender + Send,
     H: RpcService + Sync,
+    E: Reporter + Sync,
 {
     type ID = Uuid;
 
@@ -115,49 +143,27 @@ where
     }
 }
 
-enum Response {
-    Pong,
-    Reply(Reply),
-}
-
-struct ClientState<S, H> {
-    abort_lock: DynamicLatch,
-    pending: Mutex<HashMap<Uuid, Sender<RpcResult<Response>>>>,
-    sender: Mutex<S>,
-    service: H,
-}
-
-impl<S, H> ClientState<S, H> {
-    #[inline(always)]
-    fn new(service: H, sender: S, cap: usize) -> ClientState<S, H> {
-        ClientState {
-            abort_lock: DynamicLatch::new(),
-            pending: Mutex::const_new(HashMap::with_capacity(cap)),
-            sender: Mutex::const_new(sender),
-            service,
-        }
-    }
-}
-
 /// RPC Client implementation.
 /// This implementation utilizes single shared transport instance,
 /// which makes it very lightweight at the cost of some synchronization overhead.
-pub struct RpcClient<S, H> {
-    state: Arc<ClientState<S, H>>,
+pub struct RpcClient<S, H, E> {
+    state: Arc<ClientState<S, H, E>>,
     task: JoinHandle<()>,
 }
 
-impl<S, H> RpcClient<S, H>
+impl<S, H, E> RpcClient<S, H, E>
 where
     S: RpcAsyncSender + Send + 'static,
     H: RpcService + Send + Sync + 'static,
+    E: Reporter + Send + Sync + 'static,
 {
     #[inline]
     pub async fn connect<T>(
         mut transport: T,
         call_handler: H,
         capacity: usize,
-    ) -> RpcResult<RpcClient<RpcSender<T::OwnedWriteHalf>, H>>
+        reporter: E,
+    ) -> RpcResult<RpcClient<RpcSender<T::OwnedWriteHalf>, H, E>>
     where
         T: TransportLayer + 'static,
     {
@@ -169,6 +175,7 @@ where
             RpcReceiver::new(r),
             call_handler,
             capacity,
+            reporter,
         )
         .await
     }
@@ -178,7 +185,8 @@ where
         mut transport: T,
         call_handler: H,
         capacity: usize,
-    ) -> RpcResult<RpcClient<EncryptedRpcSender<T::OwnedWriteHalf>, H>>
+        reporter: E,
+    ) -> RpcResult<RpcClient<EncryptedRpcSender<T::OwnedWriteHalf>, H, E>>
     where
         T: TransportLayer + 'static,
     {
@@ -193,12 +201,13 @@ where
             EncryptedRpcReceiver::new(r, r_key),
             call_handler,
             capacity,
+            reporter,
         )
         .await
     }
 
     #[inline(always)]
-    const fn new(state: Arc<ClientState<S, H>>, task: tokio::task::JoinHandle<()>) -> Self {
+    const fn new(state: Arc<ClientState<S, H, E>>, task: tokio::task::JoinHandle<()>) -> Self {
         Self { state, task }
     }
 
@@ -207,12 +216,13 @@ where
         mut receiver: R,
         call_handler: H,
         cap: usize,
-    ) -> RpcResult<RpcClient<S, H>>
+        reporter: E,
+    ) -> RpcResult<RpcClient<S, H, E>>
     where
         S: RpcAsyncSender + Send + 'static,
         R: RpcAsyncReceiver + Send + 'static,
     {
-        let state = Arc::new(ClientState::new(call_handler, sender, cap));
+        let state = Arc::new(ClientState::new(call_handler, sender, cap, reporter));
         let c_state = Arc::clone(&state);
 
         let task = tokio::spawn(async move {
@@ -220,12 +230,12 @@ where
                 match receiver.receive().await {
                     Ok(message) => {
                         if let Err(e) = Self::process_message(&c_state, message).await {
-                            eprintln!("Handling error: {e}");
+                            c_state.reporter.error("Handling error", &e);
                             break;
                         }
                     }
                     Err(e) => {
-                        eprintln!("Receiving error: {e}");
+                        c_state.reporter.error("Receiving error", &e);
                         break;
                     }
                 }
@@ -235,7 +245,7 @@ where
         Ok(RpcClient::new(state, task))
     }
 
-    async fn process_message(state: &Arc<ClientState<S, H>>, message: Message) -> RpcResult<()> {
+    async fn process_message(state: &Arc<ClientState<S, H, E>>, message: Message) -> RpcResult<()> {
         match message.kind {
             MessageType::Reply(reply) => {
                 let mut pending = state.pending.lock().await;
@@ -312,10 +322,11 @@ where
     }
 }
 
-impl<S, H> RpcAsyncClient for RpcClient<S, H>
+impl<S, H, E> RpcAsyncClient for RpcClient<S, H, E>
 where
     S: RpcAsyncSender + Send + 'static,
     H: RpcService + Send + Sync + 'static,
+    E: Reporter + Send + Sync + 'static,
 {
     /// Makes a remote procedure call.
     /// Default timeout is `30` seconds.
@@ -432,6 +443,8 @@ mod tests {
 
     use tokio::net::{TcpStream, tcp};
 
+    use crate::report::STDIOReporter;
+
     #[tokio::test]
     async fn test_client_calls() {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -492,9 +505,14 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(10)).await;
 
         let transport = TcpStream::connect(addr).await.unwrap();
-        let mut client = RpcClient::<RpcSender<tcp::OwnedWriteHalf>, ()>::connect(transport, (), 1)
-            .await
-            .unwrap();
+        let mut client = RpcClient::<RpcSender<tcp::OwnedWriteHalf>, (), STDIOReporter>::connect(
+            transport,
+            (),
+            1,
+            STDIOReporter::new(),
+        )
+        .await
+        .unwrap();
 
         let reply = client.call::<&str, String>(1, &"call").await.unwrap();
         assert_eq!(reply, "reply");
@@ -559,10 +577,11 @@ mod tests {
 
         let transport = TcpStream::connect(addr).await.unwrap();
         let mut client =
-            RpcClient::<EncryptedRpcSender<tcp::OwnedWriteHalf>, ()>::connect_encrypted(
+            RpcClient::<EncryptedRpcSender<tcp::OwnedWriteHalf>, (), STDIOReporter>::connect_encrypted(
                 transport,
                 (),
                 1,
+                STDIOReporter::new()
             )
             .await
             .unwrap();

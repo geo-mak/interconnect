@@ -641,8 +641,11 @@ impl IORing {
     /// Each message is written after 4-bytes (u32 little-endian) length-prefix.
     ///
     /// Returns:
+    ///
     /// `IORingResult::Ok`: If submitting was successful.
+    ///
     /// `IORingResult::WouldBlock`: if there is no space for the message currently.
+    ///
     /// `IORingResult::Never`: if the message is larger than the maximum capacity of the buffer.
     pub fn write(&self, msg: &[u8]) -> IORingResult {
         let frame = 4 + msg.len();
@@ -862,10 +865,18 @@ mod tests_io_ring {
     }
 
     #[test]
-    fn test_io_ring_no_space() {
+    fn test_io_ring_large_msg() {
         let ring = IORing::new(8);
         let msg = b"12345678";
         assert_eq!(ring.write(msg), IORingResult::Never);
+    }
+
+    #[test]
+    fn test_io_ring_no_space() {
+        let ring = IORing::new(16);
+        let msg = b"12345678";
+        assert_eq!(ring.write(msg), IORingResult::Ok);
+        assert_eq!(ring.write(msg), IORingResult::WouldBlock);
     }
 
     #[test]

@@ -585,6 +585,14 @@ impl ThreadNotify {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[repr(u8)]
+pub enum IORingResult {
+    Ok = 0,
+    WouldBlock = 1,
+    Never = 2,
+}
+
 /// A multi-producer **single-consumer** ring buffer for variable-length byte-messages.
 ///
 /// This buffer acts as a bounded communication channel, where each message is written framed.
@@ -632,13 +640,14 @@ impl IORing {
     ///
     /// Each message is written after 4-bytes (u32 little-endian) length-prefix.
     ///
-    /// Returns `true` if writing was successful.
-    ///
-    /// Returns `false` if the frame is larger than the available capacity.
-    pub fn try_write(&self, msg: &[u8]) -> bool {
+    /// Returns:
+    /// `IORingResult::Ok`: If submitting was successful.
+    /// `IORingResult::WouldBlock`: if there is no space for the message currently.
+    /// `IORingResult::Never`: if the message is larger than the maximum capacity of the buffer.
+    pub fn write(&self, msg: &[u8]) -> IORingResult {
         let frame = 4 + msg.len();
         if frame > self.cap {
-            return false;
+            return IORingResult::Never;
         }
 
         loop {
@@ -646,7 +655,7 @@ impl IORing {
             let tail = self.tail.load(Ordering::Acquire);
             let used = head.wrapping_sub(tail);
             if used + frame > self.cap {
-                return false;
+                return IORingResult::WouldBlock;
             }
 
             let new_head = head.wrapping_add(frame);
@@ -656,7 +665,7 @@ impl IORing {
                 .is_ok()
             {
                 unsafe { self.write_publish(head, msg) };
-                return true;
+                return IORingResult::Ok;
             }
         }
     }
@@ -856,7 +865,7 @@ mod tests_io_ring {
     fn test_io_ring_no_space() {
         let ring = IORing::new(8);
         let msg = b"12345678";
-        assert!(!ring.try_write(msg));
+        assert_eq!(ring.write(msg), IORingResult::Never);
     }
 
     #[test]
@@ -864,7 +873,7 @@ mod tests_io_ring {
         let ring = IORing::new(32);
         let msgs = [b"Alpha", b"Betaa", b"Gamma"];
         for m in msgs {
-            assert!(ring.try_write(m));
+            assert_eq!(ring.write(m), IORingResult::Ok);
         }
         let mut dst = [0u8; 15];
         let mut pos = 0;
@@ -900,8 +909,8 @@ mod tests_io_ring {
                 "Tail mismatch at iter {i}"
             );
 
-            let success = ring.try_write(&(i + 1).to_le_bytes());
-            assert!(success, "Failed to write iter {i}");
+            let result = ring.write(&(i + 1).to_le_bytes());
+            assert_eq!(result, IORingResult::Ok, "Failed to write iter {i}");
 
             let n = ring.read_next(&mut dst).unwrap();
             assert_eq!(n, 2, "Expected 2 bytes, got {n}");
@@ -930,7 +939,7 @@ mod tests_io_ring {
         let t1 = thread::spawn(move || {
             barrier_1.wait();
             for _ in 0..30 {
-                assert!(ring_1.try_write("thread1".as_bytes()));
+                assert_eq!(ring_1.write("thread1".as_bytes()), IORingResult::Ok);
             }
         });
 
@@ -939,7 +948,7 @@ mod tests_io_ring {
         let t2 = thread::spawn(move || {
             barrier_2.wait();
             for _ in 0..30 {
-                assert!(ring_2.try_write("thread2".as_bytes()))
+                assert_eq!(ring_2.write("thread2".as_bytes()), IORingResult::Ok)
             }
         });
 
@@ -948,7 +957,7 @@ mod tests_io_ring {
         let t3 = thread::spawn(move || {
             barrier_3.wait();
             for _ in 0..30 {
-                assert!(ring_3.try_write("thread3".as_bytes()))
+                assert_eq!(ring_3.write("thread3".as_bytes()), IORingResult::Ok)
             }
         });
 

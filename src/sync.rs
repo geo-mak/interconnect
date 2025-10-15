@@ -993,8 +993,7 @@ mod tests_io_ring {
 
         let mut dst = [0u8; 7];
 
-        for _ in 0..120 {
-            ring.read_next(&mut dst.as_mut()).unwrap();
+        while ring.read_next(&mut dst.as_mut()).unwrap() != 0 {
             match std::str::from_utf8(&dst).expect("Unreadable data in the ring") {
                 "thread1" => t1_count += 1,
                 "thread2" => t2_count += 1,

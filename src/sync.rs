@@ -942,8 +942,8 @@ mod tests_io_ring {
 
     #[test]
     fn test_io_ring_data_race() {
-        let ring = Arc::new(IORing::new(1024));
-        let barrier = Arc::new(Barrier::new(3));
+        let ring = Arc::new(IORing::new(2048));
+        let barrier = Arc::new(Barrier::new(4));
 
         let ring_1 = ring.clone();
         let barrier_1 = barrier.clone();
@@ -972,20 +972,41 @@ mod tests_io_ring {
             }
         });
 
+        let ring_4 = ring.clone();
+        let barrier_4 = barrier.clone();
+        let t4 = thread::spawn(move || {
+            barrier_4.wait();
+            for _ in 0..30 {
+                assert_eq!(ring_4.write("thread4".as_bytes()), IORingResult::Ok)
+            }
+        });
+
         t1.join().unwrap();
         t2.join().unwrap();
         t3.join().unwrap();
+        t4.join().unwrap();
 
-        let mut dst = [0u8; 630];
-        let mut pos = 0;
-        for _ in 0..90 {
-            ring.read_next(&mut dst[pos..].as_mut()).unwrap();
-            pos += 7;
+        let mut t1_count = 0;
+        let mut t2_count = 0;
+        let mut t3_count = 0;
+        let mut t4_count = 0;
+
+        let mut dst = [0u8; 7];
+
+        for _ in 0..120 {
+            ring.read_next(&mut dst.as_mut()).unwrap();
+            match std::str::from_utf8(&dst).expect("Unreadable data in the ring") {
+                "thread1" => t1_count += 1,
+                "thread2" => t2_count += 1,
+                "thread3" => t3_count += 1,
+                "thread4" => t4_count += 1,
+                _ => panic!("Unexpected data in the ring"),
+            }
         }
 
-        for chunk in dst.chunks(7) {
-            let s = std::str::from_utf8(chunk).unwrap();
-            assert!(s == "thread1" || s == "thread2" || s == "thread3");
-        }
+        assert_eq!(t1_count, 30);
+        assert_eq!(t2_count, 30);
+        assert_eq!(t3_count, 30);
+        assert_eq!(t4_count, 30);
     }
 }

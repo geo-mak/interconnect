@@ -1,4 +1,4 @@
-# Autonomic Interconnect
+# Interconnect
 
 High performance remote procedure call protocol.
 

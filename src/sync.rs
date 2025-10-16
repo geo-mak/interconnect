@@ -636,7 +636,7 @@ impl IORing {
         }
     }
 
-    /// Tries to write a message.
+    /// Tries to submit a message.
     ///
     /// Each message is written after 4-bytes (u32 little-endian) length-prefix.
     ///
@@ -646,8 +646,8 @@ impl IORing {
     ///
     /// `IORingResult::WouldBlock`: if there is no space for the message currently.
     ///
-    /// `IORingResult::Never`: if the message is larger than the maximum capacity of the buffer.
-    pub fn write(&self, msg: &[u8]) -> IORingResult {
+    /// `IORingResult::Never`: if the message is larger than the maximum capacity of the ring.
+    pub fn submit(&self, msg: &[u8]) -> IORingResult {
         let frame = 4 + msg.len();
         if frame > self.cap {
             return IORingResult::Never;
@@ -698,7 +698,7 @@ impl IORing {
         self.published[msg_idx].fetch_or(msg_flag, Ordering::Release);
     }
 
-    /// Tries to read a published message.
+    /// Tries to receive a published message.
     ///
     /// Returns:
     ///
@@ -707,8 +707,8 @@ impl IORing {
     /// - Some(message size): When a published message has been written successfully to `dst`.
     ///
     /// - Some(I/O error): When writing a published message into `dst` has failed.
-    ///   Next call will read the same message.
-    pub fn read_next<W: Write>(&self, dst: &mut W) -> Option<io::Result<usize>> {
+    ///   Next call will try to write the same message.
+    pub fn receive_into<W: Write>(&self, dst: &mut W) -> Option<io::Result<usize>> {
         let tail = self.tail.load(Ordering::Relaxed);
 
         // Check flag.
@@ -864,7 +864,7 @@ mod tests_io_ring {
     fn test_io_ring_read_empty() {
         let ring = IORing::new(8);
         let mut dst = Vec::new();
-        let n = ring.read_next(&mut dst);
+        let n = ring.receive_into(&mut dst);
         assert!(n.is_none());
         assert!(dst.is_empty());
     }
@@ -873,30 +873,30 @@ mod tests_io_ring {
     fn test_io_ring_large_msg() {
         let ring = IORing::new(8);
         let msg = b"12345678";
-        assert_eq!(ring.write(msg), IORingResult::Never);
+        assert_eq!(ring.submit(msg), IORingResult::Never);
     }
 
     #[test]
     fn test_io_ring_no_space() {
         let ring = IORing::new(16);
         let msg = b"12345678";
-        assert_eq!(ring.write(msg), IORingResult::Ok);
-        assert_eq!(ring.write(msg), IORingResult::WouldBlock);
+        assert_eq!(ring.submit(msg), IORingResult::Ok);
+        assert_eq!(ring.submit(msg), IORingResult::WouldBlock);
     }
 
     #[test]
     fn test_io_ring_write_empty_msg() {
         let ring = IORing::new(16);
 
-        assert_eq!(ring.write("".as_bytes()), IORingResult::Ok);
-        assert_eq!(ring.write("data".as_bytes()), IORingResult::Ok);
+        assert_eq!(ring.submit("".as_bytes()), IORingResult::Ok);
+        assert_eq!(ring.submit("data".as_bytes()), IORingResult::Ok);
 
         let mut dst = [0u8; 4];
 
-        let n = ring.read_next(&mut dst.as_mut()).unwrap().unwrap();
+        let n = ring.receive_into(&mut dst.as_mut()).unwrap().unwrap();
         assert_eq!(n, 0);
 
-        let n = ring.read_next(&mut dst.as_mut()).unwrap().unwrap();
+        let n = ring.receive_into(&mut dst.as_mut()).unwrap().unwrap();
         assert_eq!(n, 4);
     }
 
@@ -905,12 +905,15 @@ mod tests_io_ring {
         let ring = IORing::new(32);
         let msgs = [b"Alpha", b"Betaa", b"Gamma"];
         for m in msgs {
-            assert_eq!(ring.write(m), IORingResult::Ok);
+            assert_eq!(ring.submit(m), IORingResult::Ok);
         }
         let mut dst = [0u8; 15];
         let mut pos = 0;
         for _ in 0..3 {
-            let n = ring.read_next(&mut dst[pos..].as_mut()).unwrap().unwrap();
+            let n = ring
+                .receive_into(&mut dst[pos..].as_mut())
+                .unwrap()
+                .unwrap();
             assert_eq!(n, 5);
             pos += 5;
         }
@@ -941,10 +944,10 @@ mod tests_io_ring {
                 "Tail mismatch at iter {i}"
             );
 
-            let result = ring.write(&(i + 1).to_le_bytes());
+            let result = ring.submit(&(i + 1).to_le_bytes());
             assert_eq!(result, IORingResult::Ok, "Failed to write iter {i}");
 
-            let n = ring.read_next(&mut dst).unwrap().unwrap();
+            let n = ring.receive_into(&mut dst).unwrap().unwrap();
             assert_eq!(n, 2, "Expected 2 bytes, got {n}");
 
             must_head = must_head.wrapping_add(frame_size);
@@ -971,7 +974,7 @@ mod tests_io_ring {
         let t1 = thread::spawn(move || {
             barrier_1.wait();
             for _ in 0..30 {
-                assert_eq!(ring_1.write("thread1".as_bytes()), IORingResult::Ok);
+                assert_eq!(ring_1.submit("thread1".as_bytes()), IORingResult::Ok);
             }
         });
 
@@ -980,7 +983,7 @@ mod tests_io_ring {
         let t2 = thread::spawn(move || {
             barrier_2.wait();
             for _ in 0..30 {
-                assert_eq!(ring_2.write("thread2".as_bytes()), IORingResult::Ok)
+                assert_eq!(ring_2.submit("thread2".as_bytes()), IORingResult::Ok)
             }
         });
 
@@ -989,7 +992,7 @@ mod tests_io_ring {
         let t3 = thread::spawn(move || {
             barrier_3.wait();
             for _ in 0..30 {
-                assert_eq!(ring_3.write("thread3".as_bytes()), IORingResult::Ok)
+                assert_eq!(ring_3.submit("thread3".as_bytes()), IORingResult::Ok)
             }
         });
 
@@ -998,7 +1001,7 @@ mod tests_io_ring {
         let t4 = thread::spawn(move || {
             barrier_4.wait();
             for _ in 0..30 {
-                assert_eq!(ring_4.write("thread4".as_bytes()), IORingResult::Ok)
+                assert_eq!(ring_4.submit("thread4".as_bytes()), IORingResult::Ok)
             }
         });
 
@@ -1014,7 +1017,7 @@ mod tests_io_ring {
 
         let mut dst = [0u8; 7];
 
-        while let Some(Ok(_)) = ring.read_next(&mut dst.as_mut()) {
+        while let Some(Ok(_)) = ring.receive_into(&mut dst.as_mut()) {
             match std::str::from_utf8(&dst).expect("Unreadable data in the ring") {
                 "thread1" => t1_count += 1,
                 "thread2" => t2_count += 1,

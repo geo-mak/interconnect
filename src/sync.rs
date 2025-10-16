@@ -5,8 +5,8 @@ use std::pin::Pin;
 use std::ptr::NonNull;
 use std::sync::Arc;
 use std::sync::atomic::{
-    AtomicU64, AtomicUsize, Ordering,
-    Ordering::{AcqRel, Acquire, Release},
+    AtomicU64, AtomicUsize,
+    Ordering::{AcqRel, Acquire, Relaxed, Release},
 };
 use std::task::{Context, Poll, Waker};
 use std::{fmt, io};
@@ -172,7 +172,7 @@ impl DynamicLatch {
     pub fn acquire(&self) -> Option<LatchLock<'_>> {
         // Open is only done once, so we optimize for the likely case.
         // This will make the failure case more expensive.
-        let current = self.state.fetch_add(2, Ordering::Acquire);
+        let current = self.state.fetch_add(2, Acquire);
         if (current & 1) != 0 {
             self.release();
             return None;
@@ -185,7 +185,7 @@ impl DynamicLatch {
     ///
     /// Returns `None` if `open` has been started.
     pub fn acquire_owned(self: &Arc<Self>) -> Option<OwnedLatchLock> {
-        let current = self.state.fetch_add(2, Ordering::Acquire);
+        let current = self.state.fetch_add(2, Acquire);
         if (current & 1) != 0 {
             self.release();
             return None;
@@ -198,7 +198,7 @@ impl DynamicLatch {
 
     #[inline]
     pub(crate) fn acquire_manual(&self) -> bool {
-        let current = self.state.fetch_add(2, Ordering::Acquire);
+        let current = self.state.fetch_add(2, Acquire);
         if (current & 1) != 0 {
             self.release();
             return false;
@@ -209,7 +209,7 @@ impl DynamicLatch {
     #[inline(always)]
     pub(crate) fn release(&self) {
         // If last state was open and has exactly one last lock.
-        if self.state.fetch_sub(2, Ordering::Release) == 3 {
+        if self.state.fetch_sub(2, Release) == 3 {
             self.waiter.wake();
         }
     }
@@ -217,7 +217,7 @@ impl DynamicLatch {
     /// Sets the open flag, preventing new locks from being created.
     #[inline(always)]
     pub fn open(&self) {
-        self.state.fetch_or(1, Ordering::AcqRel);
+        self.state.fetch_or(1, AcqRel);
     }
 
     /// Returns a future that resolves when all locks are released.
@@ -243,13 +243,13 @@ impl DynamicLatch {
     /// Returns `true` if the latch is currently open.
     #[inline(always)]
     pub fn is_open(&self) -> bool {
-        (self.state.load(Ordering::Acquire) & 1) != 0
+        (self.state.load(Acquire) & 1) != 0
     }
 
     /// Returns the current count of held locks.
     #[inline(always)]
     pub fn count(&self) -> usize {
-        self.state.load(Ordering::Acquire) >> 1
+        self.state.load(Acquire) >> 1
     }
 }
 
@@ -267,7 +267,7 @@ impl<'a> Future for WaitFuture<'a> {
     type Output = ();
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        if self.latch.state.load(Ordering::Acquire) == 1 {
+        if self.latch.state.load(Acquire) == 1 {
             return Poll::Ready(());
         }
         self.latch.waiter.set(cx.waker());
@@ -654,8 +654,8 @@ impl IORing {
         }
 
         loop {
-            let head = self.head.load(Ordering::Relaxed);
-            let tail = self.tail.load(Ordering::Acquire);
+            let head = self.head.load(Relaxed);
+            let tail = self.tail.load(Acquire);
             let used = head.wrapping_sub(tail);
             if used + frame > self.cap {
                 return IORingResult::WouldBlock;
@@ -664,7 +664,7 @@ impl IORing {
             let new_head = head.wrapping_add(frame);
             if self
                 .head
-                .compare_exchange_weak(head, new_head, Ordering::AcqRel, Ordering::Relaxed)
+                .compare_exchange_weak(head, new_head, AcqRel, Relaxed)
                 .is_ok()
             {
                 unsafe { self.write_publish(head, msg) };
@@ -695,7 +695,7 @@ impl IORing {
         // Publish.
         let msg_idx = (pos >> 6) & (self.published.len() - 1);
         let msg_flag = 1u64 << (pos & 63);
-        self.published[msg_idx].fetch_or(msg_flag, Ordering::Release);
+        self.published[msg_idx].fetch_or(msg_flag, Release);
     }
 
     /// Tries to receive a published message.
@@ -709,12 +709,12 @@ impl IORing {
     /// - Some(I/O error): When writing a published message into `dst` has failed.
     ///   Next call will try to write the same message.
     pub fn receive_into<W: Write>(&self, dst: &mut W) -> Option<io::Result<usize>> {
-        let tail = self.tail.load(Ordering::Relaxed);
+        let tail = self.tail.load(Relaxed);
 
         // Check flag.
         let msg_idx = (tail >> 6) & (self.published.len() - 1);
         let msg_flag = 1u64 << (tail & 63);
-        if self.published[msg_idx].load(Ordering::Acquire) & msg_flag == 0 {
+        if self.published[msg_idx].load(Acquire) & msg_flag == 0 {
             return None;
         }
 
@@ -745,11 +745,10 @@ impl IORing {
         }
 
         // Clear flag.
-        self.published[msg_idx].fetch_and(!msg_flag, Ordering::Release);
+        self.published[msg_idx].fetch_and(!msg_flag, Release);
 
         // Advance tail.
-        self.tail
-            .store(tail.wrapping_add(4 + msg_len), Ordering::Release);
+        self.tail.store(tail.wrapping_add(4 + msg_len), Release);
 
         Some(Ok(msg_len))
     }

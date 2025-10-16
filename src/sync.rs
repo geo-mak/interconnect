@@ -640,8 +640,6 @@ impl IORing {
     ///
     /// Each message is written after 4-bytes (u32 little-endian) length-prefix.
     ///
-    /// Messages of length `0` are skipped, and `IORingResult::Ok` is returned.
-    ///
     /// Returns:
     ///
     /// `IORingResult::Ok`: If submitting was successful.
@@ -650,14 +648,9 @@ impl IORing {
     ///
     /// `IORingResult::Never`: if the message is larger than the maximum capacity of the buffer.
     pub fn write(&self, msg: &[u8]) -> IORingResult {
-        let msg_len = msg.len();
-        let frame = 4 + msg_len;
+        let frame = 4 + msg.len();
         if frame > self.cap {
             return IORingResult::Never;
-        }
-
-        if msg_len == 0 {
-            return IORingResult::Ok;
         }
 
         loop {
@@ -707,18 +700,22 @@ impl IORing {
 
     /// Tries to read a published message.
     ///
-    /// Returns the message size on success.
-    /// Returning `0` means there is no published message currently.
+    /// Returns:
     ///
-    /// Returns I/O error on failure to read into `dst`.
-    pub fn read_next<W: Write>(&self, dst: &mut W) -> io::Result<usize> {
+    /// - None: When there is no published message currently.
+    ///
+    /// - Some(message size): When a published message has been written successfully to `dst`.
+    ///
+    /// - Some(I/O error): When writing a published message into `dst` has failed.
+    ///   Next call will read the same message.
+    pub fn read_next<W: Write>(&self, dst: &mut W) -> Option<io::Result<usize>> {
         let tail = self.tail.load(Ordering::Relaxed);
 
         // Check flag.
         let msg_idx = (tail >> 6) & (self.published.len() - 1);
         let msg_flag = 1u64 << (tail & 63);
         if self.published[msg_idx].load(Ordering::Acquire) & msg_flag == 0 {
-            return Ok(0);
+            return None;
         }
 
         let buf = &*self.data;
@@ -733,15 +730,18 @@ impl IORing {
         }
 
         let msg_len = u32::from_le_bytes(len_bytes) as usize;
-        debug_assert_ne!(msg_len, 0);
 
         // Read payload (may wrap).
         let payload_pos = (pos + 4) & mask;
         let some = std::cmp::min(msg_len, cap - payload_pos);
-        dst.write_all(&buf[payload_pos..payload_pos + some])?;
+        if let Err(e) = dst.write_all(&buf[payload_pos..payload_pos + some]) {
+            return Some(Err(e));
+        }
         if some < msg_len {
             let rem = msg_len - some;
-            dst.write_all(&buf[0..rem])?;
+            if let Err(e) = dst.write_all(&buf[0..rem]) {
+                return Some(Err(e));
+            }
         }
 
         // Clear flag.
@@ -751,7 +751,7 @@ impl IORing {
         self.tail
             .store(tail.wrapping_add(4 + msg_len), Ordering::Release);
 
-        Ok(msg_len)
+        Some(Ok(msg_len))
     }
 }
 
@@ -862,10 +862,10 @@ mod tests_io_ring {
 
     #[test]
     fn test_io_ring_read_empty() {
-        let ring = IORing::new(16);
+        let ring = IORing::new(8);
         let mut dst = Vec::new();
-        let n = ring.read_next(&mut dst).unwrap();
-        assert_eq!(n, 0);
+        let n = ring.read_next(&mut dst);
+        assert!(n.is_none());
         assert!(dst.is_empty());
     }
 
@@ -892,7 +892,11 @@ mod tests_io_ring {
         assert_eq!(ring.write("data".as_bytes()), IORingResult::Ok);
 
         let mut dst = [0u8; 4];
-        let n = ring.read_next(&mut dst.as_mut()).unwrap();
+
+        let n = ring.read_next(&mut dst.as_mut()).unwrap().unwrap();
+        assert_eq!(n, 0);
+
+        let n = ring.read_next(&mut dst.as_mut()).unwrap().unwrap();
         assert_eq!(n, 4);
     }
 
@@ -906,7 +910,7 @@ mod tests_io_ring {
         let mut dst = [0u8; 15];
         let mut pos = 0;
         for _ in 0..3 {
-            let n = ring.read_next(&mut dst[pos..].as_mut()).unwrap();
+            let n = ring.read_next(&mut dst[pos..].as_mut()).unwrap().unwrap();
             assert_eq!(n, 5);
             pos += 5;
         }
@@ -940,7 +944,7 @@ mod tests_io_ring {
             let result = ring.write(&(i + 1).to_le_bytes());
             assert_eq!(result, IORingResult::Ok, "Failed to write iter {i}");
 
-            let n = ring.read_next(&mut dst).unwrap();
+            let n = ring.read_next(&mut dst).unwrap().unwrap();
             assert_eq!(n, 2, "Expected 2 bytes, got {n}");
 
             must_head = must_head.wrapping_add(frame_size);
@@ -1010,7 +1014,7 @@ mod tests_io_ring {
 
         let mut dst = [0u8; 7];
 
-        while ring.read_next(&mut dst.as_mut()).unwrap() != 0 {
+        while let Some(Ok(_)) = ring.read_next(&mut dst.as_mut()) {
             match std::str::from_utf8(&dst).expect("Unreadable data in the ring") {
                 "thread1" => t1_count += 1,
                 "thread2" => t2_count += 1,

@@ -700,6 +700,14 @@ impl IORing {
 
     /// Tries to receive a published message.
     ///
+    /// Safety:
+    ///
+    /// This method must have single consumer at a time, no concurrent calls.
+    ///
+    /// The `XOR` mutability rule is not enforced to keep the type `mutex-free` at the type level.
+    ///
+    /// User must guarantee that only one consumer at a time can call this method.
+    ///
     /// Returns:
     ///
     /// - None: When there is no published message currently.

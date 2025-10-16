@@ -640,6 +640,8 @@ impl IORing {
     ///
     /// Each message is written after 4-bytes (u32 little-endian) length-prefix.
     ///
+    /// Messages of length `0` are skipped, and `IORingResult::Ok` is returned.
+    ///
     /// Returns:
     ///
     /// `IORingResult::Ok`: If submitting was successful.
@@ -648,9 +650,14 @@ impl IORing {
     ///
     /// `IORingResult::Never`: if the message is larger than the maximum capacity of the buffer.
     pub fn write(&self, msg: &[u8]) -> IORingResult {
-        let frame = 4 + msg.len();
+        let msg_len = msg.len();
+        let frame = 4 + msg_len;
         if frame > self.cap {
             return IORingResult::Never;
+        }
+
+        if msg_len == 0 {
+            return IORingResult::Ok;
         }
 
         loop {
@@ -726,9 +733,7 @@ impl IORing {
         }
 
         let msg_len = u32::from_le_bytes(len_bytes) as usize;
-        if msg_len == 0 {
-            return Ok(0);
-        }
+        debug_assert_ne!(msg_len, 0);
 
         // Read payload (may wrap).
         let payload_pos = (pos + 4) & mask;
@@ -880,7 +885,19 @@ mod tests_io_ring {
     }
 
     #[test]
-    fn test_io_ring_read_write() {
+    fn test_io_ring_write_empty_msg() {
+        let ring = IORing::new(16);
+
+        assert_eq!(ring.write("".as_bytes()), IORingResult::Ok);
+        assert_eq!(ring.write("data".as_bytes()), IORingResult::Ok);
+
+        let mut dst = [0u8; 4];
+        let n = ring.read_next(&mut dst.as_mut()).unwrap();
+        assert_eq!(n, 4);
+    }
+
+    #[test]
+    fn test_io_ring_read_write_seq() {
         let ring = IORing::new(32);
         let msgs = [b"Alpha", b"Betaa", b"Gamma"];
         for m in msgs {

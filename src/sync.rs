@@ -4,8 +4,9 @@ use std::marker::PhantomPinned;
 use std::pin::Pin;
 use std::ptr::NonNull;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use std::sync::atomic::{
-    AtomicU64, AtomicUsize,
+    AtomicUsize,
     Ordering::{AcqRel, Acquire, Relaxed, Release},
 };
 use std::task::{Context, Poll, Waker};
@@ -590,45 +591,78 @@ impl ThreadNotify {
 pub enum IORingResult {
     Ok = 0,
     WouldBlock = 1,
-    Never = 2,
+}
+
+struct IORingSegment {
+    data: UnsafeCell<Vec<u8>>,
+    published: AtomicBool,
+}
+
+impl IORingSegment {
+    #[allow(dead_code)]
+    #[inline]
+    fn new() -> Self {
+        IORingSegment {
+            data: UnsafeCell::new(Vec::new()),
+            published: AtomicBool::new(false),
+        }
+    }
+
+    #[inline]
+    fn with_capacity(cap: usize) -> Self {
+        IORingSegment {
+            data: UnsafeCell::new(Vec::with_capacity(cap)),
+            published: AtomicBool::new(false),
+        }
+    }
+
+    #[inline(always)]
+    const fn len(&self) -> usize {
+        unsafe { (*self.data.get()).len() }
+    }
+
+    /// Safety: only call this if you have exclusive access to the segment.
+    #[inline]
+    unsafe fn write(&self, msg: &[u8]) {
+        let buf = &mut unsafe { &mut *self.data.get() };
+        buf.clear();
+        buf.extend_from_slice(msg);
+        self.published.store(true, Release);
+    }
 }
 
 /// A multi-producer **single-consumer** ring buffer for variable-length byte-messages.
 ///
-/// This buffer acts as a bounded communication channel, where each message is written framed.
+/// This buffer acts as a bounded communication channel.
 ///
 /// The bounded implementation means that it will block writing when it reaches its full capacity.
 pub struct IORing {
-    data: Box<[u8]>,
-    published: Box<[AtomicU64]>,
+    segments: Box<[IORingSegment]>,
     mask: usize,
     head: AtomicUsize,
     tail: AtomicUsize,
 }
 
+unsafe impl Sync for IORing {}
+
 impl IORing {
-    /// Creates new `IORing` with the specified capacity.
+    /// Creates new `IORing` with the messages' count.
     ///
-    /// Capacity must be power of 2 and >= 8.
-    ///
-    /// Each message is written after 4-bytes (u32 little-endian) length-prefix.
-    pub fn new(cap: usize) -> Self {
-        assert!(cap.is_power_of_two());
-        assert!(cap >= 8);
+    /// Messages' count must be power of 2.
+    pub fn new(msg_count: usize, msg_size: usize) -> Self {
+        assert!(
+            msg_count.is_power_of_two(),
+            "Messages' count must be power of 2"
+        );
 
-        let data = vec![0u8; cap].into_boxed_slice();
-
-        // 1 bit per message.
-        let pub_len = (cap + 63) / 64;
-        let published = (0..pub_len)
-            .map(|_| AtomicU64::new(0))
+        let segments = (0..msg_count)
+            .map(|_| IORingSegment::with_capacity(msg_size))
             .collect::<Vec<_>>()
             .into_boxed_slice();
 
         Self {
-            data,
-            published,
-            mask: cap - 1,
+            segments,
+            mask: msg_count - 1,
             head: AtomicUsize::new(0),
             tail: AtomicUsize::new(0),
         }
@@ -636,64 +670,33 @@ impl IORing {
 
     /// Tries to submit a message.
     ///
-    /// Each message is written after 4-bytes (u32 little-endian) length-prefix.
-    ///
     /// Returns:
     ///
     /// `IORingResult::Ok`: If submitting was successful.
     ///
     /// `IORingResult::WouldBlock`: if there is no space for the message currently.
-    ///
-    /// `IORingResult::Never`: if the message is larger than the maximum capacity of the ring.
     pub fn submit(&self, msg: &[u8]) -> IORingResult {
-        let frame = 4 + msg.len();
-        if frame > self.data.len() {
-            return IORingResult::Never;
-        }
-
         loop {
             let head = self.head.load(Relaxed);
             let tail = self.tail.load(Acquire);
             let used = head.wrapping_sub(tail);
-            if used + frame > self.data.len() {
+            if used >= self.segments.len() {
                 return IORingResult::WouldBlock;
             }
 
-            let new_head = head.wrapping_add(frame);
+            let seg_idx = head & self.mask;
+            let segment = &self.segments[seg_idx];
+
+            // Acquire exclusive segment.
             if self
                 .head
-                .compare_exchange_weak(head, new_head, AcqRel, Relaxed)
+                .compare_exchange_weak(head, head.wrapping_add(1), AcqRel, Relaxed)
                 .is_ok()
             {
-                unsafe { self.write_publish(head, msg) };
+                unsafe { segment.write(msg) };
                 return IORingResult::Ok;
             }
         }
-    }
-
-    unsafe fn write_publish(&self, pos: usize, msg: &[u8]) {
-        let mask = self.mask;
-        let len = msg.len();
-        let ptr = self.data.as_ptr().cast_mut();
-
-        // Write.
-        unsafe {
-            // Payload.
-            let msg_pos = pos + 4;
-            for i in 0..len {
-                ptr.add((msg_pos + i) & mask).write(msg[i]);
-            }
-            // Header.
-            let msg_len = (len as u32).to_le_bytes();
-            for i in 0..4 {
-                ptr.add((pos + i) & mask).write(msg_len[i]);
-            }
-        }
-
-        // Publish.
-        let msg_idx = (pos >> 6) & (self.published.len() - 1);
-        let msg_flag = 1u64 << (pos & 63);
-        self.published[msg_idx].fetch_or(msg_flag, Release);
     }
 
     /// Tries to receive a published message.
@@ -717,46 +720,28 @@ impl IORing {
     pub fn receive_into<W: Write>(&self, dst: &mut W) -> Option<io::Result<usize>> {
         let tail = self.tail.load(Relaxed);
 
+        let seg_idx = tail & self.mask;
+        let segment = &self.segments[seg_idx];
+
         // Check flag.
-        let msg_idx = (tail >> 6) & (self.published.len() - 1);
-        let msg_flag = 1u64 << (tail & 63);
-        if self.published[msg_idx].load(Acquire) & msg_flag == 0 {
+        if !segment.published.load(Acquire) {
             return None;
         }
 
-        let buf = &*self.data;
-        let cap = self.data.len();
-        let mask = self.mask;
-        let pos = tail & mask;
-
-        // Read header.
-        let mut len_bytes = [0u8; 4];
-        for i in 0..4 {
-            len_bytes[i] = buf[(pos + i) & mask];
-        }
-
-        let msg_len = u32::from_le_bytes(len_bytes) as usize;
-
-        // Read payload (may wrap).
-        let payload_pos = (pos + 4) & mask;
-        let some = std::cmp::min(msg_len, cap - payload_pos);
-        if let Err(e) = dst.write_all(&buf[payload_pos..payload_pos + some]) {
+        // Write.
+        let buf = unsafe { &*segment.data.get() };
+        let len = segment.len();
+        if let Err(e) = dst.write_all(buf) {
             return Some(Err(e));
-        }
-        if some < msg_len {
-            let rem = msg_len - some;
-            if let Err(e) = dst.write_all(&buf[0..rem]) {
-                return Some(Err(e));
-            }
         }
 
         // Clear flag.
-        self.published[msg_idx].fetch_and(!msg_flag, Release);
+        segment.published.store(false, Release);
 
         // Advance tail.
-        self.tail.store(tail.wrapping_add(4 + msg_len), Release);
+        self.tail.store(tail.wrapping_add(1), Release);
 
-        Some(Ok(msg_len))
+        Some(Ok(len))
     }
 }
 
@@ -861,13 +846,12 @@ mod tests_dynamic_latch {
 #[cfg(test)]
 mod tests_io_ring {
     use super::*;
-    use std::sync::atomic::Ordering;
     use std::sync::{Arc, Barrier};
     use std::thread;
 
     #[test]
     fn test_io_ring_read_empty() {
-        let ring = IORing::new(8);
+        let ring = IORing::new(1, 8);
         let mut dst = Vec::new();
         let n = ring.receive_into(&mut dst);
         assert!(n.is_none());
@@ -875,15 +859,8 @@ mod tests_io_ring {
     }
 
     #[test]
-    fn test_io_ring_large_msg() {
-        let ring = IORing::new(8);
-        let msg = b"12345678";
-        assert_eq!(ring.submit(msg), IORingResult::Never);
-    }
-
-    #[test]
     fn test_io_ring_no_space() {
-        let ring = IORing::new(16);
+        let ring = IORing::new(1, 8);
         let msg = b"12345678";
         assert_eq!(ring.submit(msg), IORingResult::Ok);
         assert_eq!(ring.submit(msg), IORingResult::WouldBlock);
@@ -891,7 +868,7 @@ mod tests_io_ring {
 
     #[test]
     fn test_io_ring_write_empty_msg() {
-        let ring = IORing::new(16);
+        let ring = IORing::new(16, 16);
 
         assert_eq!(ring.submit("".as_bytes()), IORingResult::Ok);
         assert_eq!(ring.submit("data".as_bytes()), IORingResult::Ok);
@@ -903,11 +880,12 @@ mod tests_io_ring {
 
         let n = ring.receive_into(&mut dst.as_mut()).unwrap().unwrap();
         assert_eq!(n, 4);
+        assert_eq!(&dst[..4], b"data");
     }
 
     #[test]
     fn test_io_ring_read_write_seq() {
-        let ring = IORing::new(32);
+        let ring = IORing::new(32, 16);
         let msgs = [b"Alpha", b"Betaa", b"Gamma"];
         for m in msgs {
             assert_eq!(ring.submit(m), IORingResult::Ok);
@@ -927,51 +905,24 @@ mod tests_io_ring {
 
     #[test]
     fn test_io_ring_wrapping_cycles() {
-        let ring = IORing::new(64);
-        let mut dst = Vec::new();
-
-        let frame_size = 4 + 2;
-        let mut must_head = 0;
-        let mut must_tail = 0;
+        let ring = IORing::new(64, 2);
+        let mut dst = [0u8; 2];
 
         for i in 0u16..4096 {
-            let head = ring.head.load(Ordering::Relaxed);
-            let tail = ring.tail.load(Ordering::Relaxed);
-
-            assert_eq!(
-                head & ring.mask,
-                must_head & ring.mask,
-                "Head mismatch at iter {i}"
-            );
-            assert_eq!(
-                tail & ring.mask,
-                must_tail & ring.mask,
-                "Tail mismatch at iter {i}"
-            );
-
             let result = ring.submit(&(i + 1).to_le_bytes());
-            assert_eq!(result, IORingResult::Ok, "Failed to write iter {i}");
+            assert_eq!(result, IORingResult::Ok);
 
-            let n = ring.receive_into(&mut dst).unwrap().unwrap();
-            assert_eq!(n, 2, "Expected 2 bytes, got {n}");
+            let n = ring.receive_into(&mut dst[..].as_mut()).unwrap().unwrap();
+            assert_eq!(n, 2);
 
-            must_head = must_head.wrapping_add(frame_size);
-            must_tail = must_tail.wrapping_add(frame_size);
-        }
-
-        let mut iter = 0;
-        for msg in dst.chunks(2) {
-            iter += 1;
-            let mut bytes = [0u8; 2];
-            bytes.copy_from_slice(msg);
-            let num = u16::from_le_bytes(bytes);
-            assert_eq!(num, iter, "Publishing out of order at iter {iter}");
+            let num = u16::from_le_bytes(dst);
+            assert_eq!(num, i + 1);
         }
     }
 
     #[test]
     fn test_io_ring_data_race() {
-        let ring = Arc::new(IORing::new(2048));
+        let ring = Arc::new(IORing::new(2048, 16));
         let barrier = Arc::new(Barrier::new(4));
 
         let ring_1 = ring.clone();
@@ -988,7 +939,7 @@ mod tests_io_ring {
         let t2 = thread::spawn(move || {
             barrier_2.wait();
             for _ in 0..30 {
-                assert_eq!(ring_2.submit("thread2".as_bytes()), IORingResult::Ok)
+                assert_eq!(ring_2.submit("thread2".as_bytes()), IORingResult::Ok);
             }
         });
 
@@ -997,7 +948,7 @@ mod tests_io_ring {
         let t3 = thread::spawn(move || {
             barrier_3.wait();
             for _ in 0..30 {
-                assert_eq!(ring_3.submit("thread3".as_bytes()), IORingResult::Ok)
+                assert_eq!(ring_3.submit("thread3".as_bytes()), IORingResult::Ok);
             }
         });
 
@@ -1006,7 +957,7 @@ mod tests_io_ring {
         let t4 = thread::spawn(move || {
             barrier_4.wait();
             for _ in 0..30 {
-                assert_eq!(ring_4.submit("thread4".as_bytes()), IORingResult::Ok)
+                assert_eq!(ring_4.submit("thread4".as_bytes()), IORingResult::Ok);
             }
         });
 
@@ -1015,26 +966,19 @@ mod tests_io_ring {
         t3.join().unwrap();
         t4.join().unwrap();
 
-        let mut t1_count = 0;
-        let mut t2_count = 0;
-        let mut t3_count = 0;
-        let mut t4_count = 0;
-
+        let mut counts = [0usize; 4];
         let mut dst = [0u8; 7];
 
-        while let Some(Ok(_)) = ring.receive_into(&mut dst.as_mut()) {
+        while let Some(Ok(_)) = ring.receive_into(&mut dst[..].as_mut()) {
             match std::str::from_utf8(&dst).expect("Unreadable data in the ring") {
-                "thread1" => t1_count += 1,
-                "thread2" => t2_count += 1,
-                "thread3" => t3_count += 1,
-                "thread4" => t4_count += 1,
-                _ => panic!("Unexpected data in the ring"),
+                "thread1" => counts[0] += 1,
+                "thread2" => counts[1] += 1,
+                "thread3" => counts[2] += 1,
+                "thread4" => counts[3] += 1,
+                other => panic!("Unexpected data: {other}"),
             }
         }
 
-        assert_eq!(t1_count, 30);
-        assert_eq!(t2_count, 30);
-        assert_eq!(t3_count, 30);
-        assert_eq!(t4_count, 30);
+        assert_eq!(counts, [30, 30, 30, 30]);
     }
 }

@@ -922,7 +922,7 @@ mod tests_io_ring {
 
     #[test]
     fn test_io_ring_data_race() {
-        let ring = Arc::new(IORing::new(2048, 16));
+        let ring = Arc::new(IORing::new(128, 16));
         let barrier = Arc::new(Barrier::new(4));
 
         let ring_1 = ring.clone();

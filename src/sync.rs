@@ -601,7 +601,6 @@ pub enum IORingResult {
 pub struct IORing {
     data: Box<[u8]>,
     published: Box<[AtomicU64]>,
-    cap: usize,
     mask: usize,
     head: AtomicUsize,
     tail: AtomicUsize,
@@ -629,7 +628,6 @@ impl IORing {
         Self {
             data,
             published,
-            cap,
             mask: cap - 1,
             head: AtomicUsize::new(0),
             tail: AtomicUsize::new(0),
@@ -649,7 +647,7 @@ impl IORing {
     /// `IORingResult::Never`: if the message is larger than the maximum capacity of the ring.
     pub fn submit(&self, msg: &[u8]) -> IORingResult {
         let frame = 4 + msg.len();
-        if frame > self.cap {
+        if frame > self.data.len() {
             return IORingResult::Never;
         }
 
@@ -657,7 +655,7 @@ impl IORing {
             let head = self.head.load(Relaxed);
             let tail = self.tail.load(Acquire);
             let used = head.wrapping_sub(tail);
-            if used + frame > self.cap {
+            if used + frame > self.data.len() {
                 return IORingResult::WouldBlock;
             }
 
@@ -727,7 +725,7 @@ impl IORing {
         }
 
         let buf = &*self.data;
-        let cap = self.cap;
+        let cap = self.data.len();
         let mask = self.mask;
         let pos = tail & mask;
 

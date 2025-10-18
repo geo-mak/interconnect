@@ -4,7 +4,7 @@ use std::marker::PhantomPinned;
 use std::pin::Pin;
 use std::ptr::NonNull;
 use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::AtomicU8;
 use std::sync::atomic::{
     AtomicUsize,
     Ordering::{AcqRel, Acquire, Relaxed, Release},
@@ -586,48 +586,87 @@ impl ThreadNotify {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-#[repr(u8)]
-pub enum IORingResult {
-    Ok = 0,
-    WouldBlock = 1,
-}
-
 struct IORingSegment {
     data: UnsafeCell<Vec<u8>>,
-    published: AtomicBool,
+    state: AtomicU8,
 }
 
-impl IORingSegment {
-    #[allow(dead_code)]
-    #[inline]
-    fn new() -> Self {
-        IORingSegment {
-            data: UnsafeCell::new(Vec::new()),
-            published: AtomicBool::new(false),
-        }
-    }
+const SEG_NONE: u8 = 0;
+const SEG_PUBLISHED: u8 = 1;
+const SEG_DISCARDED: u8 = 2;
 
+impl IORingSegment {
     #[inline]
     fn with_capacity(cap: usize) -> Self {
         IORingSegment {
             data: UnsafeCell::new(Vec::with_capacity(cap)),
-            published: AtomicBool::new(false),
+            state: AtomicU8::new(SEG_NONE),
         }
     }
 
     #[inline(always)]
-    const fn len(&self) -> usize {
-        unsafe { (*self.data.get()).len() }
+    unsafe fn buffer(&self) -> &mut Vec<u8> {
+        unsafe { &mut *self.data.get() }
     }
 
-    /// Safety: only call this if you have exclusive access to the segment.
-    #[inline]
-    unsafe fn write(&self, msg: &[u8]) {
-        let buf = &mut unsafe { &mut *self.data.get() };
-        buf.clear();
-        buf.extend_from_slice(msg);
-        self.published.store(true, Release);
+    #[inline(always)]
+    unsafe fn set_none(&self) {
+        self.state.store(SEG_NONE, Release);
+    }
+
+    #[inline(always)]
+    unsafe fn set_published(&self) {
+        self.state.store(SEG_PUBLISHED, Release);
+    }
+
+    #[inline(always)]
+    unsafe fn set_discarded(&self) {
+        self.state.store(SEG_DISCARDED, Release);
+    }
+
+    #[inline(always)]
+    unsafe fn pub_ref(&self) -> IOSegment<'_> {
+        IOSegment { seg: self }
+    }
+}
+
+/// An exclusive segment that implements `io::Write`.
+///
+/// `publish` method must be called to save the data written to the segment.
+///
+/// If dropped before calling `publish`, the written data will be discarded.
+pub(crate) struct IOSegment<'a> {
+    seg: &'a IORingSegment,
+}
+
+impl<'a> IOSegment<'a> {
+    #[inline(always)]
+    pub(crate) fn publish(self) {
+        unsafe {
+            self.seg.set_published();
+        }
+        std::mem::forget(self);
+    }
+}
+
+impl<'a> io::Write for IOSegment<'a> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        unsafe { self.seg.buffer().write(buf) }
+    }
+
+    /// This call in no-op.
+    ///
+    /// Call `publish` to save written data.
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+impl<'a> Drop for IOSegment<'a> {
+    fn drop(&mut self) {
+        // If the user never called publish(),
+        // it must be discarded to prevent deadlocking the ring.
+        unsafe { self.seg.set_discarded() }
     }
 }
 
@@ -636,7 +675,11 @@ impl IORingSegment {
 /// This buffer acts as a bounded communication channel.
 ///
 /// The bounded implementation means that it will block writing when it reaches its full capacity.
-pub struct IORing {
+///
+/// This structure is a core component, which doesn't included notification component
+/// and doesn't observe panic events on both sides, with very basic protection mechanism
+/// aimed at ensuring data integrity.
+pub(crate) struct IORing {
     segments: Box<[IORingSegment]>,
     mask: usize,
     head: AtomicUsize,
@@ -646,42 +689,53 @@ pub struct IORing {
 unsafe impl Sync for IORing {}
 
 impl IORing {
-    /// Creates new `IORing` with the messages' count.
+    /// Creates new `IORing` with the specified count of dynamic segments.
     ///
-    /// Messages' count must be power of 2.
-    pub fn new(msg_count: usize, msg_size: usize) -> Self {
-        assert!(
-            msg_count.is_power_of_two(),
-            "Messages' count must be power of 2"
-        );
+    /// Parameters:
+    /// - `count`: The count of concurrent segments. Count must be power of 2.
+    /// - `seg_size`: The size of each segment in bytes.
+    pub(crate) fn new(count: usize, seg_size: usize) -> Self {
+        assert!(count.is_power_of_two(), "Count must be power of 2");
 
-        let segments = (0..msg_count)
-            .map(|_| IORingSegment::with_capacity(msg_size))
+        let segments = (0..count)
+            .map(|_| IORingSegment::with_capacity(seg_size))
             .collect::<Vec<_>>()
             .into_boxed_slice();
 
         Self {
             segments,
-            mask: msg_count - 1,
+            mask: count - 1,
             head: AtomicUsize::new(0),
             tail: AtomicUsize::new(0),
         }
     }
 
-    /// Tries to submit a message.
+    /// Tries to acquire a segment for writing.
     ///
-    /// Returns:
-    ///
-    /// `IORingResult::Ok`: If submitting was successful.
-    ///
-    /// `IORingResult::WouldBlock`: if there is no space for the message currently.
-    pub fn submit(&self, msg: &[u8]) -> IORingResult {
+    /// Returns `None` if there is no segment is free currently.
+    pub(crate) fn acquire(&self) -> Option<IOSegment<'_>> {
         loop {
             let head = self.head.load(Relaxed);
             let tail = self.tail.load(Acquire);
             let used = head.wrapping_sub(tail);
+
             if used >= self.segments.len() {
-                return IORingResult::WouldBlock;
+                let tail_idx = tail & self.mask;
+                let tail_seg = &self.segments[tail_idx];
+
+                let state = tail_seg.state.load(Acquire);
+                if state == SEG_DISCARDED {
+                    if tail_seg
+                        .state
+                        .compare_exchange_weak(SEG_DISCARDED, SEG_NONE, AcqRel, Acquire)
+                        .is_ok()
+                    {
+                        self.tail.store(tail.wrapping_add(1), Release);
+                    }
+                    continue;
+                }
+                // Just full.
+                return None;
             }
 
             let seg_idx = head & self.mask;
@@ -693,8 +747,11 @@ impl IORing {
                 .compare_exchange_weak(head, head.wrapping_add(1), AcqRel, Relaxed)
                 .is_ok()
             {
-                unsafe { segment.write(msg) };
-                return IORingResult::Ok;
+                let seg_ref = unsafe {
+                    segment.buffer().clear();
+                    segment.pub_ref()
+                };
+                return Some(seg_ref);
             }
         }
     }
@@ -717,31 +774,35 @@ impl IORing {
     ///
     /// - Some(I/O error): When writing a published message into `dst` has failed.
     ///   Next call will try to write the same message.
-    pub fn receive_into<W: Write>(&self, dst: &mut W) -> Option<io::Result<usize>> {
-        let tail = self.tail.load(Relaxed);
+    pub(crate) fn receive_into<W: Write>(&self, dst: &mut W) -> Option<io::Result<usize>> {
+        loop {
+            let tail = self.tail.load(Relaxed);
+            let seg_idx = tail & self.mask;
+            let tail_seg = &self.segments[seg_idx];
 
-        let seg_idx = tail & self.mask;
-        let segment = &self.segments[seg_idx];
-
-        // Check flag.
-        if !segment.published.load(Acquire) {
-            return None;
+            match tail_seg.state.load(Acquire) {
+                SEG_PUBLISHED => {
+                    let buf = unsafe { tail_seg.buffer() };
+                    if let Err(e) = dst.write_all(buf) {
+                        return Some(Err(e));
+                    }
+                    unsafe { tail_seg.set_none() };
+                    self.tail.store(tail.wrapping_add(1), Release);
+                    return Some(Ok(buf.len()));
+                }
+                SEG_NONE => return None,
+                SEG_DISCARDED => {
+                    if tail_seg
+                        .state
+                        .compare_exchange_weak(SEG_DISCARDED, SEG_NONE, AcqRel, Acquire)
+                        .is_ok()
+                    {
+                        self.tail.store(tail.wrapping_add(1), Release);
+                    }
+                }
+                _ => unreachable!(),
+            }
         }
-
-        // Write.
-        let buf = unsafe { &*segment.data.get() };
-        let len = segment.len();
-        if let Err(e) = dst.write_all(buf) {
-            return Some(Err(e));
-        }
-
-        // Clear flag.
-        segment.published.store(false, Release);
-
-        // Advance tail.
-        self.tail.store(tail.wrapping_add(1), Release);
-
-        Some(Ok(len))
     }
 }
 
@@ -850,8 +911,29 @@ mod tests_io_ring {
     use std::thread;
 
     #[test]
+    fn test_io_ring_acquire_publish() {
+        let ring = IORing::new(2, 16);
+        let mut seg = ring.acquire().expect("must get a segment");
+
+        let _ = seg.write(b"ring ");
+        let _ = seg.write(b"my ");
+        let _ = seg.write(b"bells");
+
+        let mut dst = [0u8; 13];
+
+        let res = ring.receive_into(&mut dst.as_mut());
+        assert!(res.is_none());
+
+        seg.publish();
+
+        let res = ring.receive_into(&mut dst.as_mut()).unwrap().unwrap();
+        assert_eq!(res, 13);
+        assert_eq!(&dst, b"ring my bells");
+    }
+
+    #[test]
     fn test_io_ring_read_empty() {
-        let ring = IORing::new(1, 8);
+        let ring = IORing::new(1, 0);
         let mut dst = Vec::new();
         let n = ring.receive_into(&mut dst);
         assert!(n.is_none());
@@ -862,34 +944,25 @@ mod tests_io_ring {
     fn test_io_ring_no_space() {
         let ring = IORing::new(1, 8);
         let msg = b"12345678";
-        assert_eq!(ring.submit(msg), IORingResult::Ok);
-        assert_eq!(ring.submit(msg), IORingResult::WouldBlock);
-    }
 
-    #[test]
-    fn test_io_ring_write_empty_msg() {
-        let ring = IORing::new(16, 16);
+        let mut seg = ring.acquire().expect("expected a free segment");
+        seg.write_all(msg).unwrap();
+        seg.publish();
 
-        assert_eq!(ring.submit("".as_bytes()), IORingResult::Ok);
-        assert_eq!(ring.submit("data".as_bytes()), IORingResult::Ok);
-
-        let mut dst = [0u8; 4];
-
-        let n = ring.receive_into(&mut dst.as_mut()).unwrap().unwrap();
-        assert_eq!(n, 0);
-
-        let n = ring.receive_into(&mut dst.as_mut()).unwrap().unwrap();
-        assert_eq!(n, 4);
-        assert_eq!(&dst[..4], b"data");
+        assert!(ring.acquire().is_none());
     }
 
     #[test]
     fn test_io_ring_read_write_seq() {
-        let ring = IORing::new(32, 16);
+        let ring = IORing::new(4, 5);
         let msgs = [b"Alpha", b"Betaa", b"Gamma"];
+
         for m in msgs {
-            assert_eq!(ring.submit(m), IORingResult::Ok);
+            let mut seg = ring.acquire().expect("expected free segment");
+            seg.write_all(m).unwrap();
+            seg.publish();
         }
+
         let mut dst = [0u8; 15];
         let mut pos = 0;
         for _ in 0..3 {
@@ -905,14 +978,15 @@ mod tests_io_ring {
 
     #[test]
     fn test_io_ring_wrapping_cycles() {
-        let ring = IORing::new(64, 2);
+        let ring = IORing::new(8, 2);
         let mut dst = [0u8; 2];
 
         for i in 0u16..4096 {
-            let result = ring.submit(&(i + 1).to_le_bytes());
-            assert_eq!(result, IORingResult::Ok);
+            let mut seg = ring.acquire().expect("acquire failed");
+            seg.write_all(&(i + 1).to_le_bytes()).unwrap();
+            seg.publish();
 
-            let n = ring.receive_into(&mut dst[..].as_mut()).unwrap().unwrap();
+            let n = ring.receive_into(&mut dst.as_mut()).unwrap().unwrap();
             assert_eq!(n, 2);
 
             let num = u16::from_le_bytes(dst);
@@ -930,7 +1004,9 @@ mod tests_io_ring {
         let t1 = thread::spawn(move || {
             barrier_1.wait();
             for _ in 0..30 {
-                assert_eq!(ring_1.submit("thread1".as_bytes()), IORingResult::Ok);
+                let mut seg = ring_1.acquire().unwrap();
+                seg.write_all("thread1".as_bytes()).unwrap();
+                seg.publish();
             }
         });
 
@@ -939,7 +1015,9 @@ mod tests_io_ring {
         let t2 = thread::spawn(move || {
             barrier_2.wait();
             for _ in 0..30 {
-                assert_eq!(ring_2.submit("thread2".as_bytes()), IORingResult::Ok);
+                let mut seg = ring_2.acquire().unwrap();
+                seg.write_all("thread2".as_bytes()).unwrap();
+                seg.publish();
             }
         });
 
@@ -948,7 +1026,9 @@ mod tests_io_ring {
         let t3 = thread::spawn(move || {
             barrier_3.wait();
             for _ in 0..30 {
-                assert_eq!(ring_3.submit("thread3".as_bytes()), IORingResult::Ok);
+                let mut seg = ring_3.acquire().unwrap();
+                seg.write_all("thread3".as_bytes()).unwrap();
+                seg.publish();
             }
         });
 
@@ -957,7 +1037,9 @@ mod tests_io_ring {
         let t4 = thread::spawn(move || {
             barrier_4.wait();
             for _ in 0..30 {
-                assert_eq!(ring_4.submit("thread4".as_bytes()), IORingResult::Ok);
+                let mut seg = ring_4.acquire().unwrap();
+                seg.write_all("thread4".as_bytes()).unwrap();
+                seg.publish();
             }
         });
 
@@ -969,7 +1051,7 @@ mod tests_io_ring {
         let mut counts = [0usize; 4];
         let mut dst = [0u8; 7];
 
-        while let Some(Ok(_)) = ring.receive_into(&mut dst[..].as_mut()) {
+        while let Some(Ok(_)) = ring.receive_into(&mut dst.as_mut()) {
             match std::str::from_utf8(&dst).expect("Unreadable data in the ring") {
                 "thread1" => counts[0] += 1,
                 "thread2" => counts[1] += 1,
@@ -980,5 +1062,32 @@ mod tests_io_ring {
         }
 
         assert_eq!(counts, [30, 30, 30, 30]);
+    }
+
+    #[test]
+    fn test_io_ring_discarded_segment() {
+        let ring = IORing::new(2, 16);
+
+        {
+            let _ = ring.acquire().unwrap();
+        }
+
+        let mut seg_2 = ring.acquire().unwrap();
+        write!(seg_2, "ok").unwrap();
+        seg_2.publish();
+
+        let mut seg_3 = ring.acquire().unwrap();
+        write!(seg_3, "was discarded").unwrap();
+        seg_3.publish();
+
+        let mut dst = [0u8; 2];
+        let res = ring.receive_into(&mut dst.as_mut()).unwrap().unwrap();
+        assert_eq!(res, 2);
+        assert_eq!(&dst, b"ok");
+
+        let mut dst = [0u8; 13];
+        let res = ring.receive_into(&mut dst.as_mut()).unwrap().unwrap();
+        assert_eq!(res, 13);
+        assert_eq!(&dst, b"was discarded");
     }
 }

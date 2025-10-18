@@ -732,6 +732,11 @@ impl IORing {
                         .is_ok()
                     {
                         self.tail.store(tail.wrapping_add(1), Release);
+                        let seg_ref = unsafe {
+                            tail_seg.buffer().clear();
+                            tail_seg.pub_ref()
+                        };
+                        return Some(seg_ref);
                     }
                     continue;
                 }

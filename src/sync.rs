@@ -719,6 +719,7 @@ impl IORing {
             let tail = self.tail.load(Acquire);
             let used = head.wrapping_sub(tail);
 
+            // TODO: Cycles policy.
             if used >= self.segments.len() {
                 let tail_idx = tail & self.mask;
                 let tail_seg = &self.segments[tail_idx];
@@ -996,7 +997,7 @@ mod tests_io_ring {
 
     #[test]
     fn test_io_ring_data_race() {
-        let ring = Arc::new(IORing::new(128, 16));
+        let ring = Arc::new(IORing::new(128, 7));
         let barrier = Arc::new(Barrier::new(4));
 
         let ring_1 = ring.clone();

@@ -4,6 +4,7 @@ mod sealed;
 pub mod capability;
 pub mod client;
 pub mod error;
+pub mod io;
 pub mod message;
 pub mod report;
 pub mod server;

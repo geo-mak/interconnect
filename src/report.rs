@@ -65,7 +65,7 @@ impl<T> ReportMaterial for T where T: Display {}
 
 /// The common unified interface of reporting agents.
 ///
-/// This trait enables using unified reporters (events dispatchers/subscribers)
+/// This trait enables using unified reporters (events' dispatchers/subscribers)
 /// without committing to a particular implementation.
 ///
 /// Types implementing this trait can operate on per-instance state,

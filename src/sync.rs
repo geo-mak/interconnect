@@ -421,7 +421,7 @@ impl<T> IList<T> {
         true
     }
 
-    /// Detaches the first node (i=0) from the list if the list.
+    /// Detaches the first node (i=0) from the list.
     ///
     /// Returns the detached node if any.
     #[allow(dead_code)]
@@ -525,7 +525,7 @@ pub type ThreadNotifyLock<'a> = parking_lot::lock_api::MutexGuard<'a, parking_lo
 
 /// A thread notification construct that can be used as signaling mechanism between threads.
 ///
-/// This implementation is very lightweight, with user-space synchronization as first option.
+/// This implementation is very lightweight, with user-space synchronization.
 pub struct ThreadNotify {
     sync: parking_lot::Mutex<()>,
     parker: parking_lot::Condvar,

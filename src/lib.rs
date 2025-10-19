@@ -13,7 +13,7 @@ pub mod stream;
 pub mod sync;
 pub mod transport;
 
-pub use client::RpcClient;
+pub use client::RpcAsyncClient;
 pub use error::{RpcError, RpcResult};
 pub use message::{Message, MessageType};
 pub use server::RpcServer;

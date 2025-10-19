@@ -25,7 +25,7 @@ use crate::sync::DynamicLatch;
 use crate::transport::TransportLayer;
 
 /// The common RPC client interface of async clients.
-pub trait RpcAsyncClient {
+pub trait AsyncRpcClient {
     fn call<P, R>(&self, method: u16, params: &P) -> impl Future<Output = RpcResult<R>>
     where
         P: Serialize,
@@ -143,15 +143,15 @@ where
     }
 }
 
-/// RPC Client implementation.
+/// An async RPC client implementation.
 /// This implementation utilizes single shared transport instance,
 /// which makes it very lightweight at the cost of some synchronization overhead.
-pub struct RpcClient<S, H, E> {
+pub struct RpcAsyncClient<S, H, E> {
     state: Arc<ClientState<S, H, E>>,
     task: JoinHandle<()>,
 }
 
-impl<S, H, E> RpcClient<S, H, E>
+impl<S, H, E> RpcAsyncClient<S, H, E>
 where
     S: RpcAsyncSender + Send + 'static,
     H: RpcService + Send + Sync + 'static,
@@ -163,14 +163,14 @@ where
         call_handler: H,
         capacity: usize,
         reporter: E,
-    ) -> RpcResult<RpcClient<RpcSender<T::OwnedWriteHalf>, H, E>>
+    ) -> RpcResult<RpcAsyncClient<RpcSender<T::OwnedWriteHalf>, H, E>>
     where
         T: TransportLayer + 'static,
     {
         negotiation::initiate(&mut transport, RpcCapability::new(1, false)).await?;
 
         let (r, w) = transport.into_split();
-        RpcClient::connect_with_parts(
+        RpcAsyncClient::connect_with_parts(
             RpcSender::new(w),
             RpcReceiver::new(r),
             call_handler,
@@ -186,7 +186,7 @@ where
         call_handler: H,
         capacity: usize,
         reporter: E,
-    ) -> RpcResult<RpcClient<EncryptedRpcSender<T::OwnedWriteHalf>, H, E>>
+    ) -> RpcResult<RpcAsyncClient<EncryptedRpcSender<T::OwnedWriteHalf>, H, E>>
     where
         T: TransportLayer + 'static,
     {
@@ -196,7 +196,7 @@ where
 
         let (r, w) = transport.into_split();
 
-        RpcClient::connect_with_parts(
+        RpcAsyncClient::connect_with_parts(
             EncryptedRpcSender::new(w, w_key),
             EncryptedRpcReceiver::new(r, r_key),
             call_handler,
@@ -217,7 +217,7 @@ where
         call_handler: H,
         cap: usize,
         reporter: E,
-    ) -> RpcResult<RpcClient<S, H, E>>
+    ) -> RpcResult<RpcAsyncClient<S, H, E>>
     where
         S: RpcAsyncSender + Send + 'static,
         R: RpcAsyncReceiver + Send + 'static,
@@ -242,7 +242,7 @@ where
             }
         });
 
-        Ok(RpcClient::new(state, task))
+        Ok(RpcAsyncClient::new(state, task))
     }
 
     async fn process_message(state: &Arc<ClientState<S, H, E>>, message: Message) -> RpcResult<()> {
@@ -322,7 +322,7 @@ where
     }
 }
 
-impl<S, H, E> RpcAsyncClient for RpcClient<S, H, E>
+impl<S, H, E> AsyncRpcClient for RpcAsyncClient<S, H, E>
 where
     S: RpcAsyncSender + Send + 'static,
     H: RpcService + Send + Sync + 'static,
@@ -505,14 +505,15 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(10)).await;
 
         let transport = TcpStream::connect(addr).await.unwrap();
-        let mut client = RpcClient::<RpcSender<tcp::OwnedWriteHalf>, (), STDIOReporter>::connect(
-            transport,
-            (),
-            1,
-            STDIOReporter::new(),
-        )
-        .await
-        .unwrap();
+        let mut client =
+            RpcAsyncClient::<RpcSender<tcp::OwnedWriteHalf>, (), STDIOReporter>::connect(
+                transport,
+                (),
+                1,
+                STDIOReporter::new(),
+            )
+            .await
+            .unwrap();
 
         let reply = client.call::<&str, String>(1, &"call").await.unwrap();
         assert_eq!(reply, "reply");
@@ -577,7 +578,7 @@ mod tests {
 
         let transport = TcpStream::connect(addr).await.unwrap();
         let mut client =
-            RpcClient::<EncryptedRpcSender<tcp::OwnedWriteHalf>, (), STDIOReporter>::connect_encrypted(
+            RpcAsyncClient::<EncryptedRpcSender<tcp::OwnedWriteHalf>, (), STDIOReporter>::connect_encrypted(
                 transport,
                 (),
                 1,

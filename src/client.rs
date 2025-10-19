@@ -18,7 +18,7 @@ use crate::message::{Call, Message, MessageType, Reply};
 use crate::report::Reporter;
 use crate::service::{CallContext, RpcService};
 use crate::stream::{
-    EncryptedRpcReceiver, EncryptedRpcSender, RpcAsyncReceiver, RpcAsyncSender, RpcReceiver,
+    AsyncRpcReceiver, AsyncRpcSender, EncryptedRpcReceiver, EncryptedRpcSender, RpcReceiver,
     RpcSender,
 };
 use crate::sync::DynamicLatch;
@@ -97,7 +97,7 @@ struct ClientContext<'a, S, H, E> {
 
 impl<'a, S, H, E> ClientContext<'a, S, H, E>
 where
-    S: RpcAsyncSender + Send,
+    S: AsyncRpcSender + Send,
 {
     #[inline(always)]
     const fn new(id: &'a Uuid, sender: &'a ClientState<S, H, E>) -> Self {
@@ -107,7 +107,7 @@ where
 
 impl<'a, S, H, E> CallContext for ClientContext<'a, S, H, E>
 where
-    S: RpcAsyncSender + Send,
+    S: AsyncRpcSender + Send,
     H: RpcService + Sync,
     E: Reporter + Sync,
 {
@@ -153,7 +153,7 @@ pub struct RpcAsyncClient<S, H, E> {
 
 impl<S, H, E> RpcAsyncClient<S, H, E>
 where
-    S: RpcAsyncSender + Send + 'static,
+    S: AsyncRpcSender + Send + 'static,
     H: RpcService + Send + Sync + 'static,
     E: Reporter + Send + Sync + 'static,
 {
@@ -219,8 +219,8 @@ where
         reporter: E,
     ) -> RpcResult<RpcAsyncClient<S, H, E>>
     where
-        S: RpcAsyncSender + Send + 'static,
-        R: RpcAsyncReceiver + Send + 'static,
+        S: AsyncRpcSender + Send + 'static,
+        R: AsyncRpcReceiver + Send + 'static,
     {
         let state = Arc::new(ClientState::new(call_handler, sender, cap, reporter));
         let c_state = Arc::clone(&state);
@@ -324,7 +324,7 @@ where
 
 impl<S, H, E> AsyncRpcClient for RpcAsyncClient<S, H, E>
 where
-    S: RpcAsyncSender + Send + 'static,
+    S: AsyncRpcSender + Send + 'static,
     H: RpcService + Send + Sync + 'static,
     E: Reporter + Send + Sync + 'static,
 {

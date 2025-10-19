@@ -21,7 +21,7 @@ use crate::message::{Call, Message, MessageType, Reply};
 use crate::report::Reporter;
 use crate::service::{CallContext, RpcService};
 use crate::stream::{
-    EncryptedRpcReceiver, EncryptedRpcSender, RpcAsyncReceiver, RpcAsyncSender, RpcReceiver,
+    AsyncRpcReceiver, AsyncRpcSender, EncryptedRpcReceiver, EncryptedRpcSender, RpcReceiver,
     RpcSender,
 };
 use crate::sync::{DynamicLatch, IList, INode};
@@ -278,7 +278,7 @@ struct ServerContext<'a, S> {
 
 impl<'a, S> ServerContext<'a, S>
 where
-    S: RpcAsyncSender + Send,
+    S: AsyncRpcSender + Send,
 {
     #[inline(always)]
     const fn new(id: &'a Uuid, sender: &'a mut S) -> Self {
@@ -288,7 +288,7 @@ where
 
 impl<'a, S> CallContext for ServerContext<'a, S>
 where
-    S: RpcAsyncSender + Send,
+    S: AsyncRpcSender + Send,
 {
     type ID = Uuid;
 
@@ -522,8 +522,8 @@ where
         receiver: &mut R,
     ) -> RpcResult<()>
     where
-        S: RpcAsyncSender + Send,
-        R: RpcAsyncReceiver,
+        S: AsyncRpcSender + Send,
+        R: AsyncRpcReceiver,
     {
         let service = task.s_state.service.clone();
         loop {
@@ -609,7 +609,7 @@ mod tests {
         }
     }
 
-    async fn make_tcp_rpc_channel(server: &str) -> (impl RpcAsyncSender, impl RpcAsyncReceiver) {
+    async fn make_tcp_rpc_channel(server: &str) -> (impl AsyncRpcSender, impl AsyncRpcReceiver) {
         let mut transport = TcpStream::connect(server).await.unwrap();
 
         capability::negotiation::initiate(&mut transport, RpcCapability::new(1, false))
@@ -622,7 +622,7 @@ mod tests {
 
     async fn make_encrypted_tcp_rpc_channel(
         server: &str,
-    ) -> (impl RpcAsyncSender, impl RpcAsyncReceiver) {
+    ) -> (impl AsyncRpcSender, impl AsyncRpcReceiver) {
         let mut transport = TcpStream::connect(server).await.unwrap();
 
         capability::negotiation::initiate(&mut transport, RpcCapability::new(1, true))

@@ -1,5 +1,5 @@
 mod opt;
-mod sealed;
+mod private;
 
 pub mod capability;
 pub mod client;

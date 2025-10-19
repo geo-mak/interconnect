@@ -6,7 +6,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use crate::capability::{BufferView, EncryptionState};
 use crate::error::{ErrKind, RpcError, RpcResult};
 use crate::message::Message;
-use crate::sealed::Sealed;
+use crate::private::Private;
 
 // RPC FRAME
 // +-----------------------+---------------------+
@@ -20,19 +20,19 @@ const MAX_MESSAGE_SIZE: u32 = 4 * 1024 * 1024;
 // Definitely not for bulk throughput or streams, but streams are a different story.
 const FRAMING_CAPACITY: usize = 1024;
 
-pub trait RpcAsyncReceiver: Sealed {
+pub trait RpcAsyncReceiver: Private {
     fn receive(&mut self) -> impl Future<Output = RpcResult<Message>> + Send;
 }
 
-pub trait RpcAsyncSender: Sealed {
+pub trait RpcAsyncSender: Private {
     fn send(&mut self, message: &Message) -> impl Future<Output = RpcResult<()>> + Send;
     fn close(&mut self) -> impl Future<Output = RpcResult<()>> + Send;
 }
 
-impl<T> Sealed for RpcSender<T> {}
-impl<T> Sealed for EncryptedRpcSender<T> {}
-impl<T> Sealed for RpcReceiver<T> {}
-impl<T> Sealed for EncryptedRpcReceiver<T> {}
+impl<T> Private for RpcSender<T> {}
+impl<T> Private for EncryptedRpcSender<T> {}
+impl<T> Private for RpcReceiver<T> {}
+impl<T> Private for EncryptedRpcReceiver<T> {}
 
 pub struct BytesWriter {
     pub buf: Vec<u8>,

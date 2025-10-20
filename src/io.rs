@@ -138,26 +138,6 @@ impl IORing {
 
             // TODO: Cycles policy.
             if used >= self.segments.len() {
-                let tail_idx = tail & self.mask;
-                let tail_seg = &self.segments[tail_idx];
-
-                let state = tail_seg.state.load(Acquire);
-                if state == SEG_DISCARDED {
-                    if tail_seg
-                        .state
-                        .compare_exchange_weak(SEG_DISCARDED, SEG_NONE, AcqRel, Acquire)
-                        .is_ok()
-                    {
-                        self.tail.store(tail.wrapping_add(1), Release);
-                        let seg_ref = unsafe {
-                            tail_seg.buffer().clear();
-                            tail_seg.pub_ref()
-                        };
-                        return Some(seg_ref);
-                    }
-                    continue;
-                }
-                // Just full.
                 return None;
             }
 
@@ -401,18 +381,15 @@ mod tests_io_ring {
         write!(seg_2, "ok").unwrap();
         seg_2.publish();
 
-        let mut seg_3 = ring.acquire().unwrap();
-        write!(seg_3, "was discarded").unwrap();
-        seg_3.publish();
+        let seg_3 = ring.acquire();
+        assert!(seg_3.is_none());
 
         let mut dst = [0u8; 2];
         let res = ring.receive_into(&mut dst.as_mut()).unwrap().unwrap();
         assert_eq!(res, 2);
         assert_eq!(&dst, b"ok");
 
-        let mut dst = [0u8; 13];
-        let res = ring.receive_into(&mut dst.as_mut()).unwrap().unwrap();
-        assert_eq!(res, 13);
-        assert_eq!(&dst, b"was discarded");
+        let seg_4 = ring.acquire();
+        assert!(seg_4.is_some());
     }
 }

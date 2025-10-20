@@ -27,11 +27,6 @@ impl IORingSegment {
     }
 
     #[inline(always)]
-    unsafe fn set_none(&self) {
-        self.state.store(SEG_NONE, Release);
-    }
-
-    #[inline(always)]
     unsafe fn set_published(&self) {
         self.state.store(SEG_PUBLISHED, Release);
     }
@@ -189,7 +184,7 @@ impl IORing {
                     if let Err(e) = dst.write_all(buf) {
                         return Some(Err(e));
                     }
-                    unsafe { tail_seg.set_none() };
+                    tail_seg.state.store(SEG_NONE, Relaxed);
                     self.tail.store(tail.wrapping_add(1), Release);
                     return Some(Ok(buf.len()));
                 }

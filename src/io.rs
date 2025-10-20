@@ -22,6 +22,11 @@ impl IORingSegment {
     }
 
     #[inline(always)]
+    unsafe fn pub_ref(&self) -> IOSegment<'_> {
+        IOSegment { seg: self }
+    }
+
+    #[inline(always)]
     unsafe fn buffer(&self) -> &mut Vec<u8> {
         unsafe { &mut *self.data.get() }
     }
@@ -34,11 +39,6 @@ impl IORingSegment {
     #[inline(always)]
     unsafe fn set_discarded(&self) {
         self.state.store(SEG_DISCARDED, Release);
-    }
-
-    #[inline(always)]
-    unsafe fn pub_ref(&self) -> IOSegment<'_> {
-        IOSegment { seg: self }
     }
 }
 
@@ -129,10 +129,12 @@ impl IORing {
         loop {
             let head = self.head.load(Relaxed);
             let tail = self.tail.load(Acquire);
-            let used = head.wrapping_sub(tail);
 
-            // TODO: Cycles policy.
+            // TODO: Cycles policy. Right now the two pointers are monotonic unbounded.
+            let used = head.wrapping_sub(tail);
             if used >= self.segments.len() {
+                // Discarded is treated as published.
+                // For faster dynamics, consumer must be invoked to make segments free.
                 return None;
             }
 

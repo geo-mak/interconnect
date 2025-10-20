@@ -133,8 +133,16 @@ impl IORing {
             // TODO: Cycles policy. Right now the two pointers are monotonic unbounded.
             let used = write.wrapping_sub(read);
             if used >= self.segments.len() {
-                // Discarded is treated as published.
-                // For faster dynamics, consumer must be invoked to make segments free.
+                // Doing cleanups here will make things complicated and slow,
+                // because this path is entered on full capacity regardless of the reason.
+                //
+                // For faster dynamics, consumer must be invoked to make segments free,
+                // because it detects both, published and discarded segments, and doesn't have to
+                // do synchronized state-store with this thread, and this thread doesn't
+                // have to update the read cursors also.
+                //
+                // So this setup is leaner and cleaner and faster, just poke the consumer to drive the "noria",
+                // and the wheel will spin again.
                 return None;
             }
 

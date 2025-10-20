@@ -94,8 +94,8 @@ impl<'a> Drop for IOSegment<'a> {
 pub(crate) struct IORing {
     segments: Box<[IORingSegment]>,
     mask: usize,
-    head: AtomicUsize,
-    tail: AtomicUsize,
+    write: AtomicUsize,
+    read: AtomicUsize,
 }
 
 unsafe impl Sync for IORing {}
@@ -117,8 +117,8 @@ impl IORing {
         Self {
             segments,
             mask: count - 1,
-            head: AtomicUsize::new(0),
-            tail: AtomicUsize::new(0),
+            write: AtomicUsize::new(0),
+            read: AtomicUsize::new(0),
         }
     }
 
@@ -127,24 +127,24 @@ impl IORing {
     /// Returns `None` if all segments are currently in use.
     pub(crate) fn acquire(&self) -> Option<IOSegment<'_>> {
         loop {
-            let head = self.head.load(Relaxed);
-            let tail = self.tail.load(Acquire);
+            let write = self.write.load(Relaxed);
+            let read = self.read.load(Acquire);
 
             // TODO: Cycles policy. Right now the two pointers are monotonic unbounded.
-            let used = head.wrapping_sub(tail);
+            let used = write.wrapping_sub(read);
             if used >= self.segments.len() {
                 // Discarded is treated as published.
                 // For faster dynamics, consumer must be invoked to make segments free.
                 return None;
             }
 
-            let seg_idx = head & self.mask;
+            let seg_idx = write & self.mask;
             let segment = &self.segments[seg_idx];
 
             // Acquire exclusive segment.
             if self
-                .head
-                .compare_exchange_weak(head, head.wrapping_add(1), AcqRel, Relaxed)
+                .write
+                .compare_exchange_weak(write, write.wrapping_add(1), AcqRel, Relaxed)
                 .is_ok()
             {
                 let seg_ref = unsafe {
@@ -176,24 +176,24 @@ impl IORing {
     ///   Next call will try to write the same message.
     pub(crate) fn receive_into<W: Write>(&self, dst: &mut W) -> Option<io::Result<usize>> {
         loop {
-            let tail = self.tail.load(Relaxed);
-            let seg_idx = tail & self.mask;
-            let tail_seg = &self.segments[seg_idx];
+            let read = self.read.load(Relaxed);
+            let seg_idx = read & self.mask;
+            let segment = &self.segments[seg_idx];
 
-            match tail_seg.state.load(Acquire) {
+            match segment.state.load(Acquire) {
                 SEG_PUBLISHED => {
-                    let buf = unsafe { tail_seg.buffer() };
+                    let buf = unsafe { segment.buffer() };
                     if let Err(e) = dst.write_all(buf) {
                         return Some(Err(e));
                     }
-                    tail_seg.state.store(SEG_NONE, Relaxed);
-                    self.tail.store(tail.wrapping_add(1), Release);
+                    segment.state.store(SEG_NONE, Relaxed);
+                    self.read.store(read.wrapping_add(1), Release);
                     return Some(Ok(buf.len()));
                 }
                 SEG_NONE => return None,
                 SEG_DISCARDED => {
-                    tail_seg.state.store(SEG_NONE, Relaxed);
-                    self.tail.store(tail.wrapping_add(1), Release);
+                    segment.state.store(SEG_NONE, Relaxed);
+                    self.read.store(read.wrapping_add(1), Release);
                 }
                 _ => unreachable!(),
             }

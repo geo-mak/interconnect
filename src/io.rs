@@ -195,13 +195,8 @@ impl IORing {
                 }
                 SEG_NONE => return None,
                 SEG_DISCARDED => {
-                    if tail_seg
-                        .state
-                        .compare_exchange_weak(SEG_DISCARDED, SEG_NONE, AcqRel, Acquire)
-                        .is_ok()
-                    {
-                        self.tail.store(tail.wrapping_add(1), Release);
-                    }
+                    tail_seg.state.store(SEG_NONE, Relaxed);
+                    self.tail.store(tail.wrapping_add(1), Release);
                 }
                 _ => unreachable!(),
             }

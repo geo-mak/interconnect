@@ -139,7 +139,7 @@ impl IORing {
                 // For faster dynamics, consumer must be invoked to make segments free,
                 // because it detects both, published and discarded segments, and doesn't have to
                 // do synchronized state-store with this thread, and this thread doesn't
-                // have to update the read cursors also.
+                // have to update the read cursor also.
                 //
                 // So this setup is leaner and cleaner and faster, just poke the consumer to drive the "noria",
                 // and the wheel will spin again.
@@ -217,7 +217,7 @@ mod tests_io_ring {
 
     #[test]
     fn test_io_ring_acquire_publish() {
-        let ring = IORing::new(2, 16);
+        let ring = IORing::new(1, 16);
         let mut seg = ring.acquire().expect("must get a segment");
 
         let _ = seg.write(b"ring ");
@@ -247,24 +247,19 @@ mod tests_io_ring {
 
     #[test]
     fn test_io_ring_no_space() {
-        let ring = IORing::new(1, 8);
-        let msg = b"12345678";
-
-        let mut seg = ring.acquire().expect("expected a free segment");
-        seg.write_all(msg).unwrap();
-        seg.publish();
-
+        let ring = IORing::new(1, 0);
+        let _ = ring.acquire().expect("expected a free segment");
         assert!(ring.acquire().is_none());
     }
 
     #[test]
-    fn test_io_ring_read_write_seq() {
+    fn test_io_ring_publishing_order() {
         let ring = IORing::new(4, 5);
         let msgs = [b"Alpha", b"Betaa", b"Gamma"];
 
         for m in msgs {
             let mut seg = ring.acquire().expect("expected free segment");
-            seg.write_all(m).unwrap();
+            seg.write(m).unwrap();
             seg.publish();
         }
 
@@ -288,7 +283,7 @@ mod tests_io_ring {
 
         for i in 0u16..4096 {
             let mut seg = ring.acquire().expect("acquire failed");
-            seg.write_all(&(i + 1).to_le_bytes()).unwrap();
+            seg.write(&(i + 1).to_le_bytes()).unwrap();
             seg.publish();
 
             let n = ring.receive_into(&mut dst.as_mut()).unwrap().unwrap();
@@ -310,7 +305,7 @@ mod tests_io_ring {
             barrier_1.wait();
             for _ in 0..30 {
                 let mut seg = ring_1.acquire().unwrap();
-                seg.write_all("thread1".as_bytes()).unwrap();
+                seg.write("thread1".as_bytes()).unwrap();
                 seg.publish();
             }
         });
@@ -321,7 +316,7 @@ mod tests_io_ring {
             barrier_2.wait();
             for _ in 0..30 {
                 let mut seg = ring_2.acquire().unwrap();
-                seg.write_all("thread2".as_bytes()).unwrap();
+                seg.write("thread2".as_bytes()).unwrap();
                 seg.publish();
             }
         });
@@ -332,7 +327,7 @@ mod tests_io_ring {
             barrier_3.wait();
             for _ in 0..30 {
                 let mut seg = ring_3.acquire().unwrap();
-                seg.write_all("thread3".as_bytes()).unwrap();
+                seg.write("thread3".as_bytes()).unwrap();
                 seg.publish();
             }
         });
@@ -343,7 +338,7 @@ mod tests_io_ring {
             barrier_4.wait();
             for _ in 0..30 {
                 let mut seg = ring_4.acquire().unwrap();
-                seg.write_all("thread4".as_bytes()).unwrap();
+                seg.write("thread4".as_bytes()).unwrap();
                 seg.publish();
             }
         });

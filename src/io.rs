@@ -361,25 +361,30 @@ mod tests_io_ring {
 
     #[test]
     fn test_io_ring_discarded_segment() {
-        let ring = IORing::new(2, 16);
+        let ring = IORing::new(2, 0);
+        // Total: 2
 
+        // Unpublished. Left 1.
         {
             let _ = ring.acquire().unwrap();
         }
 
-        let mut seg_2 = ring.acquire().unwrap();
-        write!(seg_2, "ok").unwrap();
+        // Published. Left 0.
+        let seg_2 = ring.acquire().unwrap();
         seg_2.publish();
 
-        let seg_3 = ring.acquire();
-        assert!(seg_3.is_none());
+        // Must fail.
+        assert!(ring.acquire().is_none());
 
-        let mut dst = [0u8; 2];
-        let res = ring.receive_into(&mut dst.as_mut()).unwrap().unwrap();
-        assert_eq!(res, 2);
-        assert_eq!(&dst, b"ok");
+        // Receiving + recycling.
+        // Published consumed. Discarded recycled.
+        while let Some(Ok(_)) = ring.receive_into(&mut [0u8; 0].as_mut()) {}
 
+        // All clear.
         let seg_4 = ring.acquire();
         assert!(seg_4.is_some());
+
+        let seg_5 = ring.acquire();
+        assert!(seg_5.is_some());
     }
 }

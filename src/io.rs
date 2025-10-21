@@ -45,6 +45,7 @@ impl IORingSegment {
 /// An exclusive segment that implements `io::Write`.
 ///
 /// `publish` method must be called to save the data written to the segment.
+/// `flush` method does nothing.
 ///
 /// If dropped before calling `publish`, the written data will be discarded.
 pub(crate) struct IOSegment<'a> {

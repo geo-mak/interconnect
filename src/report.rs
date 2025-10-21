@@ -71,7 +71,7 @@ impl<T> ReportMaterial for T where T: Display {}
 /// Types implementing this trait can operate on per-instance state,
 /// or on shared globals.
 ///
-/// Each type can defines its own way of formatting and publishing reports,
+/// Each implementation can define its own way of formatting and publishing reports,
 /// where reporting might be restricted to specific categories and output mediums only.
 ///
 /// Types that generate reports shall disclose details about the reports generated,

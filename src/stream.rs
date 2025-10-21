@@ -81,7 +81,7 @@ where
     async fn send(&mut self, message: &Message) -> RpcResult<()> {
         unsafe { self.bytes.buf.set_len(HEADER_LEN) };
 
-        message.encode_into_writer(&mut self.bytes)?;
+        Message::encode_into_writer(message, &mut self.bytes)?;
 
         let len = (self.bytes.buf.len() - HEADER_LEN) as u32;
 
@@ -135,7 +135,7 @@ where
     async fn send(&mut self, message: &Message) -> RpcResult<()> {
         unsafe { self.bytes.buf.set_len(HEADER_LEN) };
 
-        message.encode_into_writer(&mut self.bytes)?;
+        Message::encode_into_writer(message, &mut self.bytes)?;
 
         let mut enc_buf = BufferView {
             buf: &mut self.bytes.buf,
@@ -215,7 +215,7 @@ where
         unsafe { self.bytes.set_len(len as usize) }
         self.reader.read_exact(&mut self.bytes).await?;
 
-        Message::decode(&self.bytes)
+        Message::decode_from_slice(&self.bytes)
     }
 }
 
@@ -281,7 +281,7 @@ where
 
         self.state.decrypt(&mut self.bytes, b"")?;
 
-        Message::decode(&self.bytes)
+        Message::decode_from_slice(&self.bytes)
     }
 }
 

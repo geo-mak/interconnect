@@ -1,5 +1,4 @@
 use bincode::config::{Configuration, standard};
-use bincode::de::read::Reader;
 use bincode::enc::write::Writer;
 
 use serde::{Deserialize, Serialize};
@@ -27,7 +26,7 @@ impl Call {
     pub fn with<T: Serialize>(method: u16, value: &T) -> RpcResult<Self> {
         let instance = Self {
             method,
-            data: Message::encode_value_to_vec(value)?,
+            data: Message::encode_to_vec(value)?,
         };
         Ok(instance)
     }
@@ -53,7 +52,7 @@ impl Reply {
     #[inline(always)]
     pub fn with<T: Serialize>(value: &T) -> RpcResult<Self> {
         let instance = Self {
-            data: Message::encode_value_to_vec(value)?,
+            data: Message::encode_to_vec(value)?,
         };
         Ok(instance)
     }
@@ -160,38 +159,13 @@ impl Message {
         Self::new(id, MessageType::Pong)
     }
 
-    /// Encodes the message into binary format.
-    pub fn encode(&self) -> RpcResult<Vec<u8>> {
-        bincode::serde::encode_to_vec(self, CONFIG).map_err(Into::into)
-    }
-
-    /// Decodes a message from binary format.
-    pub fn decode(message: &[u8]) -> RpcResult<Self> {
-        bincode::serde::borrow_decode_from_slice(message, CONFIG)
-            .map(|(msg, _)| msg)
-            .map_err(Into::into)
-    }
-
-    /// Encodes and writes the message into a writer.
-    pub fn encode_into_writer<W: Writer>(&self, dst: &mut W) -> RpcResult<()> {
-        bincode::serde::encode_into_writer(self, dst, CONFIG).map_err(Into::into)
-    }
-
-    /// Decodes a message from the given reader.
-    pub fn decode_from_reader<R: Reader>(src: &mut R) -> RpcResult<Self> {
-        bincode::serde::decode_from_reader(src, CONFIG).map_err(Into::into)
-    }
-
     /// Encodes a value to binary format.
-    pub fn encode_value_to_vec<T: Serialize>(value: &T) -> RpcResult<Vec<u8>> {
+    pub fn encode_to_vec<T: Serialize>(value: &T) -> RpcResult<Vec<u8>> {
         bincode::serde::encode_to_vec(value, CONFIG).map_err(Into::into)
     }
 
     /// Encodes a value to binary format into writer.
-    pub fn encode_value_into_writer<T: Serialize, W: Writer>(
-        value: &T,
-        dst: &mut W,
-    ) -> RpcResult<()> {
+    pub fn encode_into_writer<T: Serialize, W: Writer>(value: &T, dst: &mut W) -> RpcResult<()> {
         bincode::serde::encode_into_writer(value, dst, CONFIG).map_err(Into::into)
     }
 
@@ -204,13 +178,13 @@ impl Message {
 
     /// Creates a request message with typed parameters.
     pub fn call_with<P: Serialize>(method: u16, params: &P) -> RpcResult<Self> {
-        let data = Self::encode_value_to_vec(&params)?;
+        let data = Self::encode_to_vec(&params)?;
         Ok(Self::call(Call { method, data }))
     }
 
     /// Creates a response message with typed value.
     pub fn reply_with<R: Serialize>(id: Uuid, value: &R) -> RpcResult<Self> {
-        let data = Self::encode_value_to_vec(&value)?;
+        let data = Self::encode_to_vec(&value)?;
         Ok(Self::reply(id, Reply { data }))
     }
 
@@ -236,8 +210,8 @@ mod tests {
         let data = vec![10, 20, 30];
 
         let call = Message::call(Call::new(method, data.clone()));
-        let enc_call = call.encode().unwrap();
-        let dec_call = Message::decode(&enc_call).unwrap();
+        let enc_call = Message::encode_to_vec(&call).unwrap();
+        let dec_call: Message = Message::decode_from_slice(&enc_call).unwrap();
         assert_eq!(call.id, dec_call.id);
         match (&call.kind, &dec_call.kind) {
             (MessageType::Call(orig_call), MessageType::Call(decoded_call)) => {
@@ -248,8 +222,8 @@ mod tests {
         }
 
         let nullary_call = Message::nullary_call(method);
-        let enc_nullary_call = nullary_call.encode().unwrap();
-        let dec_nullary_call = Message::decode(&enc_nullary_call).unwrap();
+        let enc_nullary_call = Message::encode_to_vec(&nullary_call).unwrap();
+        let dec_nullary_call: Message = Message::decode_from_slice(&enc_nullary_call).unwrap();
         assert_eq!(nullary_call.id, dec_nullary_call.id);
         match (&nullary_call.kind, &dec_nullary_call.kind) {
             (MessageType::NullaryCall(orig_method), MessageType::NullaryCall(decoded_method)) => {
@@ -259,8 +233,8 @@ mod tests {
         }
 
         let reply_msg = Message::reply(id, Reply { data });
-        let enc_reply = reply_msg.encode().unwrap();
-        let dec_reply = Message::decode(&enc_reply).unwrap();
+        let enc_reply = Message::encode_to_vec(&reply_msg).unwrap();
+        let dec_reply: Message = Message::decode_from_slice(&enc_reply).unwrap();
         assert_eq!(reply_msg.id, dec_reply.id);
         match (&reply_msg.kind, &dec_reply.kind) {
             (MessageType::Reply(orig_reply), MessageType::Reply(decoded_reply)) => {
@@ -270,8 +244,8 @@ mod tests {
         }
 
         let err_msg = Message::error(id, RpcError::error(ErrKind::Timeout));
-        let enc_err = err_msg.encode().unwrap();
-        let dec_err = Message::decode(&enc_err).unwrap();
+        let enc_err = Message::encode_to_vec(&err_msg).unwrap();
+        let dec_err: Message = Message::decode_from_slice(&enc_err).unwrap();
         assert_eq!(err_msg.id, dec_err.id);
         match (&err_msg.kind, &dec_err.kind) {
             (MessageType::Error(orig_err), MessageType::Error(decoded_err)) => {
@@ -281,14 +255,14 @@ mod tests {
         }
 
         let ping_msg = Message::ping();
-        let enc_ping = ping_msg.encode().unwrap();
-        let dec_ping = Message::decode(&enc_ping).unwrap();
+        let enc_ping = Message::encode_to_vec(&ping_msg).unwrap();
+        let dec_ping: Message = Message::decode_from_slice(&enc_ping).unwrap();
         assert_eq!(ping_msg.id, dec_ping.id);
         assert_eq!(dec_ping.kind, MessageType::Ping, "Expected ping");
 
         let pong_msg = Message::pong(id);
-        let enc_pong = pong_msg.encode().unwrap();
-        let dec_pong = Message::decode(&enc_pong).unwrap();
+        let enc_pong = Message::encode_to_vec(&pong_msg).unwrap();
+        let dec_pong: Message = Message::decode_from_slice(&enc_pong).unwrap();
         assert_eq!(pong_msg.id, dec_pong.id);
         assert_eq!(dec_pong.kind, MessageType::Pong, "Expected pong");
     }

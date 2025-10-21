@@ -31,7 +31,7 @@ pub trait AsyncRpcClient {
         P: Serialize,
         R: for<'de> Deserialize<'de>;
 
-    fn call_with_timeout<P, R>(
+    fn call_timeout<P, R>(
         &self,
         method: u16,
         params: &P,
@@ -45,11 +45,11 @@ pub trait AsyncRpcClient {
     where
         P: Serialize;
 
-    fn nullary_call<R>(&self, method: u16) -> impl Future<Output = RpcResult<R>>
+    fn call_nullary<R>(&self, method: u16) -> impl Future<Output = RpcResult<R>>
     where
         R: for<'de> Deserialize<'de>;
 
-    fn nullary_call_with_timeout<R>(
+    fn call_nullary_timeout<R>(
         &self,
         method: u16,
         timeout: Duration,
@@ -57,7 +57,7 @@ pub trait AsyncRpcClient {
     where
         R: for<'de> Deserialize<'de>;
 
-    fn nullary_call_one_way(&self, method: u16) -> impl Future<Output = RpcResult<()>>;
+    fn call_nullary_one_way(&self, method: u16) -> impl Future<Output = RpcResult<()>>;
 
     fn ping(&self, timeout: Duration) -> impl Future<Output = RpcResult<()>>;
 
@@ -335,17 +335,12 @@ where
         P: Serialize,
         R: for<'de> Deserialize<'de>,
     {
-        self.call_with_timeout(method, params, Duration::from_secs(30))
+        self.call_timeout(method, params, Duration::from_secs(30))
             .await
     }
 
     /// Makes a remote procedure call with custom timeout.
-    async fn call_with_timeout<P, R>(
-        &self,
-        method: u16,
-        params: &P,
-        timeout: Duration,
-    ) -> RpcResult<R>
+    async fn call_timeout<P, R>(&self, method: u16, params: &P, timeout: Duration) -> RpcResult<R>
     where
         P: Serialize,
         R: for<'de> Deserialize<'de>,
@@ -377,16 +372,16 @@ where
 
     /// Makes a remote procedure call.
     /// Default timeout is `30` seconds.
-    async fn nullary_call<R>(&self, method: u16) -> RpcResult<R>
+    async fn call_nullary<R>(&self, method: u16) -> RpcResult<R>
     where
         R: for<'de> Deserialize<'de>,
     {
-        self.nullary_call_with_timeout(method, Duration::from_secs(30))
+        self.call_nullary_timeout(method, Duration::from_secs(30))
             .await
     }
 
     /// Makes a remote procedure call with custom timeout.
-    async fn nullary_call_with_timeout<R>(&self, method: u16, timeout: Duration) -> RpcResult<R>
+    async fn call_nullary_timeout<R>(&self, method: u16, timeout: Duration) -> RpcResult<R>
     where
         R: for<'de> Deserialize<'de>,
     {
@@ -405,7 +400,7 @@ where
     ///
     /// This call is untracked, if the target method returns response,
     /// the response will be discarded.
-    async fn nullary_call_one_way(&self, method: u16) -> RpcResult<()> {
+    async fn call_nullary_one_way(&self, method: u16) -> RpcResult<()> {
         let message = Message::nullary_call(method);
         self.state.sender.lock().await.send(&message).await
     }
@@ -518,7 +513,7 @@ mod tests {
         let reply = client.call::<&str, String>(1, &"call").await.unwrap();
         assert_eq!(reply, "reply");
 
-        let reply_nullary = client.nullary_call::<String>(1).await.unwrap();
+        let reply_nullary = client.call_nullary::<String>(1).await.unwrap();
         assert_eq!(reply_nullary, "nullary call reply");
 
         let err: RpcError = client.call::<&str, String>(2, &"call").await.unwrap_err();

@@ -33,7 +33,7 @@ pub trait CallContext {
     /// Unless noted otherwise by the implementation, this method is **not** safe to be canceled.
     ///
     /// By default, it returns `Unimplemented` error.
-    fn nullary_call(&mut self, _method: u16) -> impl Future<Output = RpcResult<()>> + Send {
+    fn call_nullary(&mut self, _method: u16) -> impl Future<Output = RpcResult<()>> + Send {
         std::future::ready(Err(RpcError::error(ErrKind::Unimplemented)))
     }
 }
@@ -59,7 +59,7 @@ pub trait RpcService {
     /// Response to the call is optional and can be done via the context's methods.
     ///
     /// By default, it sends `Unimplemented` error to the caller.
-    fn nullary_call<C>(
+    fn call_nullary<C>(
         &self,
         _method: u16,
         context: &mut C,

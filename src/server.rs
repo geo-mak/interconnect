@@ -315,7 +315,7 @@ where
     }
 
     #[inline]
-    async fn nullary_call(&mut self, method: u16) -> RpcResult<()> {
+    async fn call_nullary(&mut self, method: u16) -> RpcResult<()> {
         self.sender
             .send(&Message::new(*self.id, MessageType::NullaryCall(method)))
             .await
@@ -537,7 +537,7 @@ where
                         }
                         MessageType::NullaryCall(method) => {
                             let mut ctx = ServerContext::new(&message.id, sender);
-                            service.nullary_call(*method, &mut ctx).await?
+                            service.call_nullary(*method, &mut ctx).await?
                         }
                         MessageType::Ping => sender.send(&Message::pong(message.id)).await?,
                         _ => {

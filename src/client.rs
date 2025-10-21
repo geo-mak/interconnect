@@ -137,7 +137,7 @@ where
     }
 
     #[inline]
-    async fn nullary_call(&mut self, method: u16) -> RpcResult<()> {
+    async fn call_nullary(&mut self, method: u16) -> RpcResult<()> {
         let message = Message::new(*self.id, MessageType::NullaryCall(method));
         self.state.sender.lock().await.send(&message).await
     }
@@ -274,7 +274,7 @@ where
             MessageType::NullaryCall(method) => {
                 if let Some(_lock) = state.abort_lock.acquire() {
                     let mut ctx = ClientContext::new(&message.id, state);
-                    return state.service.nullary_call(method, &mut ctx).await;
+                    return state.service.call_nullary(method, &mut ctx).await;
                 }
             }
             MessageType::Ping => {

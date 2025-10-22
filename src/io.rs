@@ -83,6 +83,49 @@ impl<'a> Drop for IOSegment<'a> {
     }
 }
 
+/// A published segment that contains data.
+///
+/// Data can be accessed via `data` method.
+///
+/// After handling the data, `recycle` method must be called to drive the ring
+/// and get the next published segment.
+///
+/// Segment must be freed as soon as possible.
+/// Not calling `recycle` will never set the segment free, and a subsequent call to `receive`
+/// will return the same segment.
+///
+/// The segment will panic when `recycle` is called for the second time on the same segment.
+pub(crate) struct PublishedSegment<'a> {
+    io_ring: &'a IORing,
+    seg: &'a IORingSegment,
+    read: usize,
+}
+
+impl<'a> PublishedSegment<'a> {
+    const fn new(io_ring: &'a IORing, seg: &'a IORingSegment, read: usize) -> Self {
+        Self { io_ring, seg, read }
+    }
+
+    #[inline(always)]
+    pub(crate) fn data(&self) -> &mut Vec<u8> {
+        unsafe { self.seg.buffer() }
+    }
+
+    /// Frees the segment to be used by producers.
+    ///
+    /// This method will panic if it is called on a recycled segment.
+    #[inline(always)]
+    pub(crate) fn recycle(self) {
+        // Once all pathways get proper shape, it can be made in debug mode only.
+        assert!(
+            self.io_ring.read.load(Acquire) == self.read,
+            "Invalid recycling"
+        );
+        self.seg.state.store(SEG_NONE, Relaxed);
+        self.io_ring.read.store(self.read.wrapping_add(1), Release);
+    }
+}
+
 /// A multi-producer **single-consumer** ring buffer for variable-length byte-messages.
 ///
 /// This buffer acts as a bounded communication channel.
@@ -177,13 +220,8 @@ impl IORing {
     ///
     /// Returns:
     ///
-    /// - None: When there is no published message currently.
-    ///
-    /// - Some(message size): When a published message has been written successfully to `dst`.
-    ///
-    /// - Some(I/O error): When writing a published message into `dst` has failed.
-    ///   Next call will try to write the same message.
-    pub(crate) fn receive_into<W: Write>(&self, dst: &mut W) -> Option<io::Result<usize>> {
+    /// Returns a reference to the current published segment if any, or `None` otherwise.
+    pub(crate) fn receive(&self) -> Option<PublishedSegment<'_>> {
         loop {
             let read = self.read.load(Relaxed);
             let seg_idx = read & self.mask;
@@ -191,13 +229,7 @@ impl IORing {
 
             match segment.state.load(Acquire) {
                 SEG_PUBLISHED => {
-                    let buf = unsafe { segment.buffer() };
-                    if let Err(e) = dst.write_all(buf) {
-                        return Some(Err(e));
-                    }
-                    segment.state.store(SEG_NONE, Relaxed);
-                    self.read.store(read.wrapping_add(1), Release);
-                    return Some(Ok(buf.len()));
+                    return Some(PublishedSegment::new(self, segment, read));
                 }
                 SEG_NONE => return None,
                 SEG_DISCARDED => {
@@ -217,33 +249,57 @@ mod tests_io_ring {
     use std::thread;
 
     #[test]
-    fn test_io_ring_acquire_publish() {
-        let ring = IORing::new(1, 16);
-        let mut seg = ring.acquire().expect("must get a segment");
+    fn test_io_ring_acquire_publish_receive() {
+        let ring = IORing::new(1, 43);
 
-        let _ = seg.write(b"ring ");
-        let _ = seg.write(b"my ");
-        let _ = seg.write(b"bells");
+        let mut segment = ring.acquire().expect("must get a segment");
 
-        let mut dst = [0u8; 13];
+        let _ = segment.write(b"The quick brown fox ");
+        let _ = segment.write(b"jumps over the lazy dog");
 
-        let res = ring.receive_into(&mut dst.as_mut());
+        let res = ring.receive();
         assert!(res.is_none());
 
-        seg.publish();
+        segment.publish();
 
-        let res = ring.receive_into(&mut dst.as_mut()).unwrap().unwrap();
-        assert_eq!(res, 13);
-        assert_eq!(&dst, b"ring my bells");
+        let published = ring.receive().expect("Must get published segment");
+        assert_eq!(
+            published.data().as_slice(),
+            b"The quick brown fox jumps over the lazy dog"
+        );
+
+        let segment = ring.acquire();
+        assert!(segment.is_none());
+
+        published.recycle();
+
+        let segment = ring.acquire();
+        assert!(segment.is_some());
+    }
+
+    #[test]
+    #[should_panic = "Invalid recycling"]
+    fn test_io_ring_recycling_twice() {
+        let ring = IORing::new(1, 0);
+
+        let segment = ring.acquire().expect("must get a segment");
+        segment.publish();
+
+        let published = ring.receive().expect("Must get published segment");
+        let same_published = ring.receive().expect("Must get published segment again");
+
+        // Set none.
+        published.recycle();
+
+        // Fire in the hole...
+        same_published.recycle();
     }
 
     #[test]
     fn test_io_ring_read_empty() {
         let ring = IORing::new(1, 0);
-        let mut dst = Vec::new();
-        let n = ring.receive_into(&mut dst);
+        let n = ring.receive();
         assert!(n.is_none());
-        assert!(dst.is_empty());
     }
 
     #[test]
@@ -266,32 +322,35 @@ mod tests_io_ring {
 
         let mut dst = [0u8; 15];
         let mut pos = 0;
-        for _ in 0..3 {
-            let n = ring
-                .receive_into(&mut dst[pos..].as_mut())
-                .unwrap()
-                .unwrap();
-            assert_eq!(n, 5);
+
+        while let Some(published) = ring.receive() {
+            dst[pos..pos + 5].copy_from_slice(&published.data());
+            published.recycle();
             pos += 5;
         }
+
         assert_eq!(&dst, b"AlphaBetaaGamma");
     }
 
     #[test]
     fn test_io_ring_wrapping_cycles() {
         let ring = IORing::new(8, 2);
-        let mut dst = [0u8; 2];
 
+        let mut dst = [0u8; 2];
         for i in 0u16..4096 {
             let mut seg = ring.acquire().expect("acquire failed");
+
             seg.write(&(i + 1).to_le_bytes()).unwrap();
+
             seg.publish();
 
-            let n = ring.receive_into(&mut dst.as_mut()).unwrap().unwrap();
-            assert_eq!(n, 2);
+            let pub_seg = ring.receive().unwrap();
+            dst.copy_from_slice(&pub_seg.data());
 
             let num = u16::from_le_bytes(dst);
             assert_eq!(num, i + 1);
+
+            pub_seg.recycle();
         }
     }
 
@@ -350,16 +409,16 @@ mod tests_io_ring {
         t4.join().unwrap();
 
         let mut counts = [0usize; 4];
-        let mut dst = [0u8; 7];
 
-        while let Some(Ok(_)) = ring.receive_into(&mut dst.as_mut()) {
-            match std::str::from_utf8(&dst).expect("Unreadable data in the ring") {
+        while let Some(published) = ring.receive() {
+            match std::str::from_utf8(&published.data()).expect("Unreadable data in the ring") {
                 "thread1" => counts[0] += 1,
                 "thread2" => counts[1] += 1,
                 "thread3" => counts[2] += 1,
                 "thread4" => counts[3] += 1,
                 other => panic!("Unexpected data: {other}"),
             }
+            published.recycle();
         }
 
         assert_eq!(counts, [30, 30, 30, 30]);
@@ -384,7 +443,9 @@ mod tests_io_ring {
 
         // Receiving + recycling.
         // Published consumed. Discarded recycled.
-        while let Some(Ok(_)) = ring.receive_into(&mut [0u8; 0].as_mut()) {}
+        while let Some(published) = ring.receive() {
+            published.recycle();
+        }
 
         // All clear.
         let seg_4 = ring.acquire();

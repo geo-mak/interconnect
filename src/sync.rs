@@ -3,13 +3,21 @@ use std::marker::PhantomPinned;
 use std::pin::Pin;
 use std::ptr::NonNull;
 use std::sync::Arc;
-
-use std::fmt;
 use std::sync::atomic::{
     AtomicUsize,
     Ordering::{AcqRel, Acquire, Release},
 };
-use std::task::{Context, Poll, Waker};
+use std::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
+use std::{fmt, ptr};
+
+pub const NOOP_WAKER: Waker = {
+    const NOOP_RAW_WAKER: RawWaker = {
+        const VTABLE: RawWakerVTable =
+            RawWakerVTable::new(|_| NOOP_RAW_WAKER, |_| {}, |_| {}, |_| {});
+        RawWaker::new(ptr::null(), &VTABLE)
+    };
+    unsafe { Waker::from_raw(NOOP_RAW_WAKER) }
+};
 
 /// A concurrent version of task's waker, protected via atomic operations.
 ///

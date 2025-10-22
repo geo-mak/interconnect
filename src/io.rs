@@ -1,5 +1,5 @@
 use std::cell::UnsafeCell;
-use std::io::{self, Write};
+use std::io;
 use std::sync::atomic::Ordering::{AcqRel, Acquire, Relaxed, Release};
 use std::sync::atomic::{AtomicU8, AtomicUsize};
 
@@ -245,6 +245,7 @@ impl IORing {
 #[cfg(test)]
 mod tests_io_ring {
     use super::*;
+    use std::io::Write;
     use std::sync::{Arc, Barrier};
     use std::thread;
 

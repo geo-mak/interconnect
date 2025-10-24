@@ -1,6 +1,6 @@
 use std::cell::{Cell, UnsafeCell};
 use std::fmt::Debug;
-use std::mem::ManuallyDrop;
+use std::mem;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU8;
@@ -47,9 +47,11 @@ impl Tasks {
             n_shards.is_power_of_two(),
             "Shards' count must be power of two"
         );
+
         let shards: Vec<_> = (0..n_shards)
             .map(|_| parking_lot::Mutex::new(IList::new()))
             .collect();
+
         Self {
             shards: shards.into_boxed_slice(),
             mask: n_shards - 1,
@@ -81,12 +83,12 @@ impl Tasks {
         let mut shard_lock = self.shards[shard].lock();
         if self.observer.acquire_manual() {
             unsafe {
-                shard_lock.attach_first(&mut task.i_node);
+                shard_lock.attach_first(&mut task.node);
                 drop(shard_lock);
             };
             return Some(AttachedTask {
                 task,
-                s_state: state,
+                srv_state: state,
                 shard,
             });
         }
@@ -94,7 +96,7 @@ impl Tasks {
     }
 
     fn detach<H, E>(&self, node: &mut AttachedTask<'_, H, E>) {
-        unsafe { self.shards[node.shard].lock().detach(&mut node.task.i_node) };
+        unsafe { self.shards[node.shard].lock().detach(&mut node.task.node) };
     }
 }
 
@@ -127,13 +129,11 @@ impl TaskControlState {
     fn cancel(&self) {
         match self.state.fetch_or(CANCEL, AcqRel) {
             WAIT => {
-                // Cancellation is checked based on `CANCEL` flag.
                 if let Some(waker) = unsafe { (*self.waker.get()).take() } {
                     waker.wake();
                 }
             }
             other => {
-                // A concurrent thread is doing `POLL`, `CANCEL` flag has been set,
                 debug_assert!(other == SET || other == CANCEL || other == SET_CANCEL);
             }
         }
@@ -199,7 +199,6 @@ where
             CANCEL | SET_CANCEL => {
                 return Poll::Ready(Err(Canceled));
             }
-            // No multiple pollers.
             _ => unreachable!("Task is being polled concurrently"),
         }
         Poll::Pending
@@ -207,7 +206,7 @@ where
 }
 
 struct Task {
-    i_node: INode<TaskControlState>,
+    node: INode<TaskControlState>,
 }
 
 unsafe impl Send for Task {}
@@ -217,22 +216,22 @@ impl Task {
     #[inline(always)]
     const fn new() -> Self {
         Self {
-            i_node: INode::new(TaskControlState::new()),
+            node: INode::new(TaskControlState::new()),
         }
     }
 }
 
 struct AttachedTask<'a, H, E> {
     // Must be by ref.
-    s_state: &'a Arc<ServerState<H, E>>,
+    srv_state: &'a Arc<ServerState<H, E>>,
     task: &'a mut Task,
     shard: usize,
 }
 
 impl<'a, H, E> Drop for AttachedTask<'a, H, E> {
     fn drop(&mut self) {
-        self.s_state.tasks.detach(self);
-        self.s_state.tasks.observer.release();
+        self.srv_state.tasks.detach(self);
+        self.srv_state.tasks.observer.release();
     }
 }
 
@@ -240,32 +239,32 @@ impl<'a, H, E> AttachedTask<'a, H, E> {
     #[inline(always)]
     fn wait_cancelable<F>(&self, future: F) -> CancelableTask<'_, F> {
         CancelableTask {
-            control: &self.task.i_node,
+            control: &self.task.node,
             future,
         }
     }
 
     #[inline(always)]
     fn release_undetached(self) {
-        self.s_state.tasks.observer.release();
-        let _ = ManuallyDrop::new(self);
+        self.srv_state.tasks.observer.release();
+        mem::forget(self);
     }
 }
 
 struct ServerState<H, E> {
     tasks: Tasks,
     service: H,
-    reporter: E,
+    report: E,
     timeout: Duration,
 }
 
 impl<H, E> ServerState<H, E> {
     #[inline]
-    fn new(shards: usize, service: H, timeout: Duration, reporter: E) -> ServerState<H, E> {
+    fn new(service: H, timeout: Duration, reporter: E, shards: usize) -> ServerState<H, E> {
         ServerState {
             tasks: Tasks::new(shards),
             service,
-            reporter,
+            report: reporter,
             timeout,
         }
     }
@@ -379,10 +378,10 @@ where
     pub async fn serve<A, L>(
         addr: A,
         service: H,
-        shards: usize,
-        encryption_required: bool,
-        conn_timeout: Duration,
+        encrypted_only: bool,
+        timeout: Duration,
         reporter: E,
+        shards: usize,
     ) -> RpcResult<Self>
     where
         A: 'static,
@@ -391,14 +390,14 @@ where
     {
         let listener = L::bind(addr).await?;
 
-        let state = Arc::new(ServerState::new(shards, service, conn_timeout, reporter));
+        let state = Arc::new(ServerState::new(service, timeout, reporter, shards));
 
-        let l_state = state.clone();
+        let state_l = state.clone();
         let listener = tokio::spawn(async move {
             loop {
                 match listener.accept().await {
                     Ok((transport, addr)) => {
-                        let t_state = l_state.clone();
+                        let state_t = state_l.clone();
                         tokio::spawn(async move {
                             // Task:
                             // |--- i_node: INode<TaskControlState>
@@ -415,32 +414,33 @@ where
                             //   because futures are constructed as "pinned" state machines.
                             // - Updating the task's node and accessing its data can be concurrent.
                             // - The state is atomic, updating and canceling can be concurrent.
-                            let mut task = Task::new();
+                            let mut pinned_task = Task::new();
 
                             // Detached on drop with release effect.
-                            if let Some(attached) = t_state.tasks.attach(&mut task, &t_state) {
+                            if let Some(attached) = state_t.tasks.attach(&mut pinned_task, &state_t)
+                            {
                                 // Can panic.
                                 let result = Self::connection::<L::Transport>(
                                     &attached,
                                     transport,
-                                    encryption_required,
+                                    encrypted_only,
                                 )
                                 .await;
 
-                                if let Err(e) = result
-                                    && e.kind != ErrKind::Disconnected
+                                if let Err(err) = result
+                                    && err.kind != ErrKind::Disconnected
                                 {
-                                    t_state.reporter.error(
+                                    state_t.report.error(
                                         "Session finished with error",
-                                        &format_args!("{e}. Peer: {addr:?}"),
+                                        &format_args!("{err}. Peer: {addr:?}"),
                                     )
                                 };
 
                                 // Detaching again is safe, but we try to avoid the "thundering herd" problem.
                                 // This allows shutdown to access locks smoothly without contention.
-                                if attached.task.i_node.is_canceled() {
+                                if attached.task.node.is_canceled() {
                                     attached.release_undetached();
-                                    t_state.reporter.info(
+                                    state_t.report.info(
                                         "Session canceled by shutdown",
                                         &format_args!("Peer: {addr:?}"),
                                     );
@@ -448,7 +448,7 @@ where
                             }
                         });
                     }
-                    Err(e) => l_state.reporter.error("Failed to accept connection", &e),
+                    Err(err) => state_l.report.error("Failed to accept connection", &err),
                 }
             }
         });
@@ -467,7 +467,7 @@ where
     {
         // TODO: Is it worth cancellation logic?
         let encrypted = timeout(
-            task.s_state.timeout,
+            task.srv_state.timeout,
             Self::negotiation(&mut transport, encryption_required),
         )
         .await??;
@@ -525,24 +525,24 @@ where
         S: AsyncRpcSender + Send,
         R: AsyncRpcReceiver,
     {
-        let service = task.s_state.service.clone();
+        let service = task.srv_state.service.clone();
         loop {
             match task.wait_cancelable(receiver.receive()).await {
                 Ok(result) => {
                     let message = result?;
                     match &message.kind {
                         MessageType::Call(call) => {
-                            let mut ctx = ServerContext::new(&message.id, sender);
-                            service.call(call, &mut ctx).await?
+                            let mut context = ServerContext::new(&message.id, sender);
+                            service.call(call, &mut context).await?
                         }
                         MessageType::NullaryCall(method) => {
-                            let mut ctx = ServerContext::new(&message.id, sender);
-                            service.call_nullary(*method, &mut ctx).await?
+                            let mut context = ServerContext::new(&message.id, sender);
+                            service.call_nullary(*method, &mut context).await?
                         }
                         MessageType::Ping => sender.send(&Message::pong(message.id)).await?,
                         _ => {
-                            task.s_state
-                                .reporter
+                            task.srv_state
+                                .report
                                 .alert("Received unexpected message type: ", &message.kind);
                         }
                     }
@@ -648,10 +648,10 @@ mod tests {
         let mut server = RpcServer::serve::<&str, TcpListener>(
             srv_addr,
             service,
-            2,
             false,
             Duration::from_secs(1),
             STDIOReporter::new(),
+            2,
         )
         .await
         .unwrap();
@@ -723,10 +723,10 @@ mod tests {
         let mut server = RpcServer::serve::<&str, TcpListener>(
             srv_addr,
             service,
-            2,
             true,
             Duration::from_secs(1),
             STDIOReporter::new(),
+            2,
         )
         .await
         .unwrap();
@@ -765,10 +765,10 @@ mod tests {
         let mut server = RpcServer::serve::<&str, UnixListener>(
             path,
             service,
-            2,
             false,
             Duration::from_secs(1),
             STDIOReporter::new(),
+            2,
         )
         .await
         .unwrap();

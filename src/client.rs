@@ -1,10 +1,16 @@
+use std::cell::UnsafeCell;
 use std::collections::HashMap;
+use std::marker::PhantomPinned;
+use std::mem;
+use std::pin::Pin;
+use std::ptr::NonNull;
 use std::sync::Arc;
+use std::sync::atomic::AtomicU8;
+use std::sync::atomic::Ordering::{AcqRel, Acquire};
+use std::task::{Context, Poll, Waker};
 use std::time::Duration;
 
 use tokio::sync::Mutex;
-use tokio::sync::oneshot;
-use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 use tokio::time::timeout;
 
@@ -21,7 +27,7 @@ use crate::stream::{
     AsyncRpcReceiver, AsyncRpcSender, EncryptedRpcReceiver, EncryptedRpcSender, RpcReceiver,
     RpcSender,
 };
-use crate::sync::DynamicLatch;
+use crate::sync::{DynamicLatch, NOOP_WAKER};
 use crate::transport::TransportLayer;
 
 /// The common RPC client interface of async clients.
@@ -64,28 +70,166 @@ pub trait AsyncRpcClient {
     fn shutdown(&mut self) -> impl Future<Output = RpcResult<()>>;
 }
 
+struct PendingStore {
+    entries: parking_lot::Mutex<HashMap<Uuid, InlinedReceiverState>>,
+}
+
+impl PendingStore {
+    #[inline(always)]
+    fn new(capacity: usize) -> Self {
+        Self {
+            entries: parking_lot::Mutex::new(HashMap::with_capacity(capacity)),
+        }
+    }
+
+    #[inline(always)]
+    fn store(&self, id: Uuid, recv_state: &ReceiverState) {
+        self.entries.lock().insert(
+            id,
+            InlinedReceiverState {
+                stack_ptr: recv_state.into(),
+            },
+        );
+    }
+
+    #[inline(always)]
+    fn remove(&self, id: &Uuid) {
+        self.entries.lock().remove(id);
+    }
+
+    #[inline]
+    fn set_ready(&self, id: &Uuid, value: RpcResult<Response>) {
+        // Safety: Locking is required to prevent receiver from dropping the state while in use.
+        let mut map = self.entries.lock();
+        if let Some(state_ref) = map.get_mut(id) {
+            let state_ptr = unsafe { state_ref.stack_ptr.as_mut() };
+
+            unsafe { *state_ptr.received_value.get() = Some(value) };
+
+            if state_ptr.state.fetch_or(RCV_READY, AcqRel) == RCV_WAIT {
+                unsafe { (*state_ptr.waker.get()).wake_by_ref() };
+            }
+
+            map.remove(&id);
+        }
+    }
+}
+
 enum Response {
     Pong,
     Reply(Reply),
 }
 
+struct ReceiverState {
+    state: AtomicU8,
+    waker: UnsafeCell<Waker>,
+    received_value: UnsafeCell<Option<RpcResult<Response>>>,
+    _pin: PhantomPinned,
+}
+
+const RCV_WAIT: u8 = 0;
+const RCV_SET: u8 = 1;
+const RCV_READY: u8 = 2;
+
+impl ReceiverState {
+    #[inline(always)]
+    const fn new() -> Self {
+        Self {
+            state: AtomicU8::new(RCV_WAIT),
+            waker: UnsafeCell::new(NOOP_WAKER),
+            received_value: UnsafeCell::new(None),
+            _pin: PhantomPinned,
+        }
+    }
+}
+
+struct InlinedReceiverState {
+    stack_ptr: NonNull<ReceiverState>,
+}
+
+unsafe impl Send for InlinedReceiverState {}
+unsafe impl Sync for InlinedReceiverState {}
+
+struct ReceiveFuture<'a> {
+    receive_state: &'a ReceiverState,
+}
+
+impl<'a> ReceiveFuture<'a> {
+    #[inline(always)]
+    fn new(recv_state: &'a ReceiverState) -> Self {
+        Self {
+            receive_state: recv_state,
+        }
+    }
+}
+
+impl<'a> Future for ReceiveFuture<'a> {
+    type Output = RpcResult<Response>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let receive = unsafe { self.get_unchecked_mut().receive_state };
+        let state = &receive.state;
+
+        match state.compare_exchange(RCV_WAIT, RCV_SET, Acquire, Acquire) {
+            Ok(_) => {
+                let waker_ptr = receive.waker.get();
+                unsafe { *waker_ptr = cx.waker().clone() };
+
+                match state.compare_exchange(RCV_SET, RCV_WAIT, AcqRel, Acquire) {
+                    Ok(_) => return Poll::Pending,
+                    Err(current) => debug_assert!(current & RCV_READY != 0),
+                };
+            }
+            Err(current) => debug_assert!(current & RCV_READY != 0),
+        }
+
+        // Safety: RCV_READY indicates that writing has been completed.
+        let value_ptr = receive.received_value.get();
+        let received_value = unsafe { (*value_ptr).take().unwrap() };
+        Poll::Ready(received_value)
+    }
+}
+
+struct OnReceiverDrop<'a> {
+    id: &'a Uuid,
+    entries: &'a PendingStore,
+}
+
+impl<'a> OnReceiverDrop<'a> {
+    #[inline(always)]
+    const fn new(id: &'a Uuid, entries: &'a PendingStore) -> Self {
+        Self { id, entries }
+    }
+
+    #[inline(always)]
+    const fn do_nothing(self) {
+        mem::forget(self);
+    }
+}
+
+impl<'a> Drop for OnReceiverDrop<'a> {
+    fn drop(&mut self) {
+        self.entries.remove(&self.id);
+    }
+}
+
 struct ClientState<S, H, E> {
-    reporter: E,
     abort_lock: DynamicLatch,
-    pending: Mutex<HashMap<Uuid, Sender<RpcResult<Response>>>>,
+    pending: PendingStore,
     sender: Mutex<S>,
     service: H,
+    reporter: E,
 }
 
 impl<S, H, E> ClientState<S, H, E> {
     #[inline(always)]
-    fn new(service: H, sender: S, cap: usize, reporter: E) -> ClientState<S, H, E> {
+    fn new(service: H, sender: S, capacity: usize, reporter: E) -> ClientState<S, H, E> {
         ClientState {
-            reporter,
             abort_lock: DynamicLatch::new(),
-            pending: Mutex::const_new(HashMap::with_capacity(cap)),
+            pending: PendingStore::new(capacity),
             sender: Mutex::const_new(sender),
             service,
+            reporter,
         }
     }
 }
@@ -148,7 +292,7 @@ where
 /// which makes it very lightweight at the cost of some synchronization overhead.
 pub struct RpcAsyncClient<S, H, E> {
     state: Arc<ClientState<S, H, E>>,
-    task: JoinHandle<()>,
+    receiver_task: JoinHandle<()>,
 }
 
 impl<S, H, E> RpcAsyncClient<S, H, E>
@@ -207,14 +351,17 @@ where
     }
 
     #[inline(always)]
-    const fn new(state: Arc<ClientState<S, H, E>>, task: tokio::task::JoinHandle<()>) -> Self {
-        Self { state, task }
+    const fn new(state: Arc<ClientState<S, H, E>>, recv_task: tokio::task::JoinHandle<()>) -> Self {
+        Self {
+            state,
+            receiver_task: recv_task,
+        }
     }
 
     async fn connect_with_parts<R>(
         sender: S,
         mut receiver: R,
-        call_handler: H,
+        handler: H,
         cap: usize,
         reporter: E,
     ) -> RpcResult<RpcAsyncClient<S, H, E>>
@@ -222,59 +369,47 @@ where
         S: AsyncRpcSender + Send + 'static,
         R: AsyncRpcReceiver + Send + 'static,
     {
-        let state = Arc::new(ClientState::new(call_handler, sender, cap, reporter));
-        let c_state = Arc::clone(&state);
+        let client_state = Arc::new(ClientState::new(handler, sender, cap, reporter));
+        let client_state_c = Arc::clone(&client_state);
 
-        let task = tokio::spawn(async move {
+        let receiver_task = tokio::spawn(async move {
             loop {
                 match receiver.receive().await {
                     Ok(message) => {
-                        if let Err(e) = Self::process_message(&c_state, message).await {
-                            c_state.reporter.error("Handling error", &e);
+                        if let Err(err) = Self::process_message(&client_state_c, message).await {
+                            client_state_c.reporter.error("Handling error", &err);
                             break;
                         }
                     }
-                    Err(e) => {
-                        c_state.reporter.error("Receiving error", &e);
+                    Err(err) => {
+                        client_state_c.reporter.error("Receiving error", &err);
                         break;
                     }
                 }
             }
         });
 
-        Ok(RpcAsyncClient::new(state, task))
+        Ok(RpcAsyncClient::new(client_state, receiver_task))
     }
 
     async fn process_message(state: &Arc<ClientState<S, H, E>>, message: Message) -> RpcResult<()> {
         match message.kind {
             MessageType::Reply(reply) => {
-                let mut pending = state.pending.lock().await;
-                if let Some(sender) = pending.remove(&message.id) {
-                    let _ = sender.send(Ok(Response::Reply(reply)));
-                }
+                let response = Response::Reply(reply);
+                state.pending.set_ready(&message.id, Ok(response));
             }
-            MessageType::Error(err) => {
-                let mut pending = state.pending.lock().await;
-                if let Some(sender) = pending.remove(&message.id) {
-                    let _ = sender.send(Err(err));
-                }
-            }
-            MessageType::Pong => {
-                let mut pending = state.pending.lock().await;
-                if let Some(sender) = pending.remove(&message.id) {
-                    let _ = sender.send(Ok(Response::Pong));
-                }
-            }
+            MessageType::Error(err) => state.pending.set_ready(&message.id, Err(err)),
+            MessageType::Pong => state.pending.set_ready(&message.id, Ok(Response::Pong)),
             MessageType::Call(call) => {
                 if let Some(_lock) = state.abort_lock.acquire() {
-                    let mut ctx = ClientContext::new(&message.id, state);
-                    return state.service.call(&call, &mut ctx).await;
+                    let mut context = ClientContext::new(&message.id, state);
+                    return state.service.call(&call, &mut context).await;
                 }
             }
             MessageType::NullaryCall(method) => {
                 if let Some(_lock) = state.abort_lock.acquire() {
-                    let mut ctx = ClientContext::new(&message.id, state);
-                    return state.service.call_nullary(method, &mut ctx).await;
+                    let mut context = ClientContext::new(&message.id, state);
+                    return state.service.call_nullary(method, &mut context).await;
                 }
             }
             MessageType::Ping => {
@@ -291,33 +426,23 @@ where
         message: &Message,
         timeout_duration: Duration,
     ) -> RpcResult<Response> {
-        let (sender, receiver) = oneshot::channel();
+        // Safety: This value must not move.
+        let pinned_state = ReceiverState::new();
 
-        let id = message.id;
+        let entries = &self.state.pending;
 
-        // Store pending request.
-        {
-            let mut pending = self.state.pending.lock().await;
-            pending.insert(id, sender);
-        }
+        entries.store(message.id, &pinned_state);
 
-        // Send the message.
-        if let Err(e) = self.state.sender.lock().await.send(message).await {
-            let mut pending = self.state.pending.lock().await;
-            pending.remove(&id);
-            return Err(e);
-        }
+        let on_drop = OnReceiverDrop::new(&message.id, entries);
 
-        // Wait for response with timeout.
-        match timeout(timeout_duration, receiver).await {
-            Ok(Ok(result)) => result,
-            // Timeout occurred.
-            Err(_) => {
-                let mut pending = self.state.pending.lock().await;
-                pending.remove(&id);
-                Err(RpcError::error(ErrKind::Timeout))
+        self.state.sender.lock().await.send(message).await?;
+
+        match timeout(timeout_duration, ReceiveFuture::new(&pinned_state)).await {
+            Ok(result) => {
+                on_drop.do_nothing();
+                result
             }
-            _ => unreachable!(),
+            Err(_) => Err(RpcError::error(ErrKind::Timeout)),
         }
     }
 }
@@ -424,7 +549,7 @@ where
 
         self.state.abort_lock.wait().await;
 
-        self.task.abort();
+        self.receiver_task.abort();
 
         self.state.sender.lock().await.close().await?;
 

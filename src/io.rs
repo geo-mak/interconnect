@@ -22,12 +22,12 @@ impl IORingSegment {
     }
 
     #[inline(always)]
-    unsafe fn pub_ref(&self) -> IOSegment<'_> {
+    const unsafe fn pub_ref(&self) -> IOSegment<'_> {
         IOSegment { seg: self }
     }
 
     #[inline(always)]
-    unsafe fn buffer(&self) -> &mut Vec<u8> {
+    const unsafe fn buffer(&self) -> &mut Vec<u8> {
         unsafe { &mut *self.data.get() }
     }
 
@@ -108,12 +108,12 @@ impl<'a> PublishedSegment<'a> {
     }
 
     #[inline(always)]
-    pub(crate) fn data(&self) -> &Vec<u8> {
+    pub(crate) const fn data(&self) -> &Vec<u8> {
         unsafe { self.seg.buffer() }
     }
 
     #[inline(always)]
-    pub(crate) fn data_mut(&mut self) -> &mut Vec<u8> {
+    pub(crate) const fn data_mut(&mut self) -> &mut Vec<u8> {
         unsafe { self.seg.buffer() }
     }
 

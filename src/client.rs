@@ -70,58 +70,15 @@ pub trait AsyncRpcClient {
     fn shutdown(&mut self) -> impl Future<Output = RpcResult<()>>;
 }
 
-struct PendingStore {
-    entries: parking_lot::Mutex<HashMap<Uuid, InlinedReceiverState>>,
-}
-
-impl PendingStore {
-    #[inline(always)]
-    fn new(capacity: usize) -> Self {
-        Self {
-            entries: parking_lot::Mutex::new(HashMap::with_capacity(capacity)),
-        }
-    }
-
-    #[inline(always)]
-    fn store(&self, id: Uuid, recv_state: &ReceiverState) {
-        self.entries.lock().insert(
-            id,
-            InlinedReceiverState {
-                stack_ptr: recv_state.into(),
-            },
-        );
-    }
-
-    #[inline(always)]
-    fn remove(&self, id: &Uuid) {
-        self.entries.lock().remove(id);
-    }
-
-    #[inline]
-    fn set_ready(&self, id: &Uuid, value: RpcResult<Response>) {
-        // Safety: Locking is required to prevent receiver from dropping the state while in use.
-        let mut map_lock = self.entries.lock();
-        if let Some(mut state_ref) = map_lock.remove(&id) {
-            let state_ptr = unsafe { state_ref.stack_ptr.as_mut() };
-
-            unsafe { *state_ptr.received_value.get() = Some(value) };
-
-            if state_ptr.state.fetch_or(RCV_READY, AcqRel) == RCV_WAIT {
-                unsafe { (*state_ptr.waker.get()).wake_by_ref() };
-            }
-        }
-    }
-}
-
 enum Response {
     Pong,
     Reply(Reply),
 }
 
-struct ReceiverState {
+struct Oneshot {
     state: AtomicU8,
     waker: UnsafeCell<Waker>,
-    received_value: UnsafeCell<Option<RpcResult<Response>>>,
+    value: UnsafeCell<Option<RpcResult<Response>>>,
     _pin: PhantomPinned,
 }
 
@@ -129,48 +86,70 @@ const RCV_WAIT: u8 = 0;
 const RCV_SET: u8 = 1;
 const RCV_READY: u8 = 2;
 
-impl ReceiverState {
+impl Oneshot {
     #[inline(always)]
     const fn new() -> Self {
         Self {
             state: AtomicU8::new(RCV_WAIT),
             waker: UnsafeCell::new(NOOP_WAKER),
-            received_value: UnsafeCell::new(None),
+            value: UnsafeCell::new(None),
             _pin: PhantomPinned,
         }
     }
 }
 
-struct InlinedReceiverState {
-    stack_ptr: NonNull<ReceiverState>,
+struct OneshotSender {
+    stack_ptr: NonNull<Oneshot>,
 }
 
-unsafe impl Send for InlinedReceiverState {}
-unsafe impl Sync for InlinedReceiverState {}
+unsafe impl Send for OneshotSender {}
+unsafe impl Sync for OneshotSender {}
 
-struct ReceiveFuture<'a> {
-    receive_state: &'a ReceiverState,
-}
-
-impl<'a> ReceiveFuture<'a> {
+impl OneshotSender {
     #[inline(always)]
-    fn new(recv_state: &'a ReceiverState) -> Self {
+    const fn new(oneshot: &Oneshot) -> Self {
         Self {
-            receive_state: recv_state,
+            stack_ptr: NonNull::from_ref(oneshot),
+        }
+    }
+
+    #[inline]
+    fn send(mut self, value: RpcResult<Response>) {
+        let oneshot = unsafe { self.stack_ptr.as_mut() };
+
+        let value_ptr = oneshot.value.get();
+
+        debug_assert!(unsafe { (*value_ptr).is_none() });
+
+        unsafe { value_ptr.write(Some(value)) };
+
+        if oneshot.state.fetch_or(RCV_READY, AcqRel) == RCV_WAIT {
+            unsafe { (*oneshot.waker.get()).wake_by_ref() };
         }
     }
 }
 
-impl<'a> Future for ReceiveFuture<'a> {
+struct OneshotReceiver<'a> {
+    oneshot: &'a Oneshot,
+}
+
+impl<'a> OneshotReceiver<'a> {
+    #[inline(always)]
+    const fn new(oneshot: &'a Oneshot) -> Self {
+        Self { oneshot }
+    }
+}
+
+impl<'a> Future for OneshotReceiver<'a> {
     type Output = RpcResult<Response>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let receive = unsafe { self.get_unchecked_mut().receive_state };
-        let state = &receive.state;
+        let oneshot = unsafe { self.get_unchecked_mut().oneshot };
+        let state = &oneshot.state;
 
         match state.compare_exchange(RCV_WAIT, RCV_SET, Acquire, Acquire) {
             Ok(_) => {
-                let waker_ptr = receive.waker.get();
+                let waker_ptr = oneshot.waker.get();
                 unsafe { *waker_ptr = cx.waker().clone() };
 
                 match state.compare_exchange(RCV_SET, RCV_WAIT, AcqRel, Acquire) {
@@ -182,18 +161,18 @@ impl<'a> Future for ReceiveFuture<'a> {
         }
 
         // Safety: RCV_READY indicates that writing has been completed.
-        let value_ptr = receive.received_value.get();
+        let value_ptr = oneshot.value.get();
         let received_value = unsafe { (*value_ptr).take().unwrap() };
         Poll::Ready(received_value)
     }
 }
 
-struct OnReceiverDrop<'a> {
+struct OnOneshotDrop<'a> {
     id: &'a Uuid,
     entries: &'a PendingStore,
 }
 
-impl<'a> OnReceiverDrop<'a> {
+impl<'a> OnOneshotDrop<'a> {
     #[inline(always)]
     const fn new(id: &'a Uuid, entries: &'a PendingStore) -> Self {
         Self { id, entries }
@@ -205,9 +184,41 @@ impl<'a> OnReceiverDrop<'a> {
     }
 }
 
-impl<'a> Drop for OnReceiverDrop<'a> {
+impl<'a> Drop for OnOneshotDrop<'a> {
     fn drop(&mut self) {
         self.entries.remove(&self.id);
+    }
+}
+
+struct PendingStore {
+    entries: parking_lot::Mutex<HashMap<Uuid, OneshotSender>>,
+}
+
+impl PendingStore {
+    #[inline(always)]
+    fn new(capacity: usize) -> Self {
+        Self {
+            entries: parking_lot::Mutex::new(HashMap::with_capacity(capacity)),
+        }
+    }
+
+    #[inline(always)]
+    fn store(&self, id: Uuid, sender: OneshotSender) {
+        self.entries.lock().insert(id, sender);
+    }
+
+    #[inline(always)]
+    fn remove(&self, id: &Uuid) {
+        self.entries.lock().remove(id);
+    }
+
+    #[inline]
+    fn send_back(&self, id: &Uuid, value: RpcResult<Response>) {
+        // Safety: Locking is required to prevent receiver from dropping the state while in use.
+        let mut map_lock = self.entries.lock();
+        if let Some(sender) = map_lock.remove(&id) {
+            sender.send(value)
+        }
     }
 }
 
@@ -394,10 +405,10 @@ where
         match message.kind {
             MessageType::Reply(reply) => {
                 let response = Response::Reply(reply);
-                state.pending.set_ready(&message.id, Ok(response));
+                state.pending.send_back(&message.id, Ok(response));
             }
-            MessageType::Error(err) => state.pending.set_ready(&message.id, Err(err)),
-            MessageType::Pong => state.pending.set_ready(&message.id, Ok(Response::Pong)),
+            MessageType::Error(err) => state.pending.send_back(&message.id, Err(err)),
+            MessageType::Pong => state.pending.send_back(&message.id, Ok(Response::Pong)),
             MessageType::Call(call) => {
                 if let Some(_lock) = state.abort_lock.acquire() {
                     let mut context = ClientContext::new(&message.id, state);
@@ -425,17 +436,17 @@ where
         timeout_duration: Duration,
     ) -> RpcResult<Response> {
         // Safety: This value must not move.
-        let pinned_state = ReceiverState::new();
+        let pinned_oneshot = Oneshot::new();
 
         let entries = &self.state.pending;
 
-        entries.store(message.id, &pinned_state);
+        entries.store(message.id, OneshotSender::new(&pinned_oneshot));
 
-        let on_drop = OnReceiverDrop::new(&message.id, entries);
+        let on_drop = OnOneshotDrop::new(&message.id, entries);
 
         self.state.sender.lock().await.send(message).await?;
 
-        match timeout(timeout_duration, ReceiveFuture::new(&pinned_state)).await {
+        match timeout(timeout_duration, OneshotReceiver::new(&pinned_oneshot)).await {
             Ok(result) => {
                 on_drop.do_nothing();
                 result

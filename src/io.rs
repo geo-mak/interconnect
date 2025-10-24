@@ -85,7 +85,7 @@ impl<'a> Drop for IOSegment<'a> {
 
 /// A published segment that contains data.
 ///
-/// Data can be accessed via `data` method.
+/// Data can be accessed via `data` methods.
 ///
 /// After handling the data, `recycle` method must be called to drive the ring
 /// and get the next published segment.
@@ -94,7 +94,7 @@ impl<'a> Drop for IOSegment<'a> {
 /// Not calling `recycle` will never set the segment free, and a subsequent call to `receive`
 /// will return the same segment.
 ///
-/// The segment will panic when `recycle` is called for the second time on the same segment.
+/// The segment will panic when `recycle` is called on the same segment more than once.
 pub(crate) struct PublishedSegment<'a> {
     io_ring: &'a IORing,
     seg: &'a IORingSegment,
@@ -102,18 +102,24 @@ pub(crate) struct PublishedSegment<'a> {
 }
 
 impl<'a> PublishedSegment<'a> {
+    #[inline(always)]
     const fn new(io_ring: &'a IORing, seg: &'a IORingSegment, read: usize) -> Self {
         Self { io_ring, seg, read }
     }
 
     #[inline(always)]
-    pub(crate) fn data(&self) -> &mut Vec<u8> {
+    pub(crate) fn data(&self) -> &Vec<u8> {
+        unsafe { self.seg.buffer() }
+    }
+
+    #[inline(always)]
+    pub(crate) fn data_mut(&mut self) -> &mut Vec<u8> {
         unsafe { self.seg.buffer() }
     }
 
     /// Frees the segment to be used by producers.
     ///
-    /// This method will panic if it is called on a recycled segment.
+    /// This method will panic if it is called on the same segment more than once.
     #[inline(always)]
     pub(crate) fn recycle(self) {
         // Once all pathways get proper shape, it can be made in debug mode only.
@@ -299,8 +305,8 @@ mod tests_io_ring {
     #[test]
     fn test_io_ring_read_empty() {
         let ring = IORing::new(1, 0);
-        let n = ring.receive();
-        assert!(n.is_none());
+        let published = ring.receive();
+        assert!(published.is_none());
     }
 
     #[test]
@@ -316,16 +322,16 @@ mod tests_io_ring {
         let msgs = [b"Alpha", b"Betaa", b"Gamma"];
 
         for m in msgs {
-            let mut seg = ring.acquire().expect("expected free segment");
-            seg.write(m).unwrap();
-            seg.publish();
+            let mut segment = ring.acquire().expect("expected free segment");
+            segment.write(m).unwrap();
+            segment.publish();
         }
 
         let mut dst = [0u8; 15];
         let mut pos = 0;
 
         while let Some(published) = ring.receive() {
-            dst[pos..pos + 5].copy_from_slice(&published.data());
+            dst[pos..pos + 5].copy_from_slice(published.data());
             published.recycle();
             pos += 5;
         }
@@ -345,13 +351,13 @@ mod tests_io_ring {
 
             seg.publish();
 
-            let pub_seg = ring.receive().unwrap();
-            dst.copy_from_slice(&pub_seg.data());
+            let published = ring.receive().unwrap();
+            dst.copy_from_slice(published.data());
 
             let num = u16::from_le_bytes(dst);
             assert_eq!(num, i + 1);
 
-            pub_seg.recycle();
+            published.recycle();
         }
     }
 
@@ -365,9 +371,9 @@ mod tests_io_ring {
         let t1 = thread::spawn(move || {
             barrier_1.wait();
             for _ in 0..30 {
-                let mut seg = ring_1.acquire().unwrap();
-                seg.write("thread1".as_bytes()).unwrap();
-                seg.publish();
+                let mut segment = ring_1.acquire().unwrap();
+                segment.write("thread1".as_bytes()).unwrap();
+                segment.publish();
             }
         });
 
@@ -376,9 +382,9 @@ mod tests_io_ring {
         let t2 = thread::spawn(move || {
             barrier_2.wait();
             for _ in 0..30 {
-                let mut seg = ring_2.acquire().unwrap();
-                seg.write("thread2".as_bytes()).unwrap();
-                seg.publish();
+                let mut segment = ring_2.acquire().unwrap();
+                segment.write("thread2".as_bytes()).unwrap();
+                segment.publish();
             }
         });
 
@@ -387,9 +393,9 @@ mod tests_io_ring {
         let t3 = thread::spawn(move || {
             barrier_3.wait();
             for _ in 0..30 {
-                let mut seg = ring_3.acquire().unwrap();
-                seg.write("thread3".as_bytes()).unwrap();
-                seg.publish();
+                let mut segment = ring_3.acquire().unwrap();
+                segment.write("thread3".as_bytes()).unwrap();
+                segment.publish();
             }
         });
 
@@ -398,9 +404,9 @@ mod tests_io_ring {
         let t4 = thread::spawn(move || {
             barrier_4.wait();
             for _ in 0..30 {
-                let mut seg = ring_4.acquire().unwrap();
-                seg.write("thread4".as_bytes()).unwrap();
-                seg.publish();
+                let mut segment = ring_4.acquire().unwrap();
+                segment.write("thread4".as_bytes()).unwrap();
+                segment.publish();
             }
         });
 
@@ -412,7 +418,7 @@ mod tests_io_ring {
         let mut counts = [0usize; 4];
 
         while let Some(published) = ring.receive() {
-            match std::str::from_utf8(&published.data()).expect("Unreadable data in the ring") {
+            match std::str::from_utf8(published.data()).expect("Unreadable data in the ring") {
                 "thread1" => counts[0] += 1,
                 "thread2" => counts[1] += 1,
                 "thread3" => counts[2] += 1,

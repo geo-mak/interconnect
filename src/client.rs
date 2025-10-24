@@ -100,8 +100,8 @@ impl PendingStore {
     #[inline]
     fn set_ready(&self, id: &Uuid, value: RpcResult<Response>) {
         // Safety: Locking is required to prevent receiver from dropping the state while in use.
-        let mut map = self.entries.lock();
-        if let Some(state_ref) = map.get_mut(id) {
+        let mut map_lock = self.entries.lock();
+        if let Some(mut state_ref) = map_lock.remove(&id) {
             let state_ptr = unsafe { state_ref.stack_ptr.as_mut() };
 
             unsafe { *state_ptr.received_value.get() = Some(value) };
@@ -109,8 +109,6 @@ impl PendingStore {
             if state_ptr.state.fetch_or(RCV_READY, AcqRel) == RCV_WAIT {
                 unsafe { (*state_ptr.waker.get()).wake_by_ref() };
             }
-
-            map.remove(&id);
         }
     }
 }

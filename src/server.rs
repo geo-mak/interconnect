@@ -24,7 +24,7 @@ use crate::stream::{
     AsyncRpcReceiver, AsyncRpcSender, EncryptedRpcReceiver, EncryptedRpcSender, RpcReceiver,
     RpcSender,
 };
-use crate::sync::{DynamicLatch, IList, INode};
+use crate::sync::{DynamicLatch, IList, INode, NOOP_WAKER};
 use crate::transport::{TransportLayer, TransportListener};
 
 thread_local! {
@@ -102,7 +102,7 @@ impl Tasks {
 
 struct TaskControlState {
     state: AtomicU8,
-    waker: UnsafeCell<Option<Waker>>,
+    waker: UnsafeCell<Waker>,
 }
 
 const WAIT: u8 = 0b00;
@@ -118,21 +118,16 @@ impl TaskControlState {
     const fn new() -> Self {
         Self {
             state: AtomicU8::new(WAIT),
-            waker: UnsafeCell::new(None),
+            waker: UnsafeCell::new(NOOP_WAKER),
         }
     }
 
-    /// Sets the state to canceled and wakes the stored waker if any.
-    ///
-    /// Safe to call concurrently while polling.
     #[inline]
     fn cancel(&self) {
         match self.state.fetch_or(CANCEL, AcqRel) {
-            WAIT => {
-                if let Some(waker) = unsafe { (*self.waker.get()).take() } {
-                    waker.wake();
-                }
-            }
+            WAIT => unsafe {
+                (*self.waker.get()).wake_by_ref();
+            },
             other => {
                 debug_assert!(other == SET || other == CANCEL || other == SET_CANCEL);
             }
@@ -170,38 +165,32 @@ where
             return Poll::Ready(Ok(x));
         }
 
-        let observed = match self
-            .control
-            .state
-            .compare_exchange(WAIT, SET, AcqRel, Acquire)
-        {
+        let state = &self.control.state;
+
+        let observed = match state.compare_exchange(WAIT, SET, AcqRel, Acquire) {
             Ok(prev) => prev,
             Err(current) => current,
         };
 
         match observed {
             WAIT => unsafe {
-                match &*self.control.waker.get() {
-                    Some(prev) if prev.will_wake(cx.waker()) => (),
-                    _ => *self.control.waker.get() = Some(cx.waker().clone()),
+                let waker_ptr = self.control.waker.get();
+
+                if !(*waker_ptr).will_wake(cx.waker()) {
+                    *waker_ptr = cx.waker().clone()
                 }
-                // If the state transitioned to include the `CANCEL` flag,
-                // this means that `cancel()` has been called concurrently,
-                if let Err(current) = self
-                    .control
-                    .state
-                    .compare_exchange(SET, WAIT, AcqRel, Acquire)
-                {
-                    debug_assert_eq!(current, SET_CANCEL);
-                    return Poll::Ready(Err(Canceled));
+
+                match state.compare_exchange(SET, WAIT, AcqRel, Acquire) {
+                    Ok(_) => Poll::Pending,
+                    Err(current) => {
+                        debug_assert!(current == SET_CANCEL);
+                        Poll::Ready(Err(Canceled))
+                    }
                 }
             },
-            CANCEL | SET_CANCEL => {
-                return Poll::Ready(Err(Canceled));
-            }
+            CANCEL | SET_CANCEL => Poll::Ready(Err(Canceled)),
             _ => unreachable!("Task is being polled concurrently"),
         }
-        Poll::Pending
     }
 }
 

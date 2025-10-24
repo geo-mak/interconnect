@@ -1,5 +1,6 @@
 use std::cell::UnsafeCell;
 use std::collections::HashMap;
+use std::hash::Hash;
 use std::marker::PhantomPinned;
 use std::mem;
 use std::pin::Pin;
@@ -70,15 +71,10 @@ pub trait AsyncRpcClient {
     fn shutdown(&mut self) -> impl Future<Output = RpcResult<()>>;
 }
 
-enum Response {
-    Pong,
-    Reply(Reply),
-}
-
-struct Oneshot {
+struct Oneshot<T> {
     state: AtomicU8,
     waker: UnsafeCell<Waker>,
-    value: UnsafeCell<Option<RpcResult<Response>>>,
+    value: UnsafeCell<Option<T>>,
     _pin: PhantomPinned,
 }
 
@@ -86,7 +82,7 @@ const RCV_WAIT: u8 = 0;
 const RCV_SET: u8 = 1;
 const RCV_READY: u8 = 2;
 
-impl Oneshot {
+impl<T> Oneshot<T> {
     #[inline(always)]
     const fn new() -> Self {
         Self {
@@ -98,23 +94,23 @@ impl Oneshot {
     }
 }
 
-struct OneshotSender {
-    stack_ptr: NonNull<Oneshot>,
+struct OneshotSender<T> {
+    stack_ptr: NonNull<Oneshot<T>>,
 }
 
-unsafe impl Send for OneshotSender {}
-unsafe impl Sync for OneshotSender {}
+unsafe impl<T> Send for OneshotSender<T> {}
+unsafe impl<T> Sync for OneshotSender<T> {}
 
-impl OneshotSender {
+impl<T> OneshotSender<T> {
     #[inline(always)]
-    const fn new(oneshot: &Oneshot) -> Self {
+    const fn new(oneshot: &Oneshot<T>) -> Self {
         Self {
             stack_ptr: NonNull::from_ref(oneshot),
         }
     }
 
     #[inline]
-    fn send(mut self, value: RpcResult<Response>) {
+    fn send(mut self, value: T) {
         let oneshot = unsafe { self.stack_ptr.as_mut() };
 
         let value_ptr = oneshot.value.get();
@@ -129,19 +125,19 @@ impl OneshotSender {
     }
 }
 
-struct OneshotReceiver<'a> {
-    oneshot: &'a Oneshot,
+struct OneshotReceiver<'a, T> {
+    oneshot: &'a Oneshot<T>,
 }
 
-impl<'a> OneshotReceiver<'a> {
+impl<'a, T> OneshotReceiver<'a, T> {
     #[inline(always)]
-    const fn new(oneshot: &'a Oneshot) -> Self {
+    const fn new(oneshot: &'a Oneshot<T>) -> Self {
         Self { oneshot }
     }
 }
 
-impl<'a> Future for OneshotReceiver<'a> {
-    type Output = RpcResult<Response>;
+impl<'a, T> Future for OneshotReceiver<'a, T> {
+    type Output = T;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let oneshot = unsafe { self.get_unchecked_mut().oneshot };
@@ -167,14 +163,20 @@ impl<'a> Future for OneshotReceiver<'a> {
     }
 }
 
-struct OnOneshotDrop<'a> {
-    id: &'a Uuid,
-    entries: &'a PendingStore,
+struct OnOneshotDrop<'a, I, T>
+where
+    I: Hash + Eq,
+{
+    id: &'a I,
+    entries: &'a PendingStore<I, T>,
 }
 
-impl<'a> OnOneshotDrop<'a> {
+impl<'a, I, T> OnOneshotDrop<'a, I, T>
+where
+    I: Hash + Eq,
+{
     #[inline(always)]
-    const fn new(id: &'a Uuid, entries: &'a PendingStore) -> Self {
+    const fn new(id: &'a I, entries: &'a PendingStore<I, T>) -> Self {
         Self { id, entries }
     }
 
@@ -184,17 +186,23 @@ impl<'a> OnOneshotDrop<'a> {
     }
 }
 
-impl<'a> Drop for OnOneshotDrop<'a> {
+impl<'a, I, T> Drop for OnOneshotDrop<'a, I, T>
+where
+    I: Hash + Eq,
+{
     fn drop(&mut self) {
         self.entries.remove(&self.id);
     }
 }
 
-struct PendingStore {
-    entries: parking_lot::Mutex<HashMap<Uuid, OneshotSender>>,
+struct PendingStore<I, T> {
+    entries: parking_lot::Mutex<HashMap<I, OneshotSender<T>>>,
 }
 
-impl PendingStore {
+impl<I, T> PendingStore<I, T>
+where
+    I: Hash + Eq,
+{
     #[inline(always)]
     fn new(capacity: usize) -> Self {
         Self {
@@ -203,17 +211,17 @@ impl PendingStore {
     }
 
     #[inline(always)]
-    fn store(&self, id: Uuid, sender: OneshotSender) {
+    fn store(&self, id: I, sender: OneshotSender<T>) {
         self.entries.lock().insert(id, sender);
     }
 
     #[inline(always)]
-    fn remove(&self, id: &Uuid) {
+    fn remove(&self, id: &I) {
         self.entries.lock().remove(id);
     }
 
     #[inline]
-    fn send_back(&self, id: &Uuid, value: RpcResult<Response>) {
+    fn send_back(&self, id: &I, value: T) {
         // Safety: Locking is required to prevent receiver from dropping the state while in use.
         let mut map_lock = self.entries.lock();
         if let Some(sender) = map_lock.remove(&id) {
@@ -222,9 +230,14 @@ impl PendingStore {
     }
 }
 
+enum Response {
+    Pong,
+    Reply(Reply),
+}
+
 struct ClientState<S, H, E> {
     abort_lock: DynamicLatch,
-    pending: PendingStore,
+    pending: PendingStore<Uuid, RpcResult<Response>>,
     sender: Mutex<S>,
     service: H,
     reporter: E,

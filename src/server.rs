@@ -1,5 +1,6 @@
 use std::cell::{Cell, UnsafeCell};
 use std::fmt::Debug;
+use std::marker::PhantomPinned;
 use std::mem;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -103,6 +104,7 @@ impl Tasks {
 struct TaskControlState {
     state: AtomicU8,
     waker: UnsafeCell<Waker>,
+    _pin: PhantomPinned,
 }
 
 const WAIT: u8 = 0b00;
@@ -119,6 +121,7 @@ impl TaskControlState {
         Self {
             state: AtomicU8::new(WAIT),
             waker: UnsafeCell::new(NOOP_WAKER),
+            _pin: PhantomPinned,
         }
     }
 

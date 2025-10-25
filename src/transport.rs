@@ -68,7 +68,7 @@ impl<A: AsRef<Path>> TransportListener<A> for UnixListener {
 /// - They provide two modes of operation: single-mode and split-mode.
 ///
 /// - In split-mode, the two halves must be owned handles, that allow **parallel** access.
-pub trait TransportLayer: AsyncIORead + AsyncIOWrite + Send + Sync + Unpin {
+pub trait TransportLayer: AsyncIORead + AsyncIOWrite + Send + Unpin {
     type OwnedReadHalf: AsyncIORead + Send + Sync + Unpin;
     type OwnedWriteHalf: AsyncIOWrite + Send + Sync + Unpin;
     fn into_split(self) -> (Self::OwnedReadHalf, Self::OwnedWriteHalf);

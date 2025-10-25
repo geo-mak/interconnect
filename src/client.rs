@@ -314,7 +314,7 @@ where
 /// which makes it very lightweight at the cost of some synchronization overhead.
 pub struct RpcAsyncClient<S, H, E> {
     state: Arc<ClientState<S, H, E>>,
-    receiver_task: JoinHandle<()>,
+    recv_task: JoinHandle<()>,
 }
 
 impl<S, H, E> RpcAsyncClient<S, H, E>
@@ -336,14 +336,16 @@ where
         negotiation::initiate(&mut transport, RpcCapability::new(1, false)).await?;
 
         let (r, w) = transport.into_split();
-        RpcAsyncClient::connect_with_parts(
+
+        let instance = RpcAsyncClient::new(
             RpcSender::new(w),
             RpcReceiver::new(r),
             call_handler,
             capacity,
             reporter,
-        )
-        .await
+        );
+
+        Ok(instance)
     }
 
     #[inline]
@@ -362,56 +364,49 @@ where
 
         let (r, w) = transport.into_split();
 
-        RpcAsyncClient::connect_with_parts(
+        let instance = RpcAsyncClient::new(
             EncryptedRpcSender::new(w, w_key),
             EncryptedRpcReceiver::new(r, r_key),
             call_handler,
             capacity,
             reporter,
-        )
-        .await
+        );
+
+        Ok(instance)
     }
 
-    #[inline(always)]
-    const fn new(state: Arc<ClientState<S, H, E>>, recv_task: tokio::task::JoinHandle<()>) -> Self {
-        Self {
-            state,
-            receiver_task: recv_task,
-        }
-    }
-
-    async fn connect_with_parts<R>(
+    fn new<R>(
         sender: S,
         mut receiver: R,
         handler: H,
         cap: usize,
         reporter: E,
-    ) -> RpcResult<RpcAsyncClient<S, H, E>>
+    ) -> RpcAsyncClient<S, H, E>
     where
         S: AsyncRpcSender + Send + 'static,
         R: AsyncRpcReceiver + Send + 'static,
     {
-        let client_state = Arc::new(ClientState::new(handler, sender, cap, reporter));
-        let client_state_c = Arc::clone(&client_state);
+        let state = Arc::new(ClientState::new(handler, sender, cap, reporter));
+        let client_state = Arc::clone(&state);
 
-        let receiver_task = tokio::spawn(async move {
+        let recv_task = tokio::spawn(async move {
             loop {
                 match receiver.receive().await {
                     Ok(message) => {
-                        if let Err(err) = Self::process_message(&client_state_c, message).await {
-                            client_state_c.reporter.error("Handling error", &err);
+                        if let Err(err) = Self::process_message(&client_state, message).await {
+                            client_state.reporter.error("Handling error", &err);
                             break;
                         }
                     }
                     Err(err) => {
-                        client_state_c.reporter.error("Receiving error", &err);
+                        client_state.reporter.error("Receiving error", &err);
                         break;
                     }
                 }
             }
         });
 
-        Ok(RpcAsyncClient::new(client_state, receiver_task))
+        Self { state, recv_task }
     }
 
     async fn process_message(state: &Arc<ClientState<S, H, E>>, message: Message) -> RpcResult<()> {
@@ -571,7 +566,7 @@ where
 
         self.state.abort_lock.wait().await;
 
-        self.receiver_task.abort();
+        self.recv_task.abort();
 
         self.state.sender.lock().await.close().await?;
 

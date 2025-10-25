@@ -74,7 +74,7 @@ impl<T> RpcSender<T> {
 
 impl<T> AsyncRpcSender for RpcSender<T>
 where
-    T: AsyncIOWrite + Send + Sync + Unpin,
+    T: AsyncIOWrite + Send + Unpin,
 {
     /// Encodes a message as RPC frame and writes it into the I/O stream.
     async fn send(&mut self, message: &Message) -> RpcResult<()> {
@@ -128,7 +128,7 @@ impl<T> EncryptedRpcSender<T> {
 
 impl<T> AsyncRpcSender for EncryptedRpcSender<T>
 where
-    T: AsyncIOWrite + Send + Sync + Unpin,
+    T: AsyncIOWrite + Send + Unpin,
 {
     /// Encodes a message as RPC frame and writes it into the I/O stream.
     async fn send(&mut self, message: &Message) -> RpcResult<()> {
@@ -182,7 +182,7 @@ impl<T> RpcReceiver<T> {
 
 impl<T> AsyncRpcReceiver for RpcReceiver<T>
 where
-    T: AsyncIORead + Send + Sync + Unpin,
+    T: AsyncIORead + Send + Unpin,
 {
     /// Reads and validates the RPC frame and decodes its data as a message.
     /// This method is not cancellation-safe, and it should not be awaited as part of selection race.
@@ -247,7 +247,7 @@ impl<T> EncryptedRpcReceiver<T> {
 
 impl<T> AsyncRpcReceiver for EncryptedRpcReceiver<T>
 where
-    T: AsyncIORead + Send + Sync + Unpin,
+    T: AsyncIORead + Send + Unpin,
 {
     /// Reads and validates the RPC frame and decodes its data as a message.
     /// This method is not cancellation-safe, and it should not be awaited as part of selection race.

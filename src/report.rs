@@ -87,48 +87,17 @@ impl<T> ReportMaterial for T where T: Display {}
 /// - The no-op implementation of reporter is `()`.
 /// - The no-op implementation of `ReportMaterial` is `NoMaterial`.
 pub trait Reporter {
-    fn trace<M>(&self, description: &str, material: &M)
-    where
-        M: ReportMaterial;
-    fn info<M>(&self, description: &str, material: &M)
-    where
-        M: ReportMaterial;
-    fn alert<M>(&self, description: &str, material: &M)
-    where
-        M: ReportMaterial;
-    fn error<M>(&self, description: &str, material: &M)
-    where
-        M: ReportMaterial;
+    fn trace<M: ReportMaterial>(&self, description: &str, material: &M);
+    fn info<M: ReportMaterial>(&self, description: &str, material: &M);
+    fn alert<M: ReportMaterial>(&self, description: &str, material: &M);
+    fn error<M: ReportMaterial>(&self, description: &str, material: &M);
 }
 
 impl Reporter for () {
-    fn trace<M>(&self, _description: &str, _material: &M)
-    where
-        M: ReportMaterial,
-    {
-        ()
-    }
-
-    fn info<M>(&self, _description: &str, _material: &M)
-    where
-        M: ReportMaterial,
-    {
-        ()
-    }
-
-    fn alert<M>(&self, _description: &str, _material: &M)
-    where
-        M: ReportMaterial,
-    {
-        ()
-    }
-
-    fn error<M>(&self, _description: &str, _material: &M)
-    where
-        M: ReportMaterial,
-    {
-        ()
-    }
+    fn trace<M: ReportMaterial>(&self, _description: &str, _material: &M) {}
+    fn info<M: ReportMaterial>(&self, _description: &str, _material: &M) {}
+    fn alert<M: ReportMaterial>(&self, _description: &str, _material: &M) {}
+    fn error<M: ReportMaterial>(&self, _description: &str, _material: &M) {}
 }
 
 thread_local! {
@@ -157,65 +126,53 @@ impl STDIOReporter {
 
 impl Reporter for STDIOReporter {
     #[inline]
-    fn trace<M>(&self, description: &str, material: &M)
-    where
-        M: ReportMaterial,
-    {
+    fn trace<M: ReportMaterial>(&self, description: &str, material: &M) {
         REPORT_LOCAL_CACHE.with_borrow_mut(|cache| {
             let _ = cache.write_fmt(format_args!(
                 "{}TRACE: {description}. {material}{}\n",
                 colors::BLUE,
                 colors::RESET
             ));
-            let _ = self.out.lock().write_all(&cache);
+            let _ = self.out.lock().write_all(cache);
             cache.clear();
         });
     }
 
     #[inline]
-    fn info<M>(&self, description: &str, material: &M)
-    where
-        M: ReportMaterial,
-    {
+    fn info<M: ReportMaterial>(&self, description: &str, material: &M) {
         REPORT_LOCAL_CACHE.with_borrow_mut(|cache| {
             let _ = cache.write_fmt(format_args!(
                 "{}INFO: {description}. {material}{}\n",
                 colors::GREEN,
                 colors::RESET
             ));
-            let _ = self.out.lock().write_all(&cache);
+            let _ = self.out.lock().write_all(cache);
             cache.clear();
         });
     }
 
     #[inline]
-    fn alert<M>(&self, description: &str, material: &M)
-    where
-        M: ReportMaterial,
-    {
+    fn alert<M: ReportMaterial>(&self, description: &str, material: &M) {
         REPORT_LOCAL_CACHE.with_borrow_mut(|cache| {
             let _ = cache.write_fmt(format_args!(
                 "{}ALERT: {description}. {material}{}\n",
                 colors::ORANGE,
                 colors::RESET
             ));
-            let _ = self.out.lock().write_all(&cache);
+            let _ = self.out.lock().write_all(cache);
             cache.clear();
         });
     }
 
     #[inline]
-    fn error<M>(&self, description: &str, material: &M)
-    where
-        M: ReportMaterial,
-    {
+    fn error<M: ReportMaterial>(&self, description: &str, material: &M) {
         REPORT_LOCAL_CACHE.with_borrow_mut(|cache| {
             let _ = cache.write_fmt(format_args!(
                 "{}ERROR: {description}. {material}{}\n",
                 colors::BRIGHT_RED,
                 colors::RESET
             ));
-            let _ = self.err.lock().write_all(&cache);
+            let _ = self.err.lock().write_all(cache);
             cache.clear();
         });
     }

@@ -190,10 +190,7 @@ impl Message {
     }
 
     /// Encodes a value to binary format.
-    pub fn encode_to_vec<T>(value: &T) -> RpcResult<Vec<u8>>
-    where
-        T: Serialize,
-    {
+    pub fn encode_to_vec<T: Serialize>(value: &T) -> RpcResult<Vec<u8>> {
         bincode::serde::encode_to_vec(value, CONFIG).map_err(Into::into)
     }
 
@@ -217,19 +214,13 @@ impl Message {
     }
 
     /// Creates a request message with typed parameters.
-    pub fn call_with<P>(method: u16, params: &P) -> RpcResult<Self>
-    where
-        P: Serialize,
-    {
+    pub fn call_with<P: Serialize>(method: u16, params: &P) -> RpcResult<Self> {
         let data = Self::encode_to_vec(&params)?;
         Ok(Self::call(Call { method, data }))
     }
 
     /// Creates a response message with typed value.
-    pub fn reply_with<R>(id: MessageID, value: &R) -> RpcResult<Self>
-    where
-        R: Serialize,
-    {
+    pub fn reply_with<R: Serialize>(id: MessageID, value: &R) -> RpcResult<Self> {
         let data = Self::encode_to_vec(&value)?;
         Ok(Self::reply(id, Reply { data }))
     }

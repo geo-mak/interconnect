@@ -189,7 +189,7 @@ where
     I: Hash + Eq,
 {
     fn drop(&mut self) {
-        self.entries.remove(&self.id);
+        self.entries.remove(self.id);
     }
 }
 
@@ -222,7 +222,7 @@ where
     fn send_back(&self, id: &I, value: T) {
         // Safety: Locking is required to prevent receiver from dropping the state while in use.
         let mut map_lock = self.entries.lock();
-        if let Some(sender) = map_lock.remove(&id) {
+        if let Some(sender) = map_lock.remove(id) {
             sender.send(value)
         }
     }

@@ -17,11 +17,9 @@ use tokio::time::timeout;
 
 use serde::{Deserialize, Serialize};
 
-use uuid::Uuid;
-
 use crate::capability::{RpcCapability, negotiation};
 use crate::error::{ErrKind, RpcError, RpcResult};
-use crate::message::{Call, Message, MessageType, Reply};
+use crate::message::{Call, Message, MessageID, MessageType, Reply};
 use crate::report::Reporter;
 use crate::service::{CallContext, RpcService};
 use crate::stream::{
@@ -237,7 +235,7 @@ enum Response {
 
 struct ClientState<S, H, E> {
     abort_lock: DynamicLatch,
-    pending: PendingStore<Uuid, RpcResult<Response>>,
+    pending: PendingStore<MessageID, RpcResult<Response>>,
     sender: Mutex<S>,
     service: H,
     reporter: E,
@@ -257,7 +255,7 @@ impl<S, H, E> ClientState<S, H, E> {
 }
 
 struct ClientContext<'a, S, H, E> {
-    id: &'a Uuid,
+    id: &'a MessageID,
     state: &'a ClientState<S, H, E>,
 }
 
@@ -266,7 +264,7 @@ where
     S: AsyncRpcSender + Send,
 {
     #[inline(always)]
-    const fn new(id: &'a Uuid, sender: &'a ClientState<S, H, E>) -> Self {
+    const fn new(id: &'a MessageID, sender: &'a ClientState<S, H, E>) -> Self {
         Self { id, state: sender }
     }
 }
@@ -277,7 +275,7 @@ where
     H: RpcService + Sync,
     E: Reporter + Sync,
 {
-    type ID = Uuid;
+    type ID = MessageID;
 
     #[inline(always)]
     fn id(&self) -> &Self::ID {

@@ -133,12 +133,13 @@ impl core::fmt::Display for MessageType {
     }
 }
 
+pub type MessageID = Uuid;
+
 /// High-level message structure of the RPC protocol.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Message {
-    /// A 128-bit (16 byte) unique identifier for the message.
-    // TODO: Use integer with tracker later, to reduce message size.
-    pub id: Uuid,
+    /// A 128-bit (16 byte) unique identifier for the message
+    pub id: MessageID,
 
     /// The payload of the message.
     pub kind: MessageType,
@@ -146,14 +147,14 @@ pub struct Message {
 
 impl Message {
     /// Creates a new message.
-    pub fn new(id: Uuid, kind: MessageType) -> Self {
+    pub fn new(id: MessageID, kind: MessageType) -> Self {
         Self { id, kind }
     }
 
     /// Creates a new message with auto-generated id.
     pub fn new_with_id(kind: MessageType) -> Self {
         Self {
-            id: Uuid::new_v4(),
+            id: MessageID::new_v4(),
             kind,
         }
     }
@@ -169,12 +170,12 @@ impl Message {
     }
 
     /// Creates a response message.
-    pub fn reply(id: Uuid, reply: Reply) -> Self {
+    pub fn reply(id: MessageID, reply: Reply) -> Self {
         Self::new(id, MessageType::Reply(reply))
     }
 
     /// Creates an error message.
-    pub fn error(id: Uuid, err: RpcError) -> Self {
+    pub fn error(id: MessageID, err: RpcError) -> Self {
         Self::new(id, MessageType::Error(err))
     }
 
@@ -184,7 +185,7 @@ impl Message {
     }
 
     /// Creates a pong message.
-    pub fn pong(id: Uuid) -> Self {
+    pub fn pong(id: MessageID) -> Self {
         Self::new(id, MessageType::Pong)
     }
 
@@ -225,7 +226,7 @@ impl Message {
     }
 
     /// Creates a response message with typed value.
-    pub fn reply_with<R>(id: Uuid, value: &R) -> RpcResult<Self>
+    pub fn reply_with<R>(id: MessageID, value: &R) -> RpcResult<Self>
     where
         R: Serialize,
     {
@@ -250,7 +251,7 @@ mod tests {
 
     #[test]
     fn test_message_encoding_decoding() {
-        let id = Uuid::new_v4();
+        let id = MessageID::new_v4();
         let method = 1;
         let data = vec![10, 20, 30];
 
@@ -327,7 +328,7 @@ mod tests {
 
     #[test]
     fn test_reply_with() {
-        let id = Uuid::new_v4();
+        let id = MessageID::new_v4();
         let message = Message::reply_with(id, &"some reply").unwrap();
         match &message.kind {
             MessageType::Reply(reply) => {

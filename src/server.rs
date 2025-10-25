@@ -14,11 +14,9 @@ use pin_project_lite::pin_project;
 use tokio::task::JoinHandle;
 use tokio::time::timeout;
 
-use uuid::Uuid;
-
 use crate::capability::{EncryptionState, negotiation};
 use crate::error::{ErrKind, RpcError, RpcResult};
-use crate::message::{Call, Message, MessageType, Reply};
+use crate::message::{Call, Message, MessageID, MessageType, Reply};
 use crate::report::Reporter;
 use crate::service::{CallContext, RpcService};
 use crate::stream::{
@@ -263,7 +261,7 @@ impl<H, E> ServerState<H, E> {
 }
 
 struct ServerContext<'a, S> {
-    id: &'a Uuid,
+    id: &'a MessageID,
     sender: &'a mut S,
 }
 
@@ -272,7 +270,7 @@ where
     S: AsyncRpcSender + Send,
 {
     #[inline(always)]
-    const fn new(id: &'a Uuid, sender: &'a mut S) -> Self {
+    const fn new(id: &'a MessageID, sender: &'a mut S) -> Self {
         Self { id, sender }
     }
 }
@@ -281,7 +279,7 @@ impl<'a, S> CallContext for ServerContext<'a, S>
 where
     S: AsyncRpcSender + Send,
 {
-    type ID = Uuid;
+    type ID = MessageID;
 
     #[inline(always)]
     fn id(&self) -> &Self::ID {

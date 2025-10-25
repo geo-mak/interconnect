@@ -1,6 +1,7 @@
 use bincode::config::{Configuration, standard};
 use bincode::enc::write::Writer;
 
+use bincode::error::EncodeError;
 use serde::{Deserialize, Serialize};
 
 use uuid::Uuid;
@@ -8,6 +9,34 @@ use uuid::Uuid;
 use crate::error::{RpcError, RpcResult};
 
 const CONFIG: Configuration = standard();
+
+/// A Type that can be a destination to encode message.
+pub trait MessageWriter {
+    /// Write data to the underlying writer.
+    ///
+    /// The entire data must be written, or an error shall be returned.
+    fn write(&mut self, data: &[u8]) -> RpcResult<()>;
+}
+
+pub struct MessageBuffer {
+    pub buf: Vec<u8>,
+}
+
+impl MessageWriter for MessageBuffer {
+    #[inline(always)]
+    fn write(&mut self, bytes: &[u8]) -> RpcResult<()> {
+        self.buf.extend_from_slice(bytes);
+        Ok(())
+    }
+}
+
+struct ImplWriter<'a, W: MessageWriter>(&'a mut W);
+impl<'a, W: MessageWriter> Writer for ImplWriter<'a, W> {
+    #[inline(always)]
+    fn write(&mut self, bytes: &[u8]) -> Result<(), EncodeError> {
+        self.0.write(bytes).map_err(|_| EncodeError::Other(""))
+    }
+}
 
 /// RPC call message.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -160,30 +189,46 @@ impl Message {
     }
 
     /// Encodes a value to binary format.
-    pub fn encode_to_vec<T: Serialize>(value: &T) -> RpcResult<Vec<u8>> {
+    pub fn encode_to_vec<T>(value: &T) -> RpcResult<Vec<u8>>
+    where
+        T: Serialize,
+    {
         bincode::serde::encode_to_vec(value, CONFIG).map_err(Into::into)
     }
 
     /// Encodes a value to binary format into writer.
-    pub fn encode_into_writer<T: Serialize, W: Writer>(value: &T, dst: &mut W) -> RpcResult<()> {
-        bincode::serde::encode_into_writer(value, dst, CONFIG).map_err(Into::into)
+    pub fn encode_into_writer<T, W>(value: &T, dst: &mut W) -> RpcResult<()>
+    where
+        T: Serialize,
+        W: MessageWriter,
+    {
+        bincode::serde::encode_into_writer(value, ImplWriter(dst), CONFIG).map_err(Into::into)
     }
 
     /// Decodes data from slice of bytes into a value.
-    pub fn decode_from_slice<T: for<'de> Deserialize<'de>>(data: &[u8]) -> RpcResult<T> {
+    pub fn decode_from_slice<T>(data: &[u8]) -> RpcResult<T>
+    where
+        T: for<'de> Deserialize<'de>,
+    {
         bincode::serde::borrow_decode_from_slice(data, CONFIG)
             .map(|(value, _)| value)
             .map_err(Into::into)
     }
 
     /// Creates a request message with typed parameters.
-    pub fn call_with<P: Serialize>(method: u16, params: &P) -> RpcResult<Self> {
+    pub fn call_with<P>(method: u16, params: &P) -> RpcResult<Self>
+    where
+        P: Serialize,
+    {
         let data = Self::encode_to_vec(&params)?;
         Ok(Self::call(Call { method, data }))
     }
 
     /// Creates a response message with typed value.
-    pub fn reply_with<R: Serialize>(id: Uuid, value: &R) -> RpcResult<Self> {
+    pub fn reply_with<R>(id: Uuid, value: &R) -> RpcResult<Self>
+    where
+        R: Serialize,
+    {
         let data = Self::encode_to_vec(&value)?;
         Ok(Self::reply(id, Reply { data }))
     }

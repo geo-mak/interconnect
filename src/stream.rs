@@ -1,10 +1,7 @@
-use bincode::enc::write::Writer;
-use bincode::error::EncodeError;
-
 use crate::capability::{BufferView, EncryptionState};
 use crate::error::{ErrKind, RpcError, RpcResult};
 use crate::io::{AsyncIORead, AsyncIOWrite};
-use crate::message::Message;
+use crate::message::{Message, MessageBuffer};
 use crate::private::Private;
 
 // RPC FRAME
@@ -33,21 +30,9 @@ impl<T> Private for EncryptedRpcSender<T> {}
 impl<T> Private for RpcReceiver<T> {}
 impl<T> Private for EncryptedRpcReceiver<T> {}
 
-pub struct BytesWriter {
-    pub buf: Vec<u8>,
-}
-
-impl Writer for BytesWriter {
-    #[inline(always)]
-    fn write(&mut self, bytes: &[u8]) -> Result<(), EncodeError> {
-        self.buf.extend_from_slice(bytes);
-        Ok(())
-    }
-}
-
 pub struct RpcSender<T> {
     writer: T,
-    bytes: BytesWriter,
+    buffer: MessageBuffer,
 }
 
 impl<T> RpcSender<T> {
@@ -55,7 +40,7 @@ impl<T> RpcSender<T> {
     pub fn new(writer: T) -> Self {
         Self {
             writer,
-            bytes: BytesWriter {
+            buffer: MessageBuffer {
                 buf: Vec::with_capacity(FRAMING_CAPACITY),
             },
         }
@@ -65,7 +50,7 @@ impl<T> RpcSender<T> {
     pub fn with_capacity(writer: T, framing_cap: usize) -> Self {
         Self {
             writer,
-            bytes: BytesWriter {
+            buffer: MessageBuffer {
                 buf: Vec::with_capacity(framing_cap.max(HEADER_LEN)),
             },
         }
@@ -78,15 +63,15 @@ where
 {
     /// Encodes a message as RPC frame and writes it into the I/O stream.
     async fn send(&mut self, message: &Message) -> RpcResult<()> {
-        unsafe { self.bytes.buf.set_len(HEADER_LEN) };
+        unsafe { self.buffer.buf.set_len(HEADER_LEN) };
 
-        Message::encode_into_writer(message, &mut self.bytes)?;
+        Message::encode_into_writer(message, &mut self.buffer)?;
 
-        let len = (self.bytes.buf.len() - HEADER_LEN) as u32;
+        let len = (self.buffer.buf.len() - HEADER_LEN) as u32;
 
-        self.bytes.buf[0..HEADER_LEN].copy_from_slice(&len.to_le_bytes());
+        self.buffer.buf[0..HEADER_LEN].copy_from_slice(&len.to_le_bytes());
 
-        self.writer.write_all(&self.bytes.buf).await?;
+        self.writer.write_all(&self.buffer.buf).await?;
         Ok(())
     }
 
@@ -98,8 +83,8 @@ where
 
 pub struct EncryptedRpcSender<T> {
     writer: T,
+    buffer: MessageBuffer,
     state: EncryptionState,
-    bytes: BytesWriter,
 }
 
 impl<T> EncryptedRpcSender<T> {
@@ -107,10 +92,10 @@ impl<T> EncryptedRpcSender<T> {
     pub fn new(writer: T, state: EncryptionState) -> Self {
         Self {
             writer,
-            state,
-            bytes: BytesWriter {
+            buffer: MessageBuffer {
                 buf: Vec::with_capacity(FRAMING_CAPACITY),
             },
+            state,
         }
     }
 
@@ -118,10 +103,10 @@ impl<T> EncryptedRpcSender<T> {
     pub fn with_capacity(writer: T, state: EncryptionState, framing_cap: usize) -> Self {
         Self {
             writer,
-            state,
-            bytes: BytesWriter {
+            buffer: MessageBuffer {
                 buf: Vec::with_capacity(framing_cap.max(HEADER_LEN)),
             },
+            state,
         }
     }
 }
@@ -132,22 +117,22 @@ where
 {
     /// Encodes a message as RPC frame and writes it into the I/O stream.
     async fn send(&mut self, message: &Message) -> RpcResult<()> {
-        unsafe { self.bytes.buf.set_len(HEADER_LEN) };
+        unsafe { self.buffer.buf.set_len(HEADER_LEN) };
 
-        Message::encode_into_writer(message, &mut self.bytes)?;
+        Message::encode_into_writer(message, &mut self.buffer)?;
 
         let mut enc_buf = BufferView {
-            buf: &mut self.bytes.buf,
+            buf: &mut self.buffer.buf,
             offset: HEADER_LEN,
         };
 
         self.state.encrypt(&mut enc_buf, b"")?;
 
-        let len = (self.bytes.buf.len() - HEADER_LEN) as u32;
+        let len = (self.buffer.buf.len() - HEADER_LEN) as u32;
 
-        self.bytes.buf[0..HEADER_LEN].copy_from_slice(&len.to_le_bytes());
+        self.buffer.buf[0..HEADER_LEN].copy_from_slice(&len.to_le_bytes());
 
-        self.writer.write_all(&self.bytes.buf).await?;
+        self.writer.write_all(&self.buffer.buf).await?;
         Ok(())
     }
 
@@ -159,7 +144,7 @@ where
 
 pub struct RpcReceiver<T> {
     reader: T,
-    bytes: Vec<u8>,
+    buffer: Vec<u8>,
 }
 
 impl<T> RpcReceiver<T> {
@@ -167,7 +152,7 @@ impl<T> RpcReceiver<T> {
     pub fn new(reader: T) -> Self {
         Self {
             reader,
-            bytes: Vec::with_capacity(FRAMING_CAPACITY),
+            buffer: Vec::with_capacity(FRAMING_CAPACITY),
         }
     }
 
@@ -175,7 +160,7 @@ impl<T> RpcReceiver<T> {
     pub fn with_capacity(reader: T, framing_cap: usize) -> Self {
         Self {
             reader,
-            bytes: Vec::with_capacity(framing_cap),
+            buffer: Vec::with_capacity(framing_cap),
         }
     }
 }
@@ -189,7 +174,7 @@ where
     /// **Currently**, if an error has been returned, receiving must be terminated and the stream must be closed.
     #[allow(clippy::uninit_vec)]
     async fn receive(&mut self) -> RpcResult<Message> {
-        unsafe { self.bytes.set_len(0) }
+        unsafe { self.buffer.set_len(0) }
 
         let mut bytes = [0u8; 4];
         self.reader.read_exact(&mut bytes).await?;
@@ -200,7 +185,7 @@ where
         }
 
         // Len is 0 => If len > cap => reserve, no-op otherwise.
-        self.bytes.reserve_exact(len as usize);
+        self.buffer.reserve_exact(len as usize);
 
         // Safety: This should be safe because:
         //
@@ -212,10 +197,10 @@ where
         //     because the bit-pattern of that memory will not be interpreted in consistent manner (random),
         //     but we are not doing any operation except copying/overwriting FROM the stream TO the buffer,
         //     and only on success, or otherwise, an error will be returned.
-        unsafe { self.bytes.set_len(len as usize) }
-        self.reader.read_exact(&mut self.bytes).await?;
+        unsafe { self.buffer.set_len(len as usize) }
+        self.reader.read_exact(&mut self.buffer).await?;
 
-        Message::decode_from_slice(&self.bytes)
+        Message::decode_from_slice(&self.buffer)
     }
 }
 

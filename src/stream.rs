@@ -1,10 +1,9 @@
 use bincode::enc::write::Writer;
 use bincode::error::EncodeError;
 
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-
 use crate::capability::{BufferView, EncryptionState};
 use crate::error::{ErrKind, RpcError, RpcResult};
+use crate::io::{AsyncIORead, AsyncIOWrite};
 use crate::message::Message;
 use crate::private::Private;
 
@@ -75,7 +74,7 @@ impl<T> RpcSender<T> {
 
 impl<T> AsyncRpcSender for RpcSender<T>
 where
-    T: AsyncWriteExt + Send + Sync + Unpin,
+    T: AsyncIOWrite + Send + Sync + Unpin,
 {
     /// Encodes a message as RPC frame and writes it into the I/O stream.
     async fn send(&mut self, message: &Message) -> RpcResult<()> {
@@ -129,7 +128,7 @@ impl<T> EncryptedRpcSender<T> {
 
 impl<T> AsyncRpcSender for EncryptedRpcSender<T>
 where
-    T: AsyncWriteExt + Send + Sync + Unpin,
+    T: AsyncIOWrite + Send + Sync + Unpin,
 {
     /// Encodes a message as RPC frame and writes it into the I/O stream.
     async fn send(&mut self, message: &Message) -> RpcResult<()> {
@@ -183,7 +182,7 @@ impl<T> RpcReceiver<T> {
 
 impl<T> AsyncRpcReceiver for RpcReceiver<T>
 where
-    T: AsyncReadExt + Send + Sync + Unpin,
+    T: AsyncIORead + Send + Sync + Unpin,
 {
     /// Reads and validates the RPC frame and decodes its data as a message.
     /// This method is not cancellation-safe, and it should not be awaited as part of selection race.
@@ -192,8 +191,9 @@ where
     async fn receive(&mut self) -> RpcResult<Message> {
         unsafe { self.bytes.set_len(0) }
 
-        // Read 4 bytes size prefix.
-        let len = self.reader.read_u32_le().await?;
+        let mut bytes = [0u8; 4];
+        self.reader.read_exact(&mut bytes).await?;
+        let len = u32::from_le_bytes(bytes);
 
         if len > MAX_MESSAGE_SIZE {
             return Err(RpcError::error(ErrKind::LargeMessage));
@@ -247,7 +247,7 @@ impl<T> EncryptedRpcReceiver<T> {
 
 impl<T> AsyncRpcReceiver for EncryptedRpcReceiver<T>
 where
-    T: AsyncReadExt + Send + Sync + Unpin,
+    T: AsyncIORead + Send + Sync + Unpin,
 {
     /// Reads and validates the RPC frame and decodes its data as a message.
     /// This method is not cancellation-safe, and it should not be awaited as part of selection race.
@@ -256,8 +256,9 @@ where
     async fn receive(&mut self) -> RpcResult<Message> {
         unsafe { self.bytes.set_len(0) }
 
-        // Read 4 bytes size prefix.
-        let len = self.reader.read_u32_le().await?;
+        let mut bytes = [0u8; 4];
+        self.reader.read_exact(&mut bytes).await?;
+        let len = u32::from_le_bytes(bytes);
 
         if len > MAX_MESSAGE_SIZE {
             return Err(RpcError::error(ErrKind::LargeMessage));

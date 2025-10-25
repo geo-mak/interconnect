@@ -1,12 +1,14 @@
+use std::io;
 use std::net::SocketAddr;
 use std::path::Path;
 
-use tokio::io;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::ToSocketAddrs;
 use tokio::net::tcp;
 use tokio::net::unix;
 use tokio::net::{TcpListener, TcpStream, UnixListener, UnixStream};
+
+use crate::io::{AsyncIORead, AsyncIOWrite};
 
 pub trait TransportListener<A>: Sized + Send {
     type Address;
@@ -63,15 +65,189 @@ impl<A: AsRef<Path>> TransportListener<A> for UnixListener {
 ///
 /// Types that implement this trait should comply with the following requirements:
 ///
-/// - They don't use intermediate buffers, in sense that calling `flush` is not required.
-///
 /// - They provide two modes of operation: single-mode and split-mode.
 ///
 /// - In split-mode, the two halves must be owned handles, that allow **parallel** access.
-pub trait TransportLayer: AsyncWriteExt + AsyncReadExt + Send + Sync + Unpin {
-    type OwnedReadHalf: AsyncReadExt + Send + Sync + Unpin;
-    type OwnedWriteHalf: AsyncWriteExt + Send + Sync + Unpin;
+pub trait TransportLayer: AsyncIORead + AsyncIOWrite + Send + Sync + Unpin {
+    type OwnedReadHalf: AsyncIORead + Send + Sync + Unpin;
+    type OwnedWriteHalf: AsyncIOWrite + Send + Sync + Unpin;
     fn into_split(self) -> (Self::OwnedReadHalf, Self::OwnedWriteHalf);
+}
+
+impl AsyncIORead for TcpStream {
+    #[inline(always)]
+    async fn read<'a>(&'a mut self, output: &'a mut [u8]) -> std::io::Result<usize>
+    where
+        Self: Unpin,
+    {
+        AsyncReadExt::read(self, output).await
+    }
+
+    #[inline(always)]
+    async fn read_exact<'a>(&'a mut self, output: &'a mut [u8]) -> std::io::Result<usize>
+    where
+        Self: Unpin,
+    {
+        AsyncReadExt::read_exact(self, output).await
+    }
+}
+
+impl AsyncIOWrite for TcpStream {
+    #[inline(always)]
+    async fn write<'a>(&'a mut self, input: &'a [u8]) -> std::io::Result<usize>
+    where
+        Self: Unpin,
+    {
+        AsyncWriteExt::write(self, input).await
+    }
+
+    #[inline(always)]
+    async fn write_all<'a>(&'a mut self, input: &'a [u8]) -> std::io::Result<()>
+    where
+        Self: Unpin,
+    {
+        AsyncWriteExt::write_all(self, input).await
+    }
+
+    #[inline(always)]
+    async fn shutdown(&mut self) -> std::io::Result<()>
+    where
+        Self: Unpin,
+    {
+        AsyncWriteExt::shutdown(self).await
+    }
+}
+
+impl AsyncIORead for tcp::OwnedReadHalf {
+    #[inline(always)]
+    async fn read<'a>(&'a mut self, output: &'a mut [u8]) -> std::io::Result<usize>
+    where
+        Self: Unpin,
+    {
+        AsyncReadExt::read(self, output).await
+    }
+
+    #[inline(always)]
+    async fn read_exact<'a>(&'a mut self, output: &'a mut [u8]) -> std::io::Result<usize>
+    where
+        Self: Unpin,
+    {
+        AsyncReadExt::read_exact(self, output).await
+    }
+}
+
+impl AsyncIOWrite for tcp::OwnedWriteHalf {
+    #[inline(always)]
+    async fn write<'a>(&'a mut self, input: &'a [u8]) -> std::io::Result<usize>
+    where
+        Self: Unpin,
+    {
+        AsyncWriteExt::write(self, input).await
+    }
+
+    #[inline(always)]
+    async fn write_all<'a>(&'a mut self, input: &'a [u8]) -> std::io::Result<()>
+    where
+        Self: Unpin,
+    {
+        AsyncWriteExt::write_all(self, input).await
+    }
+
+    #[inline(always)]
+    async fn shutdown(&mut self) -> std::io::Result<()>
+    where
+        Self: Unpin,
+    {
+        AsyncWriteExt::shutdown(self).await
+    }
+}
+
+impl AsyncIORead for UnixStream {
+    #[inline(always)]
+    async fn read<'a>(&'a mut self, output: &'a mut [u8]) -> std::io::Result<usize>
+    where
+        Self: Unpin,
+    {
+        AsyncReadExt::read(self, output).await
+    }
+
+    #[inline(always)]
+    async fn read_exact<'a>(&'a mut self, output: &'a mut [u8]) -> std::io::Result<usize>
+    where
+        Self: Unpin,
+    {
+        AsyncReadExt::read_exact(self, output).await
+    }
+}
+
+impl AsyncIOWrite for UnixStream {
+    #[inline(always)]
+    async fn write<'a>(&'a mut self, input: &'a [u8]) -> std::io::Result<usize>
+    where
+        Self: Unpin,
+    {
+        AsyncWriteExt::write(self, input).await
+    }
+
+    #[inline(always)]
+    async fn write_all<'a>(&'a mut self, input: &'a [u8]) -> std::io::Result<()>
+    where
+        Self: Unpin,
+    {
+        AsyncWriteExt::write_all(self, input).await
+    }
+
+    #[inline(always)]
+    async fn shutdown(&mut self) -> std::io::Result<()>
+    where
+        Self: Unpin,
+    {
+        AsyncWriteExt::shutdown(self).await
+    }
+}
+
+impl AsyncIORead for unix::OwnedReadHalf {
+    #[inline(always)]
+    async fn read<'a>(&'a mut self, output: &'a mut [u8]) -> std::io::Result<usize>
+    where
+        Self: Unpin,
+    {
+        AsyncReadExt::read(self, output).await
+    }
+
+    #[inline(always)]
+    async fn read_exact<'a>(&'a mut self, output: &'a mut [u8]) -> std::io::Result<usize>
+    where
+        Self: Unpin,
+    {
+        AsyncReadExt::read_exact(self, output).await
+    }
+}
+
+impl AsyncIOWrite for unix::OwnedWriteHalf {
+    #[inline(always)]
+    async fn write<'a>(&'a mut self, input: &'a [u8]) -> std::io::Result<usize>
+    where
+        Self: Unpin,
+    {
+        AsyncWriteExt::write(self, input).await
+    }
+
+    #[inline(always)]
+    async fn write_all<'a>(&'a mut self, input: &'a [u8]) -> std::io::Result<()>
+    where
+        Self: Unpin,
+    {
+        AsyncWriteExt::write_all(self, input).await
+    }
+
+    #[inline(always)]
+    async fn shutdown(&mut self) -> std::io::Result<()>
+    where
+        Self: Unpin,
+    {
+        AsyncWriteExt::shutdown(self).await
+    }
 }
 
 impl TransportLayer for TcpStream {

@@ -323,10 +323,9 @@ pub mod negotiation {
 mod test {
     use super::*;
     use std::time::Duration;
-    use tokio::{
-        io::{AsyncReadExt, AsyncWriteExt},
-        net::{TcpListener, TcpStream},
-    };
+    use tokio::net::{TcpListener, TcpStream};
+
+    use crate::io::{AsyncIORead, AsyncIOWrite};
 
     #[tokio::test]
     async fn test_negotiation_with_encryption() {
@@ -353,7 +352,10 @@ mod test {
             };
 
             // First message.
-            let len = transport.read_u16().await.unwrap() as usize;
+            let mut bytes = [0u8; 2];
+            transport.read(&mut bytes).await.unwrap();
+            let len = u16::from_le_bytes(bytes) as usize;
+
             let mut buffer = vec![0u8; len];
             transport.read_exact(&mut buffer).await.unwrap();
 
@@ -361,7 +363,9 @@ mod test {
             assert_eq!(&buffer, b"first message!");
 
             // Second message.
-            let len = transport.read_u16().await.unwrap() as usize;
+            transport.read(&mut bytes).await.unwrap();
+            let len = u16::from_le_bytes(bytes) as usize;
+
             let mut buffer = vec![0u8; len];
             transport.read_exact(&mut buffer).await.unwrap();
 
@@ -390,16 +394,16 @@ mod test {
         let mut buffer = b"first message!".to_vec();
         w_key.encrypt(&mut buffer, b"").unwrap();
 
-        let len = buffer.len() as u16;
-        transport.write_u16(len).await.unwrap();
+        let mut bytes = (buffer.len() as u16).to_le_bytes();
+        transport.write(&mut bytes).await.unwrap();
         transport.write_all(&buffer).await.unwrap();
 
         // Second message.
         let mut buffer = b"second message!".to_vec();
         w_key.encrypt(&mut buffer, b"").unwrap();
 
-        let len = buffer.len() as u16;
-        transport.write_u16(len).await.unwrap();
+        let mut bytes = (buffer.len() as u16).to_le_bytes();
+        transport.write(&mut bytes).await.unwrap();
         transport.write_all(&buffer).await.unwrap();
 
         server.await.unwrap();

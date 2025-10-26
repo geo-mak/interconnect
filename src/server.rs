@@ -1,6 +1,6 @@
 use std::cell::{Cell, UnsafeCell};
 use std::fmt::Debug;
-use std::marker::PhantomPinned;
+use std::marker::{PhantomData, PhantomPinned};
 use std::mem;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -312,12 +312,13 @@ where
 }
 
 /// RPC Server implementation.
-pub struct RpcServer<H, E> {
+pub struct RpcServer<A, H, E> {
     state: Arc<ServerState<H, E>>,
     listener: JoinHandle<()>,
+    _a: PhantomData<A>,
 }
 
-impl<H, E> RpcServer<H, E>
+impl<A, H, E> RpcServer<A, H, E>
 where
     H: RpcService + Send + Sync + Clone + 'static,
     E: Reporter + Send + Sync + 'static,
@@ -365,7 +366,7 @@ where
     /// 3 - Waits for all active sessions to finish properly.
     /// 4 - Calls shutdown on the service to inform it to terminates its state machines,
     ///     and waits for its completion.
-    pub async fn serve<A, L>(
+    pub async fn serve<L>(
         addr: A,
         service: H,
         encrypted_only: bool,
@@ -443,7 +444,11 @@ where
             }
         });
 
-        Ok(Self { state, listener })
+        Ok(Self {
+            state,
+            listener,
+            _a: PhantomData,
+        })
     }
 
     /// Tries to negotiate a new session and starts one over the transport layer upon success.
@@ -635,7 +640,7 @@ mod tests {
     async fn test_tcp_rpc_server_core() {
         let srv_addr = "127.0.0.1:8000";
         let service = RpcTestService {};
-        let mut server = RpcServer::serve::<&str, TcpListener>(
+        let mut server = RpcServer::serve::<TcpListener>(
             srv_addr,
             service,
             false,
@@ -710,7 +715,7 @@ mod tests {
         let service = RpcTestService {};
 
         // Server with encryption-only policy.
-        let mut server = RpcServer::serve::<&str, TcpListener>(
+        let mut server = RpcServer::serve::<TcpListener>(
             srv_addr,
             service,
             true,
@@ -752,7 +757,7 @@ mod tests {
         let path = "unix_server_test.sock";
 
         let service = RpcTestService {};
-        let mut server = RpcServer::serve::<&str, UnixListener>(
+        let mut server = RpcServer::serve::<UnixListener>(
             path,
             service,
             false,

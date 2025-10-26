@@ -76,7 +76,7 @@ pub trait TransportLayer: AsyncIORead + AsyncIOWrite + Send + Unpin {
 
 impl AsyncIORead for TcpStream {
     #[inline(always)]
-    async fn read<'a>(&'a mut self, output: &'a mut [u8]) -> std::io::Result<usize>
+    async fn read(&mut self, output: &mut [u8]) -> std::io::Result<usize>
     where
         Self: Unpin,
     {
@@ -84,7 +84,7 @@ impl AsyncIORead for TcpStream {
     }
 
     #[inline(always)]
-    async fn read_exact<'a>(&'a mut self, output: &'a mut [u8]) -> std::io::Result<usize>
+    async fn read_exact(&mut self, output: &mut [u8]) -> std::io::Result<usize>
     where
         Self: Unpin,
     {
@@ -94,7 +94,7 @@ impl AsyncIORead for TcpStream {
 
 impl AsyncIOWrite for TcpStream {
     #[inline(always)]
-    async fn write<'a>(&'a mut self, input: &'a [u8]) -> std::io::Result<usize>
+    async fn write(&mut self, input: &[u8]) -> std::io::Result<usize>
     where
         Self: Unpin,
     {
@@ -102,7 +102,7 @@ impl AsyncIOWrite for TcpStream {
     }
 
     #[inline(always)]
-    async fn write_all<'a>(&'a mut self, input: &'a [u8]) -> std::io::Result<()>
+    async fn write_all(&mut self, input: &[u8]) -> std::io::Result<()>
     where
         Self: Unpin,
     {
@@ -120,7 +120,7 @@ impl AsyncIOWrite for TcpStream {
 
 impl AsyncIORead for tcp::OwnedReadHalf {
     #[inline(always)]
-    async fn read<'a>(&'a mut self, output: &'a mut [u8]) -> std::io::Result<usize>
+    async fn read(&mut self, output: &mut [u8]) -> std::io::Result<usize>
     where
         Self: Unpin,
     {
@@ -128,7 +128,7 @@ impl AsyncIORead for tcp::OwnedReadHalf {
     }
 
     #[inline(always)]
-    async fn read_exact<'a>(&'a mut self, output: &'a mut [u8]) -> std::io::Result<usize>
+    async fn read_exact(&mut self, output: &mut [u8]) -> std::io::Result<usize>
     where
         Self: Unpin,
     {
@@ -138,7 +138,7 @@ impl AsyncIORead for tcp::OwnedReadHalf {
 
 impl AsyncIOWrite for tcp::OwnedWriteHalf {
     #[inline(always)]
-    async fn write<'a>(&'a mut self, input: &'a [u8]) -> std::io::Result<usize>
+    async fn write(&mut self, input: &[u8]) -> std::io::Result<usize>
     where
         Self: Unpin,
     {
@@ -146,7 +146,7 @@ impl AsyncIOWrite for tcp::OwnedWriteHalf {
     }
 
     #[inline(always)]
-    async fn write_all<'a>(&'a mut self, input: &'a [u8]) -> std::io::Result<()>
+    async fn write_all(&mut self, input: &[u8]) -> std::io::Result<()>
     where
         Self: Unpin,
     {
@@ -164,7 +164,7 @@ impl AsyncIOWrite for tcp::OwnedWriteHalf {
 
 impl AsyncIORead for UnixStream {
     #[inline(always)]
-    async fn read<'a>(&'a mut self, output: &'a mut [u8]) -> std::io::Result<usize>
+    async fn read(&mut self, output: &mut [u8]) -> std::io::Result<usize>
     where
         Self: Unpin,
     {
@@ -172,7 +172,7 @@ impl AsyncIORead for UnixStream {
     }
 
     #[inline(always)]
-    async fn read_exact<'a>(&'a mut self, output: &'a mut [u8]) -> std::io::Result<usize>
+    async fn read_exact(&mut self, output: &mut [u8]) -> std::io::Result<usize>
     where
         Self: Unpin,
     {
@@ -182,7 +182,7 @@ impl AsyncIORead for UnixStream {
 
 impl AsyncIOWrite for UnixStream {
     #[inline(always)]
-    async fn write<'a>(&'a mut self, input: &'a [u8]) -> std::io::Result<usize>
+    async fn write(&mut self, input: &[u8]) -> std::io::Result<usize>
     where
         Self: Unpin,
     {
@@ -190,7 +190,7 @@ impl AsyncIOWrite for UnixStream {
     }
 
     #[inline(always)]
-    async fn write_all<'a>(&'a mut self, input: &'a [u8]) -> std::io::Result<()>
+    async fn write_all(&mut self, input: &[u8]) -> std::io::Result<()>
     where
         Self: Unpin,
     {
@@ -208,7 +208,7 @@ impl AsyncIOWrite for UnixStream {
 
 impl AsyncIORead for unix::OwnedReadHalf {
     #[inline(always)]
-    async fn read<'a>(&'a mut self, output: &'a mut [u8]) -> std::io::Result<usize>
+    async fn read(&mut self, output: &mut [u8]) -> std::io::Result<usize>
     where
         Self: Unpin,
     {
@@ -216,7 +216,7 @@ impl AsyncIORead for unix::OwnedReadHalf {
     }
 
     #[inline(always)]
-    async fn read_exact<'a>(&'a mut self, output: &'a mut [u8]) -> std::io::Result<usize>
+    async fn read_exact(&mut self, output: &mut [u8]) -> std::io::Result<usize>
     where
         Self: Unpin,
     {
@@ -226,7 +226,7 @@ impl AsyncIORead for unix::OwnedReadHalf {
 
 impl AsyncIOWrite for unix::OwnedWriteHalf {
     #[inline(always)]
-    async fn write<'a>(&'a mut self, input: &'a [u8]) -> std::io::Result<usize>
+    async fn write(&mut self, input: &[u8]) -> std::io::Result<usize>
     where
         Self: Unpin,
     {
@@ -234,7 +234,7 @@ impl AsyncIOWrite for unix::OwnedWriteHalf {
     }
 
     #[inline(always)]
-    async fn write_all<'a>(&'a mut self, input: &'a [u8]) -> std::io::Result<()>
+    async fn write_all(&mut self, input: &[u8]) -> std::io::Result<()>
     where
         Self: Unpin,
     {

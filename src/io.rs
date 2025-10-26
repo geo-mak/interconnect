@@ -4,27 +4,21 @@ use std::sync::atomic::Ordering::{AcqRel, Acquire, Relaxed, Release};
 use std::sync::atomic::{AtomicU8, AtomicUsize};
 
 pub trait AsyncIORead {
-    fn read<'a>(
-        &'a mut self,
-        output: &'a mut [u8],
-    ) -> impl Future<Output = io::Result<usize>> + Send
+    fn read(&mut self, output: &mut [u8]) -> impl Future<Output = io::Result<usize>> + Send
     where
         Self: Unpin;
 
-    fn read_exact<'a>(
-        &'a mut self,
-        output: &'a mut [u8],
-    ) -> impl Future<Output = io::Result<usize>> + Send
+    fn read_exact(&mut self, output: &mut [u8]) -> impl Future<Output = io::Result<usize>> + Send
     where
         Self: Unpin;
 }
 
 pub trait AsyncIOWrite {
-    fn write<'a>(&'a mut self, input: &'a [u8]) -> impl Future<Output = io::Result<usize>> + Send
+    fn write(&mut self, input: &[u8]) -> impl Future<Output = io::Result<usize>> + Send
     where
         Self: Unpin;
 
-    fn write_all<'a>(&'a mut self, input: &'a [u8]) -> impl Future<Output = io::Result<()>> + Send
+    fn write_all(&mut self, input: &[u8]) -> impl Future<Output = io::Result<()>> + Send
     where
         Self: Unpin;
 

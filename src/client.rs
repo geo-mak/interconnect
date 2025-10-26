@@ -315,65 +315,14 @@ pub struct RpcAsyncClient<S, H, E> {
     recv_task: JoinHandle<()>,
 }
 
+// Core private implementation.
 impl<S, H, E> RpcAsyncClient<S, H, E>
 where
     S: AsyncRpcSender + Send + 'static,
     H: RpcService + Send + Sync + 'static,
     E: Reporter + Send + Sync + 'static,
 {
-    #[inline]
-    pub async fn connect<T>(
-        mut transport: T,
-        call_handler: H,
-        capacity: usize,
-        reporter: E,
-    ) -> RpcResult<RpcAsyncClient<RpcSender<T::OwnedWriteHalf>, H, E>>
-    where
-        T: TransportLayer + 'static,
-    {
-        negotiation::initiate(&mut transport, RpcCapability::new(1, false)).await?;
-
-        let (r, w) = transport.into_split();
-
-        let instance = RpcAsyncClient::new(
-            RpcSender::new(w),
-            RpcReceiver::new(r),
-            call_handler,
-            capacity,
-            reporter,
-        );
-
-        Ok(instance)
-    }
-
-    #[inline]
-    pub async fn connect_encrypted<T>(
-        mut transport: T,
-        call_handler: H,
-        capacity: usize,
-        reporter: E,
-    ) -> RpcResult<RpcAsyncClient<EncryptedRpcSender<T::OwnedWriteHalf>, H, E>>
-    where
-        T: TransportLayer + 'static,
-    {
-        negotiation::initiate(&mut transport, RpcCapability::new(1, true)).await?;
-
-        let (r_key, w_key) = negotiation::initiate_key_exchange(&mut transport).await?;
-
-        let (r, w) = transport.into_split();
-
-        let instance = RpcAsyncClient::new(
-            EncryptedRpcSender::new(w, w_key),
-            EncryptedRpcReceiver::new(r, r_key),
-            call_handler,
-            capacity,
-            reporter,
-        );
-
-        Ok(instance)
-    }
-
-    fn new<R>(
+    fn init<R>(
         sender: S,
         mut receiver: R,
         handler: H,
@@ -459,6 +408,66 @@ where
             }
             Err(_) => Err(RpcError::error(ErrKind::Timeout)),
         }
+    }
+}
+
+impl<T, H, E> RpcAsyncClient<RpcSender<T>, H, E>
+where
+    T: TransportLayer + 'static,
+    H: RpcService + Send + Sync + 'static,
+    E: Reporter + Send + Sync + 'static,
+{
+    #[inline]
+    pub async fn connect(
+        mut transport: T,
+        call_handler: H,
+        capacity: usize,
+        reporter: E,
+    ) -> RpcResult<RpcAsyncClient<RpcSender<T::OwnedWriteHalf>, H, E>> {
+        negotiation::initiate(&mut transport, RpcCapability::new(1, false)).await?;
+
+        let (r, w) = transport.into_split();
+
+        let instance = RpcAsyncClient::init(
+            RpcSender::new(w),
+            RpcReceiver::new(r),
+            call_handler,
+            capacity,
+            reporter,
+        );
+
+        Ok(instance)
+    }
+}
+
+impl<T, H, E> RpcAsyncClient<EncryptedRpcSender<T>, H, E>
+where
+    T: TransportLayer + 'static,
+    H: RpcService + Send + Sync + 'static,
+    E: Reporter + Send + Sync + 'static,
+{
+    #[inline]
+    pub async fn connect_encrypted(
+        mut transport: T,
+        call_handler: H,
+        capacity: usize,
+        reporter: E,
+    ) -> RpcResult<RpcAsyncClient<EncryptedRpcSender<T::OwnedWriteHalf>, H, E>> {
+        negotiation::initiate(&mut transport, RpcCapability::new(1, true)).await?;
+
+        let (r_key, w_key) = negotiation::initiate_key_exchange(&mut transport).await?;
+
+        let (r, w) = transport.into_split();
+
+        let instance = RpcAsyncClient::init(
+            EncryptedRpcSender::new(w, w_key),
+            EncryptedRpcReceiver::new(r, r_key),
+            call_handler,
+            capacity,
+            reporter,
+        );
+
+        Ok(instance)
     }
 }
 
@@ -576,7 +585,7 @@ where
 mod tests {
     use super::*;
 
-    use tokio::net::{TcpStream, tcp};
+    use tokio::net::TcpStream;
 
     use crate::report::STDIOReporter;
 
@@ -640,13 +649,7 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(10)).await;
 
         let transport = TcpStream::connect(addr).await.unwrap();
-        let mut client =
-            RpcAsyncClient::<RpcSender<tcp::OwnedWriteHalf>, (), STDIOReporter>::connect(
-                transport,
-                (),
-                1,
-                STDIOReporter::new(),
-            )
+        let mut client = RpcAsyncClient::connect(transport, (), 1, STDIOReporter::new())
             .await
             .unwrap();
 
@@ -712,13 +715,7 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(10)).await;
 
         let transport = TcpStream::connect(addr).await.unwrap();
-        let mut client =
-            RpcAsyncClient::<EncryptedRpcSender<tcp::OwnedWriteHalf>, (), STDIOReporter>::connect_encrypted(
-                transport,
-                (),
-                1,
-                STDIOReporter::new()
-            )
+        let mut client = RpcAsyncClient::connect_encrypted(transport, (), 1, STDIOReporter::new())
             .await
             .unwrap();
 

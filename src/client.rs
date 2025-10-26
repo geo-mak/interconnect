@@ -243,7 +243,7 @@ struct ClientState<S, H, E> {
 
 impl<S, H, E> ClientState<S, H, E> {
     #[inline(always)]
-    fn new(service: H, sender: S, capacity: usize, reporter: E) -> ClientState<S, H, E> {
+    fn new(sender: S, capacity: usize, reporter: E, service: H) -> ClientState<S, H, E> {
         ClientState {
             abort_lock: DynamicLatch::new(),
             pending: PendingStore::new(capacity),
@@ -323,17 +323,17 @@ where
     E: Reporter + Send + Sync + 'static,
 {
     fn init<R>(
+        capacity: usize,
         sender: S,
         mut receiver: R,
-        handler: H,
-        cap: usize,
         reporter: E,
+        handler: H,
     ) -> RpcAsyncClient<S, H, E>
     where
         S: AsyncRpcSender + Send + 'static,
         R: AsyncRpcReceiver + Send + 'static,
     {
-        let state = Arc::new(ClientState::new(handler, sender, cap, reporter));
+        let state = Arc::new(ClientState::new(sender, capacity, reporter, handler));
         let client_state = Arc::clone(&state);
 
         let recv_task = tokio::spawn(async move {
@@ -419,21 +419,21 @@ where
 {
     #[inline]
     pub async fn connect(
-        mut transport: T,
-        call_handler: H,
         capacity: usize,
+        mut transport: T,
         reporter: E,
+        handler: H,
     ) -> RpcResult<RpcAsyncClient<RpcSender<T::OwnedWriteHalf>, H, E>> {
         negotiation::initiate(&mut transport, RpcCapability::new(1, false)).await?;
 
         let (r, w) = transport.into_split();
 
         let instance = RpcAsyncClient::init(
+            capacity,
             RpcSender::new(w),
             RpcReceiver::new(r),
-            call_handler,
-            capacity,
             reporter,
+            handler,
         );
 
         Ok(instance)
@@ -448,10 +448,10 @@ where
 {
     #[inline]
     pub async fn connect_encrypted(
-        mut transport: T,
-        call_handler: H,
         capacity: usize,
+        mut transport: T,
         reporter: E,
+        handler: H,
     ) -> RpcResult<RpcAsyncClient<EncryptedRpcSender<T::OwnedWriteHalf>, H, E>> {
         negotiation::initiate(&mut transport, RpcCapability::new(1, true)).await?;
 
@@ -460,11 +460,11 @@ where
         let (r, w) = transport.into_split();
 
         let instance = RpcAsyncClient::init(
+            capacity,
             EncryptedRpcSender::new(w, w_key),
             EncryptedRpcReceiver::new(r, r_key),
-            call_handler,
-            capacity,
             reporter,
+            handler,
         );
 
         Ok(instance)
@@ -649,7 +649,7 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(10)).await;
 
         let transport = TcpStream::connect(addr).await.unwrap();
-        let mut client = RpcAsyncClient::connect(transport, (), 1, STDIOReporter::new())
+        let mut client = RpcAsyncClient::connect(1, transport, STDIOReporter::new(), ())
             .await
             .unwrap();
 
@@ -715,7 +715,7 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(10)).await;
 
         let transport = TcpStream::connect(addr).await.unwrap();
-        let mut client = RpcAsyncClient::connect_encrypted(transport, (), 1, STDIOReporter::new())
+        let mut client = RpcAsyncClient::connect_encrypted(1, transport, STDIOReporter::new(), ())
             .await
             .unwrap();
 

@@ -250,7 +250,7 @@ struct ServerState<H, E> {
 
 impl<H, E> ServerState<H, E> {
     #[inline]
-    fn new(service: H, timeout: Duration, reporter: E, shards: usize) -> ServerState<H, E> {
+    fn new(shards: usize, service: H, timeout: Duration, reporter: E) -> ServerState<H, E> {
         ServerState {
             tasks: Tasks::new(shards),
             service,
@@ -367,12 +367,12 @@ where
     /// 4 - Calls shutdown on the service to inform it to terminates its state machines,
     ///     and waits for its completion.
     pub async fn serve<L>(
+        shards: usize,
         addr: A,
         service: H,
         encrypted_only: bool,
-        timeout: Duration,
+        negotiation_timeout: Duration,
         reporter: E,
-        shards: usize,
     ) -> RpcResult<Self>
     where
         A: 'static,
@@ -381,7 +381,12 @@ where
     {
         let listener = L::bind(addr).await?;
 
-        let state = Arc::new(ServerState::new(service, timeout, reporter, shards));
+        let state = Arc::new(ServerState::new(
+            shards,
+            service,
+            negotiation_timeout,
+            reporter,
+        ));
 
         let state_l = state.clone();
         let listener = tokio::spawn(async move {
@@ -641,12 +646,12 @@ mod tests {
         let srv_addr = "127.0.0.1:8000";
         let service = RpcTestService {};
         let mut server = RpcServer::serve::<TcpListener>(
+            2,
             srv_addr,
             service,
             false,
             Duration::from_secs(1),
             STDIOReporter::new(),
-            2,
         )
         .await
         .unwrap();
@@ -716,12 +721,12 @@ mod tests {
 
         // Server with encryption-only policy.
         let mut server = RpcServer::serve::<TcpListener>(
+            2,
             srv_addr,
             service,
             true,
             Duration::from_secs(1),
             STDIOReporter::new(),
-            2,
         )
         .await
         .unwrap();
@@ -758,12 +763,12 @@ mod tests {
 
         let service = RpcTestService {};
         let mut server = RpcServer::serve::<UnixListener>(
+            2,
             path,
             service,
             false,
             Duration::from_secs(1),
             STDIOReporter::new(),
-            2,
         )
         .await
         .unwrap();

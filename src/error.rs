@@ -60,12 +60,11 @@ pub enum ErrKind {
 /// - Error: A representative error that can be direct or indirect/categorical.
 /// - Reference: An extra context to the error as reference. `0` as value means `N/A` or `None`.
 ///
-/// This style is limiting but allows efficient matching of errors, at the same time it keeps
+/// This scheme allows efficient matching of errors, at the same time it keeps
 /// the error type simple and small to be used internally and over the wire.
 ///
 /// For example, for reporting service-specific error, the kind can be set to `Service`
-/// as a general marker, and the error can be provided as reference to member of
-/// some set of service-specific errors.
+/// as category, and the actual error can be provided as reference to service-specific error's member.
 ///
 /// For text-formatted error messages, helper functions can be used to provide formatted string
 /// representation, in similar fashion to POSIX error-handling.

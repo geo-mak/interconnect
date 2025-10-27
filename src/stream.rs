@@ -1,7 +1,12 @@
-use crate::capability::{BufferView, EncryptionState};
+use std::marker::PhantomData;
+
+use aead::Buffer;
+
+use crate::capability::EncryptionState;
 use crate::error::{ErrKind, RpcError, RpcResult};
 use crate::io::{AsyncIORead, AsyncIOWrite};
 use crate::message::{Message, MessageBuffer};
+use crate::opt::branch_prediction::unlikely;
 use crate::private::Private;
 
 // RPC FRAME
@@ -29,6 +34,90 @@ impl<T> Private for RpcSender<T> {}
 impl<T> Private for EncryptedRpcSender<T> {}
 impl<T> Private for RpcReceiver<T> {}
 impl<T> Private for EncryptedRpcReceiver<T> {}
+
+struct ExtBufferView<'a> {
+    pub buf: &'a mut Vec<u8>,
+    pub offset: usize,
+}
+
+impl<'a> AsRef<[u8]> for ExtBufferView<'a> {
+    #[inline(always)]
+    fn as_ref(&self) -> &[u8] {
+        &self.buf[self.offset..]
+    }
+}
+
+impl<'a> AsMut<[u8]> for ExtBufferView<'a> {
+    #[inline(always)]
+    fn as_mut(&mut self) -> &mut [u8] {
+        &mut self.buf[self.offset..]
+    }
+}
+
+impl<'a> Buffer for ExtBufferView<'a> {
+    #[inline(always)]
+    fn extend_from_slice(&mut self, other: &[u8]) -> aead::Result<()> {
+        self.buf.extend_from_slice(other);
+        Ok(())
+    }
+
+    #[inline(always)]
+    fn truncate(&mut self, len: usize) {
+        self.buf.truncate(self.offset + len);
+    }
+}
+
+struct FixedBufferView<'a> {
+    ptr: *mut u8,
+    len: usize,
+    _marker: std::marker::PhantomData<&'a mut [u8]>,
+}
+
+unsafe impl<'a> Send for FixedBufferView<'a> {}
+
+impl<'a> FixedBufferView<'a> {
+    const fn new(ptr: *mut u8, len: usize) -> Self {
+        Self {
+            ptr,
+            len,
+            _marker: PhantomData,
+        }
+    }
+
+    const fn as_slice(&self) -> &'a [u8] {
+        unsafe { std::slice::from_raw_parts(self.ptr, self.len) }
+    }
+
+    const fn as_slice_mut(&self) -> &'a mut [u8] {
+        unsafe { std::slice::from_raw_parts_mut(self.ptr, self.len) }
+    }
+}
+
+impl<'a> AsRef<[u8]> for FixedBufferView<'a> {
+    #[inline(always)]
+    fn as_ref(&self) -> &[u8] {
+        self.as_slice()
+    }
+}
+
+impl<'a> AsMut<[u8]> for FixedBufferView<'a> {
+    #[inline(always)]
+    fn as_mut(&mut self) -> &mut [u8] {
+        self.as_slice_mut()
+    }
+}
+
+impl<'a> Buffer for FixedBufferView<'a> {
+    #[inline(always)]
+    fn extend_from_slice(&mut self, _other: &[u8]) -> aead::Result<()> {
+        Ok(())
+    }
+
+    #[inline(always)]
+    fn truncate(&mut self, len: usize) {
+        self.len = len
+    }
+}
 
 pub struct RpcSender<T> {
     writer: T,
@@ -121,7 +210,7 @@ where
 
         Message::encode_into_writer(message, &mut self.buffer)?;
 
-        let mut enc_buf = BufferView {
+        let mut enc_buf = ExtBufferView {
             buf: &mut self.buffer.buf,
             offset: HEADER_LEN,
         };
@@ -171,43 +260,40 @@ where
 {
     /// Reads and validates the RPC frame and decodes its data as a message.
     /// This method is not cancellation-safe, and it should not be awaited as part of selection race.
-    /// **Currently**, if an error has been returned, receiving must be terminated and the stream must be closed.
-    #[allow(clippy::uninit_vec)]
+    /// On error, receiving must be terminated and the stream must be closed.
     async fn receive(&mut self) -> RpcResult<Message> {
-        unsafe { self.buffer.set_len(0) }
+        debug_assert_eq!(self.buffer.len(), 0);
 
-        let mut bytes = [0u8; 4];
-        self.reader.read_exact(&mut bytes).await?;
-        let len = u32::from_le_bytes(bytes);
+        let mut len_bytes = [0u8; 4];
 
-        if len > MAX_MESSAGE_SIZE {
+        let read = self.reader.read_exact(&mut len_bytes).await?;
+        debug_assert_eq!(read, 4);
+
+        let len = u32::from_le_bytes(len_bytes);
+
+        if unlikely(len > MAX_MESSAGE_SIZE) {
             return Err(RpcError::error(ErrKind::LargeMessage));
         }
 
-        // Len is 0 => If len > cap => reserve, no-op otherwise.
-        self.buffer.reserve_exact(len as usize);
+        let len = len as usize;
 
-        // Safety: This should be safe because:
-        //
-        // 1 - Buffer has allocated memory for `len` bytes.
-        //
-        // 2 - `len` matches the expected decoding size.
-        //
-        // 3 - In Rust, any operation (Add, Sub, Mul, etc.) with uninitialized memory is UB,
-        //     because the bit-pattern of that memory will not be interpreted in consistent manner (random),
-        //     but we are not doing any operation except copying/overwriting FROM the stream TO the buffer,
-        //     and only on success, or otherwise, an error will be returned.
-        unsafe { self.buffer.set_len(len as usize) }
-        self.reader.read_exact(&mut self.buffer).await?;
+        // Safety: capacity must be ensured before segmentation.
+        self.buffer.reserve_exact(len);
+        let segment = unsafe { std::slice::from_raw_parts_mut(self.buffer.as_mut_ptr(), len) };
 
-        Message::decode_from_slice(&self.buffer)
+        // Safety: This call must initialize the provided segment or it must fail and return.
+        let read = self.reader.read_exact(segment).await?;
+        debug_assert_eq!(read, segment.len());
+
+        // Safety: Reading is assumed to be done on initialized bytes at this stage.
+        Message::decode_from_slice(segment)
     }
 }
 
 pub struct EncryptedRpcReceiver<T> {
     reader: T,
     state: EncryptionState,
-    bytes: Vec<u8>,
+    buffer: Vec<u8>,
 }
 
 impl<T> EncryptedRpcReceiver<T> {
@@ -216,7 +302,7 @@ impl<T> EncryptedRpcReceiver<T> {
         Self {
             reader,
             state,
-            bytes: Vec::with_capacity(FRAMING_CAPACITY),
+            buffer: Vec::with_capacity(FRAMING_CAPACITY),
         }
     }
 
@@ -225,7 +311,7 @@ impl<T> EncryptedRpcReceiver<T> {
         Self {
             reader,
             state,
-            bytes: Vec::with_capacity(framing_cap),
+            buffer: Vec::with_capacity(framing_cap),
         }
     }
 }
@@ -236,38 +322,34 @@ where
 {
     /// Reads and validates the RPC frame and decodes its data as a message.
     /// This method is not cancellation-safe, and it should not be awaited as part of selection race.
-    /// **Currently**, if an error has been returned, receiving must be terminated and the stream must be closed.
-    #[allow(clippy::uninit_vec)]
+    /// On error, receiving must be terminated and the stream must be closed.
     async fn receive(&mut self) -> RpcResult<Message> {
-        unsafe { self.bytes.set_len(0) }
+        debug_assert_eq!(self.buffer.len(), 0);
 
-        let mut bytes = [0u8; 4];
-        self.reader.read_exact(&mut bytes).await?;
-        let len = u32::from_le_bytes(bytes);
+        let mut len_bytes = [0u8; 4];
 
-        if len > MAX_MESSAGE_SIZE {
+        let read = self.reader.read_exact(&mut len_bytes).await?;
+        debug_assert_eq!(read, 4);
+
+        let len = u32::from_le_bytes(len_bytes);
+
+        if unlikely(len > MAX_MESSAGE_SIZE) {
             return Err(RpcError::error(ErrKind::LargeMessage));
         }
 
-        // Len is 0 => If len > cap => reserve, no-op otherwise.
-        self.bytes.reserve_exact(len as usize);
+        let len = len as usize;
 
-        // Safety: This should be safe because:
-        //
-        // 1 - Buffer has allocated memory for `len` bytes.
-        //
-        // 2 - `len` matches the expected decoding size.
-        //
-        // 3 - In Rust, any operation (Add, Sub, Mul, etc.) with uninitialized memory is UB,
-        //     because the bit-pattern of that memory will not be interpreted in consistent manner (random),
-        //     but we are not doing any operation except copying/overwriting FROM the stream TO the buffer,
-        //     and only on success, or otherwise, an error will be returned.
-        unsafe { self.bytes.set_len(len as usize) }
-        self.reader.read_exact(&mut self.bytes).await?;
+        // Safety: capacity must be ensured before segmentation.
+        self.buffer.reserve_exact(len);
+        let mut segment = FixedBufferView::new(self.buffer.as_mut_ptr(), len);
 
-        self.state.decrypt(&mut self.bytes, b"")?;
+        // Safety: This call must initialize the provided segment or it must fail and return.
+        let read = self.reader.read_exact(segment.as_slice_mut()).await?;
+        debug_assert_eq!(read, segment.len);
 
-        Message::decode_from_slice(&self.bytes)
+        // Safety: Reading is assumed to be done on initialized bytes at this stage.
+        self.state.decrypt(&mut segment, b"")?;
+        Message::decode_from_slice(segment.as_slice())
     }
 }
 

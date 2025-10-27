@@ -90,35 +90,6 @@ impl RpcCapability {
     }
 }
 
-pub struct BufferView<'a> {
-    pub buf: &'a mut Vec<u8>,
-    pub offset: usize,
-}
-
-impl<'a> AsRef<[u8]> for BufferView<'a> {
-    #[inline(always)]
-    fn as_ref(&self) -> &[u8] {
-        &self.buf[self.offset..]
-    }
-}
-impl<'a> AsMut<[u8]> for BufferView<'a> {
-    #[inline(always)]
-    fn as_mut(&mut self) -> &mut [u8] {
-        &mut self.buf[self.offset..]
-    }
-}
-impl<'a> Buffer for BufferView<'a> {
-    #[inline(always)]
-    fn extend_from_slice(&mut self, other: &[u8]) -> aead::Result<()> {
-        self.buf.extend_from_slice(other);
-        Ok(())
-    }
-    #[inline(always)]
-    fn truncate(&mut self, len: usize) {
-        self.buf.truncate(self.offset + len);
-    }
-}
-
 pub type ReadKey = [u8; 16];
 pub type WriteKey = [u8; 16];
 pub type NonceBase = [u8; 4];
@@ -170,6 +141,7 @@ impl EncryptionState {
     /// Decrypts the message in-place to its original format.
     /// The buffer will be truncated to the length of the original data upon success.
     pub fn decrypt(&mut self, data: &mut impl Buffer, associated_data: &[u8]) -> RpcResult<()> {
+        // TODO: Resigned the interface without requiring `Buffer` trait.
         let next = self.next_nonce();
         let nonce = Nonce::<Aes128Gcm>::from_slice(&next);
         self.cipher

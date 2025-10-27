@@ -4,10 +4,32 @@ use std::sync::atomic::Ordering::{AcqRel, Acquire, Relaxed, Release};
 use std::sync::atomic::{AtomicU8, AtomicUsize};
 
 pub trait AsyncIORead {
+    /// Tries to write available data into the provided output-segment from the underlying I/O source.
+    ///
+    /// Note:
+    /// - The provided output-segment must be assumed to be consisting of **uninitialized** data.
+    ///
+    /// - Writing into the output-segment has **initialization** semantics.
+    ///
+    /// - Reading from the output-segment at a position where no data has been written yet is undefined behavior.
+    ///
+    /// Returns the number of bytes where **initialized** by being successfully written to the output-segment.
     fn read(&mut self, output: &mut [u8]) -> impl Future<Output = io::Result<usize>> + Send
     where
         Self: Unpin;
 
+    /// Tries to write data into the provided output-segment from the underlying I/O source.
+    ///
+    /// This method will try to fill the provided output-segment, or it will fail otherwise.
+    ///
+    /// Note:
+    /// - The provided output-segment must be assumed to be consisting of **uninitialized** data.
+    ///
+    /// - Writing into the output-segment has **initialization** semantics.
+    ///
+    /// - Reading from the output-segment at a position where no data has been written yet is undefined behavior.
+    ///
+    /// Returns the number of bytes where **initialized** by being successfully written to the output-segment.
     fn read_exact(&mut self, output: &mut [u8]) -> impl Future<Output = io::Result<usize>> + Send
     where
         Self: Unpin;

@@ -66,15 +66,16 @@ pub enum MessageType {
 impl MessageType {
     #[inline]
     pub const fn from_le_byte(byte: u8) -> Option<Self> {
-        match byte {
-            0 => Some(Self::Call),
-            1 => Some(Self::NullaryCall),
-            2 => Some(Self::Reply),
-            3 => Some(Self::Error),
-            4 => Some(Self::Ping),
-            5 => Some(Self::Pong),
-            _ => None,
-        }
+        use MessageType::*;
+        Some(match byte {
+            0 => Call,
+            1 => NullaryCall,
+            2 => Reply,
+            3 => Error,
+            4 => Ping,
+            5 => Pong,
+            _ => return None,
+        })
     }
 }
 
@@ -198,7 +199,7 @@ impl Message {
     {
         let header = MessageHeader::new(*id, MessageType::Error);
         output.write(&header.encode())?;
-        Message::encode_into_writer(&err, output)
+        output.write(&err.encode())
     }
 
     pub fn ping<T>(id: &MessageID, output: &mut T) -> RpcResult<()>
@@ -250,7 +251,7 @@ impl Message {
     }
 
     pub fn decode_error(message: &[u8]) -> RpcResult<RpcError> {
-        Self::decode_from_slice(&message[17..])
+        RpcError::decode(&message[17..])
     }
 
     /// Encodes a value to binary format.

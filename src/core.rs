@@ -228,7 +228,7 @@ impl Message {
         Ok(u16::from_le_bytes(method))
     }
 
-    pub fn param_data<'a>(message: &'a [u8]) -> &'a [u8] {
+    pub fn param_data(message: &[u8]) -> &[u8] {
         &message[19..]
     }
 
@@ -239,7 +239,7 @@ impl Message {
         Self::decode_from_slice::<R>(&message[19..])
     }
 
-    pub fn reply_data<'a>(message: &'a [u8]) -> &'a [u8] {
+    pub fn reply_data(message: &[u8]) -> &[u8] {
         &message[17..]
     }
 

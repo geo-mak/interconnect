@@ -490,8 +490,6 @@ struct FixedBufferView<'a> {
     len: usize,
 }
 
-unsafe impl<'a> Send for FixedBufferView<'a> {}
-
 impl<'a> FixedBufferView<'a> {
     const fn new(buf: &'a mut Vec<u8>, len: usize) -> Self {
         Self { buf, len }

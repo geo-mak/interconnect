@@ -9,6 +9,8 @@ High performance remote procedure call protocol.
 - Lightweight message format.
 - Out-of-the-box support for TCP and Unix domain sockets.
 
+This project aims at providing the best possible usability and performance compared to an application-specific protocol.
+
 ## Architectural Overview.
 ```
 ┌─────────────────────────────────────────────┐

@@ -22,7 +22,7 @@ use crate::core::{
 };
 use crate::error::{ErrKind, RpcError, RpcResult};
 use crate::report::Reporter;
-use crate::service::{CallContext, RpcService};
+use crate::service::{Call, CallContext, RpcService};
 use crate::sync::{DynamicLatch, IList, INode, NOOP_WAKER};
 use crate::transport::{TransportLayer, TransportListener};
 use crate::{Message, MessageType};
@@ -529,15 +529,12 @@ where
                     let header = Message::decode_header(receiver.message())?;
                     match header.kind {
                         MessageType::Call => {
-                            let method = Message::decode_method(receiver.message())?;
+                            let call = Call {
+                                method: Message::decode_method(receiver.message())?,
+                                params: Message::param_data(receiver.message()),
+                            };
                             let mut context = ServerContext::new(&header.id, sender);
-                            service
-                                .call(
-                                    method,
-                                    Message::param_data(receiver.message()),
-                                    &mut context,
-                                )
-                                .await?
+                            service.call(call, &mut context).await?
                         }
                         MessageType::NullaryCall => {
                             let method = Message::decode_method(receiver.message())?;
@@ -593,18 +590,19 @@ mod tests {
     use crate::capability::{self, RpcCapability};
     use crate::error::{ErrKind, RpcError};
     use crate::report::STDIOReporter;
+    use crate::service::Call;
 
     #[derive(Clone)]
     struct RpcTestService {}
 
     impl RpcService for RpcTestService {
-        async fn call<C>(&self, method: u16, params: &[u8], context: &mut C) -> RpcResult<()>
+        async fn call<C>(&self, call: Call<'_>, context: &mut C) -> RpcResult<()>
         where
             C: CallContext + Send,
         {
-            match method {
+            match call.method {
                 1 => {
-                    let src = Message::decode_from_slice::<String>(params).unwrap();
+                    let src: String = call.decode_as().unwrap();
                     context.send_reply(&format!("Reply to {src}")).await
                 }
                 _ => Err(RpcError::error(ErrKind::Unimplemented)),

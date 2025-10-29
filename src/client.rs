@@ -23,7 +23,7 @@ use crate::core::{
 };
 use crate::error::{ErrKind, RpcError, RpcResult};
 use crate::report::Reporter;
-use crate::service::{CallContext, RpcService};
+use crate::service::{Call, CallContext, RpcService};
 use crate::sync::{DynamicLatch, NOOP_WAKER};
 use crate::transport::TransportLayer;
 
@@ -384,7 +384,10 @@ where
                     let method = Message::decode_method(receiver.message())?;
                     let params = Message::param_data(receiver.message());
                     let mut context = ClientContext::new(&header.id, state);
-                    return state.service.call(method, params, &mut context).await;
+                    return state
+                        .service
+                        .call(Call { method, params }, &mut context)
+                        .await;
                 }
             }
             MessageType::NullaryCall => {

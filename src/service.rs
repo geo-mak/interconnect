@@ -1,8 +1,25 @@
 use std::future::Future;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
-use crate::error::{ErrKind, RpcError, RpcResult};
+use crate::{
+    Message,
+    error::{ErrKind, RpcError, RpcResult},
+};
+
+#[derive(Debug, PartialEq)]
+pub struct Call<'a> {
+    pub method: u16,
+    pub params: &'a [u8],
+}
+
+impl<'a> Call<'a> {
+    /// Tries to decode the parameters as `P`.
+    #[inline(always)]
+    pub fn decode_as<P: for<'de> Deserialize<'de>>(&self) -> RpcResult<P> {
+        Message::decode_from_slice(self.params)
+    }
+}
 
 pub trait CallContext {
     type ID: Copy;
@@ -57,8 +74,7 @@ pub trait RpcService {
     /// By default, it sends `Unimplemented` error to the caller.
     fn call<C>(
         &self,
-        _method: u16,
-        _params: &[u8],
+        _call: Call<'_>,
         context: &mut C,
     ) -> impl Future<Output = RpcResult<()>> + Send
     where

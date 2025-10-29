@@ -364,10 +364,11 @@ where
     where
         R: AsyncReceiver,
     {
-        let header = Message::decode_header(receiver.message())?;
+        let message = receiver.message();
+        let header = Message::decode_header(message)?;
         match header.kind {
             MessageType::Reply => {
-                let data = Message::reply_data(receiver.message());
+                let data = Message::reply_data(message);
                 let mut reply = MessageBuffer::with_capacity(data.len());
                 unsafe { reply.copy_from(data) };
                 state
@@ -375,14 +376,14 @@ where
                     .send_back(&header.id, Ok(Response::Reply(reply)));
             }
             MessageType::Error => {
-                let err = Message::decode_error(receiver.message())?;
+                let err = Message::decode_error(message)?;
                 state.pending.send_back(&header.id, Err(err))
             }
             MessageType::Pong => state.pending.send_back(&header.id, Ok(Response::Pong)),
             MessageType::Call => {
                 if let Some(_lock) = state.abort_lock.acquire() {
-                    let method = Message::decode_method(receiver.message())?;
-                    let params = Message::param_data(receiver.message());
+                    let method = Message::decode_method(message)?;
+                    let params = Message::param_data(message);
                     let mut context = ClientContext::new(&header.id, state);
                     return state
                         .service
@@ -392,7 +393,7 @@ where
             }
             MessageType::NullaryCall => {
                 if let Some(_lock) = state.abort_lock.acquire() {
-                    let method = Message::decode_method(receiver.message())?;
+                    let method = Message::decode_method(message)?;
                     let mut context = ClientContext::new(&header.id, state);
                     return state.service.call_nullary(method, &mut context).await;
                 }

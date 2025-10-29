@@ -526,18 +526,19 @@ where
         loop {
             match task.wait_cancelable(receiver.receive()).await {
                 Ok(_) => {
-                    let header = Message::decode_header(receiver.message())?;
+                    let message = receiver.message();
+                    let header = Message::decode_header(message)?;
                     match header.kind {
                         MessageType::Call => {
                             let call = Call {
-                                method: Message::decode_method(receiver.message())?,
-                                params: Message::param_data(receiver.message()),
+                                method: Message::decode_method(message)?,
+                                params: Message::param_data(message),
                             };
                             let mut context = ServerContext::new(&header.id, sender);
                             service.call(call, &mut context).await?
                         }
                         MessageType::NullaryCall => {
-                            let method = Message::decode_method(receiver.message())?;
+                            let method = Message::decode_method(message)?;
                             let mut context = ServerContext::new(&header.id, sender);
                             service.call_nullary(method, &mut context).await?
                         }

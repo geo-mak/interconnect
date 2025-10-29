@@ -13,19 +13,17 @@ use std::time::Duration;
 
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
-use tokio::time::timeout;
 
 use serde::{Deserialize, Serialize};
 
 use crate::capability::{RpcCapability, negotiation};
+use crate::core::{
+    AsyncReceiver, AsyncSender, EncMessageReceiver, EncMessageSender, Message, MessageBuffer,
+    MessageID, MessageReceiver, MessageSender, MessageType,
+};
 use crate::error::{ErrKind, RpcError, RpcResult};
-use crate::message::{Call, Message, MessageID, MessageType, Reply};
 use crate::report::Reporter;
 use crate::service::{CallContext, RpcService};
-use crate::stream::{
-    AsyncRpcReceiver, AsyncRpcSender, EncryptedRpcReceiver, EncryptedRpcSender, RpcReceiver,
-    RpcSender,
-};
 use crate::sync::{DynamicLatch, NOOP_WAKER};
 use crate::transport::TransportLayer;
 
@@ -33,7 +31,7 @@ use crate::transport::TransportLayer;
 pub trait AsyncRpcClient {
     fn call<P, R>(&self, method: u16, params: &P) -> impl Future<Output = RpcResult<R>>
     where
-        P: Serialize,
+        P: Serialize + Sync,
         R: for<'de> Deserialize<'de>;
 
     fn call_timeout<P, R>(
@@ -43,12 +41,12 @@ pub trait AsyncRpcClient {
         timeout: Duration,
     ) -> impl Future<Output = RpcResult<R>>
     where
-        P: Serialize,
+        P: Serialize + Sync,
         R: for<'de> Deserialize<'de>;
 
     fn call_one_way<P>(&self, method: u16, params: &P) -> impl Future<Output = RpcResult<()>>
     where
-        P: Serialize;
+        P: Serialize + Sync;
 
     fn call_nullary<R>(&self, method: u16) -> impl Future<Output = RpcResult<R>>
     where
@@ -230,7 +228,7 @@ where
 
 enum Response {
     Pong,
-    Reply(Reply),
+    Reply(MessageBuffer),
 }
 
 struct ClientState<S, H, E> {
@@ -261,7 +259,7 @@ struct ClientContext<'a, S, H, E> {
 
 impl<'a, S, H, E> ClientContext<'a, S, H, E>
 where
-    S: AsyncRpcSender + Send,
+    S: AsyncSender + Send,
 {
     #[inline(always)]
     const fn new(id: &'a MessageID, sender: &'a ClientState<S, H, E>) -> Self {
@@ -271,7 +269,7 @@ where
 
 impl<'a, S, H, E> CallContext for ClientContext<'a, S, H, E>
 where
-    S: AsyncRpcSender + Send,
+    S: AsyncSender + Send,
     H: RpcService + Sync,
     E: Reporter + Sync,
 {
@@ -283,27 +281,33 @@ where
     }
 
     #[inline]
-    async fn send_reply(&mut self, reply: Reply) -> RpcResult<()> {
-        let message = Message::reply(*self.id, reply);
-        self.state.sender.lock().await.send(&message).await
+    async fn send_reply<R: Serialize + Sync>(&mut self, reply: &R) -> RpcResult<()> {
+        self.state.sender.lock().await.reply(self.id, reply).await
     }
 
     #[inline]
     async fn send_error(&mut self, err: RpcError) -> RpcResult<()> {
-        let message = Message::error(*self.id, err);
-        self.state.sender.lock().await.send(&message).await
+        self.state.sender.lock().await.error(self.id, err).await
     }
 
     #[inline]
-    async fn call(&mut self, call: Call) -> RpcResult<()> {
-        let message = Message::new(*self.id, MessageType::Call(call));
-        self.state.sender.lock().await.send(&message).await
+    async fn call<P: Serialize + Sync>(&mut self, method: u16, params: &P) -> RpcResult<()> {
+        self.state
+            .sender
+            .lock()
+            .await
+            .call(self.id, method, &params)
+            .await
     }
 
     #[inline]
     async fn call_nullary(&mut self, method: u16) -> RpcResult<()> {
-        let message = Message::new(*self.id, MessageType::NullaryCall(method));
-        self.state.sender.lock().await.send(&message).await
+        self.state
+            .sender
+            .lock()
+            .await
+            .call_nullary(self.id, method)
+            .await
     }
 }
 
@@ -318,7 +322,7 @@ pub struct RpcAsyncClient<S, H, E> {
 // Core private implementation.
 impl<S, H, E> RpcAsyncClient<S, H, E>
 where
-    S: AsyncRpcSender + Send + 'static,
+    S: AsyncSender + Send + 'static,
     H: RpcService + Send + Sync + 'static,
     E: Reporter + Send + Sync + 'static,
 {
@@ -330,8 +334,8 @@ where
         handler: H,
     ) -> RpcAsyncClient<S, H, E>
     where
-        S: AsyncRpcSender + Send + 'static,
-        R: AsyncRpcReceiver + Send + 'static,
+        S: AsyncSender + Send + 'static,
+        R: AsyncReceiver + Send + Sync + 'static,
     {
         let state = Arc::new(ClientState::new(sender, capacity, reporter, handler));
         let client_state = Arc::clone(&state);
@@ -339,8 +343,8 @@ where
         let recv_task = tokio::spawn(async move {
             loop {
                 match receiver.receive().await {
-                    Ok(message) => {
-                        if let Err(err) = Self::process_message(&client_state, message).await {
+                    Ok(_) => {
+                        if let Err(err) = Self::process_message(&receiver, &client_state).await {
                             client_state.reporter.error("Handling error", &err);
                             break;
                         }
@@ -356,82 +360,66 @@ where
         Self { state, recv_task }
     }
 
-    async fn process_message(state: &Arc<ClientState<S, H, E>>, message: Message) -> RpcResult<()> {
-        match message.kind {
-            MessageType::Reply(reply) => {
-                let response = Response::Reply(reply);
-                state.pending.send_back(&message.id, Ok(response));
+    async fn process_message<R>(receiver: &R, state: &Arc<ClientState<S, H, E>>) -> RpcResult<()>
+    where
+        R: AsyncReceiver,
+    {
+        let header = Message::decode_header(receiver.message())?;
+        match header.kind {
+            MessageType::Reply => {
+                let data = Message::reply_data(receiver.message());
+                let mut reply = MessageBuffer::with_capacity(data.len());
+                unsafe { reply.copy_from(data) };
+                state
+                    .pending
+                    .send_back(&header.id, Ok(Response::Reply(reply)));
             }
-            MessageType::Error(err) => state.pending.send_back(&message.id, Err(err)),
-            MessageType::Pong => state.pending.send_back(&message.id, Ok(Response::Pong)),
-            MessageType::Call(call) => {
+            MessageType::Error => {
+                let err = Message::decode_error(receiver.message())?;
+                state.pending.send_back(&header.id, Err(err))
+            }
+            MessageType::Pong => state.pending.send_back(&header.id, Ok(Response::Pong)),
+            MessageType::Call => {
                 if let Some(_lock) = state.abort_lock.acquire() {
-                    let mut context = ClientContext::new(&message.id, state);
-                    return state.service.call(&call, &mut context).await;
+                    let method = Message::decode_method(receiver.message())?;
+                    let params = Message::param_data(receiver.message());
+                    let mut context = ClientContext::new(&header.id, state);
+                    return state.service.call(method, params, &mut context).await;
                 }
             }
-            MessageType::NullaryCall(method) => {
+            MessageType::NullaryCall => {
                 if let Some(_lock) = state.abort_lock.acquire() {
-                    let mut context = ClientContext::new(&message.id, state);
+                    let method = Message::decode_method(receiver.message())?;
+                    let mut context = ClientContext::new(&header.id, state);
                     return state.service.call_nullary(method, &mut context).await;
                 }
             }
-            MessageType::Ping => {
-                let pong = Message::pong(message.id);
-                return state.sender.lock().await.send(&pong).await;
-            }
+            MessageType::Ping => return state.sender.lock().await.pong(&header.id).await,
         }
         Ok(())
     }
-
-    /// Sends a message and waits for response.
-    async fn send_message(
-        &self,
-        message: &Message,
-        timeout_duration: Duration,
-    ) -> RpcResult<Response> {
-        // Safety: This value must not move.
-        let pinned_oneshot = Oneshot::new();
-
-        let entries = &self.state.pending;
-
-        entries.store(message.id, OneshotSender::new(&pinned_oneshot));
-
-        let on_drop = OnOneshotDrop::new(&message.id, entries);
-
-        self.state.sender.lock().await.send(message).await?;
-
-        match timeout(timeout_duration, OneshotReceiver::new(&pinned_oneshot)).await {
-            Ok(result) => {
-                on_drop.do_nothing();
-                result
-            }
-            Err(_) => Err(RpcError::error(ErrKind::Timeout)),
-        }
-    }
 }
 
-impl<T, H, E> RpcAsyncClient<RpcSender<T>, H, E>
+impl<T, H, E> RpcAsyncClient<MessageSender<T>, H, E>
 where
     T: TransportLayer + 'static,
     H: RpcService + Send + Sync + 'static,
     E: Reporter + Send + Sync + 'static,
 {
-    #[inline]
     pub async fn connect(
         capacity: usize,
         mut transport: T,
         reporter: E,
         handler: H,
-    ) -> RpcResult<RpcAsyncClient<RpcSender<T::OwnedWriteHalf>, H, E>> {
+    ) -> RpcResult<RpcAsyncClient<MessageSender<T::OwnedWriteHalf>, H, E>> {
         negotiation::initiate(&mut transport, RpcCapability::new(1, false)).await?;
 
         let (r, w) = transport.into_split();
 
         let instance = RpcAsyncClient::init(
             capacity,
-            RpcSender::new(w),
-            RpcReceiver::new(r),
+            MessageSender::new(w),
+            MessageReceiver::new(r),
             reporter,
             handler,
         );
@@ -440,19 +428,18 @@ where
     }
 }
 
-impl<T, H, E> RpcAsyncClient<EncryptedRpcSender<T>, H, E>
+impl<T, H, E> RpcAsyncClient<EncMessageSender<T>, H, E>
 where
     T: TransportLayer + 'static,
     H: RpcService + Send + Sync + 'static,
     E: Reporter + Send + Sync + 'static,
 {
-    #[inline]
     pub async fn connect_encrypted(
         capacity: usize,
         mut transport: T,
         reporter: E,
         handler: H,
-    ) -> RpcResult<RpcAsyncClient<EncryptedRpcSender<T::OwnedWriteHalf>, H, E>> {
+    ) -> RpcResult<RpcAsyncClient<EncMessageSender<T::OwnedWriteHalf>, H, E>> {
         negotiation::initiate(&mut transport, RpcCapability::new(1, true)).await?;
 
         let (r_key, w_key) = negotiation::initiate_key_exchange(&mut transport).await?;
@@ -461,8 +448,8 @@ where
 
         let instance = RpcAsyncClient::init(
             capacity,
-            EncryptedRpcSender::new(w, w_key),
-            EncryptedRpcReceiver::new(r, r_key),
+            EncMessageSender::new(w, w_key),
+            EncMessageReceiver::new(r, r_key),
             reporter,
             handler,
         );
@@ -473,7 +460,7 @@ where
 
 impl<S, H, E> AsyncRpcClient for RpcAsyncClient<S, H, E>
 where
-    S: AsyncRpcSender + Send + 'static,
+    S: AsyncSender + Send + 'static,
     H: RpcService + Send + Sync + 'static,
     E: Reporter + Send + Sync + 'static,
 {
@@ -481,7 +468,7 @@ where
     /// Default timeout is `30` seconds.
     async fn call<P, R>(&self, method: u16, params: &P) -> RpcResult<R>
     where
-        P: Serialize,
+        P: Serialize + Sync,
         R: for<'de> Deserialize<'de>,
     {
         self.call_timeout(method, params, Duration::from_secs(30))
@@ -491,19 +478,41 @@ where
     /// Makes a remote procedure call with custom timeout.
     async fn call_timeout<P, R>(&self, method: u16, params: &P, timeout: Duration) -> RpcResult<R>
     where
-        P: Serialize,
+        P: Serialize + Sync,
         R: for<'de> Deserialize<'de>,
     {
-        let message = Message::call_with(method, params)?;
+        // Safety: This value must not move.
+        let pinned_oneshot = Oneshot::new();
 
-        let response = self.send_message(&message, timeout).await?;
+        let entries = &self.state.pending;
 
-        match response {
-            Response::Reply(reply) => {
-                let result: R = Message::decode_from_slice(&reply.data)?;
-                Ok(result)
+        let id = MessageID::new_v4();
+
+        entries.store(id, OneshotSender::new(&pinned_oneshot));
+
+        let on_drop = OnOneshotDrop::new(&id, entries);
+
+        self.state
+            .sender
+            .lock()
+            .await
+            .call(&id, method, params)
+            .await?;
+
+        match tokio::time::timeout(timeout, OneshotReceiver::new(&pinned_oneshot)).await {
+            Ok(result) => {
+                on_drop.do_nothing();
+                match result {
+                    Ok(response) => {
+                        if let Response::Reply(reply) = response {
+                            return Message::decode_from_slice(&reply.data);
+                        }
+                        Err(RpcError::error(ErrKind::UnexpectedMsg))
+                    }
+                    Err(err) => Err(err),
+                }
             }
-            _ => Err(RpcError::error(ErrKind::UnexpectedMsg)),
+            Err(_) => Err(RpcError::error(ErrKind::Timeout)),
         }
     }
 
@@ -513,10 +522,15 @@ where
     /// the response will be discarded.
     async fn call_one_way<P>(&self, method: u16, params: &P) -> RpcResult<()>
     where
-        P: Serialize,
+        P: Serialize + Sync,
     {
-        let message = Message::call_with(method, params)?;
-        self.state.sender.lock().await.send(&message).await
+        let id = MessageID::new_v4();
+        self.state
+            .sender
+            .lock()
+            .await
+            .call(&id, method, params)
+            .await
     }
 
     /// Makes a remote procedure call.
@@ -534,14 +548,38 @@ where
     where
         R: for<'de> Deserialize<'de>,
     {
-        let message = Message::nullary_call(method);
-        let response = self.send_message(&message, timeout).await?;
-        match response {
-            Response::Reply(reply) => {
-                let result: R = Message::decode_from_slice(&reply.data)?;
-                Ok(result)
+        // Safety: This value must not move.
+        let pinned_oneshot = Oneshot::new();
+
+        let entries = &self.state.pending;
+
+        let id = MessageID::new_v4();
+
+        entries.store(id, OneshotSender::new(&pinned_oneshot));
+
+        let on_drop = OnOneshotDrop::new(&id, entries);
+
+        self.state
+            .sender
+            .lock()
+            .await
+            .call_nullary(&id, method)
+            .await?;
+
+        match tokio::time::timeout(timeout, OneshotReceiver::new(&pinned_oneshot)).await {
+            Ok(result) => {
+                on_drop.do_nothing();
+                match result {
+                    Ok(response) => {
+                        if let Response::Reply(reply) = response {
+                            return Message::decode_from_slice(&reply.data);
+                        }
+                        Err(RpcError::error(ErrKind::UnexpectedMsg))
+                    }
+                    Err(err) => Err(err),
+                }
             }
-            _ => Err(RpcError::error(ErrKind::UnexpectedMsg)),
+            Err(_) => Err(RpcError::error(ErrKind::Timeout)),
         }
     }
 
@@ -550,14 +588,37 @@ where
     /// This call is untracked, if the target method returns response,
     /// the response will be discarded.
     async fn call_nullary_one_way(&self, method: u16) -> RpcResult<()> {
-        let message = Message::nullary_call(method);
-        self.state.sender.lock().await.send(&message).await
+        let id = MessageID::new_v4();
+        self.state
+            .sender
+            .lock()
+            .await
+            .call_nullary(&id, method)
+            .await
     }
 
     /// Sends a `ping`` message.
     async fn ping(&self, timeout: Duration) -> RpcResult<()> {
-        let _ = self.send_message(&Message::ping(), timeout).await?;
-        Ok(())
+        // Safety: This value must not move.
+        let pinned_oneshot = Oneshot::new();
+
+        let entries = &self.state.pending;
+
+        let id = MessageID::new_v4();
+
+        entries.store(id, OneshotSender::new(&pinned_oneshot));
+
+        let on_drop = OnOneshotDrop::new(&id, entries);
+
+        self.state.sender.lock().await.ping(&id).await?;
+
+        match tokio::time::timeout(timeout, OneshotReceiver::new(&pinned_oneshot)).await {
+            Ok(_) => {
+                on_drop.do_nothing();
+                Ok(())
+            }
+            Err(_) => Err(RpcError::error(ErrKind::Timeout)),
+        }
     }
 
     /// Closes its sender and shutdowns the receiving task in graceful manner.
@@ -606,38 +667,51 @@ mod tests {
                 .expect("Failed to send confirmation");
 
             let (r, w) = transport.into_split();
-            let mut rpc_reader = RpcReceiver::new(r);
-            let mut rpc_writer = RpcSender::new(w);
+
+            let mut msg_sender = MessageSender::new(w);
+            let mut msg_receiver = MessageReceiver::new(r);
 
             loop {
-                match rpc_reader.receive().await {
-                    Ok(message) => match &message.kind {
-                        MessageType::Call(call) => match call.method {
-                            1 => {
-                                let params: String =
-                                    Message::decode_from_slice(&call.data).unwrap();
-                                assert_eq!(params, "call");
+                match msg_receiver.receive().await {
+                    Ok(_) => {
+                        let header = Message::decode_header(msg_receiver.message()).unwrap();
+                        match header.kind {
+                            MessageType::Call => {
+                                let method =
+                                    Message::decode_method(msg_receiver.message()).unwrap();
+                                match method {
+                                    1 => {
+                                        let params: String =
+                                            Message::decode_params(msg_receiver.message()).unwrap();
+                                        assert_eq!(params, "call");
 
-                                let response = Message::reply_with(message.id, &"reply").unwrap();
-                                let _ = rpc_writer.send(&response).await;
+                                        msg_sender.reply(&header.id, &"reply").await.unwrap();
+                                    }
+                                    2 => {
+                                        msg_sender
+                                            .error(
+                                                &header.id,
+                                                RpcError::error(ErrKind::Unimplemented),
+                                            )
+                                            .await
+                                            .unwrap();
+                                    }
+                                    _ => panic!("undefined method"),
+                                }
                             }
-                            2 => {
-                                let error = Message::error(
-                                    message.id,
-                                    RpcError::error(ErrKind::Unimplemented),
-                                );
-                                let _ = rpc_writer.send(&error).await;
+                            MessageType::NullaryCall => {
+                                let method =
+                                    Message::decode_method(msg_receiver.message()).unwrap();
+                                assert_eq!(method, 1);
+
+                                msg_sender
+                                    .reply(&header.id, &"nullary call reply")
+                                    .await
+                                    .unwrap();
                             }
-                            _ => panic!("undefined method"),
-                        },
-                        MessageType::NullaryCall(method) => {
-                            assert_eq!(*method, 1);
-                            let response =
-                                Message::reply_with(message.id, &"nullary call reply").unwrap();
-                            let _ = rpc_writer.send(&response).await;
+                            _ => panic!("Expected call"),
                         }
-                        _ => panic!("Expected call"),
-                    },
+                    }
                     Err(e) => {
                         println!("Server error: {e}");
                         break;
@@ -653,10 +727,10 @@ mod tests {
             .await
             .unwrap();
 
-        let reply = client.call::<&str, String>(1, &"call").await.unwrap();
+        let reply: String = client.call(1, &"call").await.unwrap();
         assert_eq!(reply, "reply");
 
-        let reply_nullary = client.call_nullary::<String>(1).await.unwrap();
+        let reply_nullary: String = client.call_nullary(1).await.unwrap();
         assert_eq!(reply_nullary, "nullary call reply");
 
         let err: RpcError = client.call::<&str, String>(2, &"call").await.unwrap_err();
@@ -691,21 +765,26 @@ mod tests {
                 .expect("Server encryption setup failed");
 
             let (r, w) = transport.into_split();
-            let mut rpc_reader = EncryptedRpcReceiver::new(r, r_key);
-            let mut rpc_writer = EncryptedRpcSender::new(w, w_key);
 
-            match rpc_reader.receive().await {
-                Ok(message) => match &message.kind {
-                    MessageType::Call(call) => {
-                        assert_eq!(call.method, 1);
-                        let params: String = Message::decode_from_slice(&call.data).unwrap();
-                        assert_eq!(params, "call");
+            let mut msg_sender = EncMessageSender::new(w, w_key);
+            let mut msg_receiver = EncMessageReceiver::new(r, r_key);
 
-                        let response = Message::reply_with(message.id, &"reply").unwrap();
-                        let _ = rpc_writer.send(&response).await;
+            match msg_receiver.receive().await {
+                Ok(_) => {
+                    let header = Message::decode_header(msg_receiver.message()).unwrap();
+                    match header.kind {
+                        MessageType::Call => {
+                            let method = Message::decode_method(msg_receiver.message()).unwrap();
+                            assert_eq!(method, 1);
+                            let params: String =
+                                Message::decode_params(msg_receiver.message()).unwrap();
+                            assert_eq!(params, "call");
+
+                            msg_sender.reply(&header.id, &"reply").await.unwrap();
+                        }
+                        _ => panic!("Expected call message"),
                     }
-                    _ => panic!("Expected call message"),
-                },
+                }
                 Err(e) => {
                     println!("Server error: {e}");
                 }

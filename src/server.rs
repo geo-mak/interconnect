@@ -11,20 +11,21 @@ use std::time::Duration;
 
 use pin_project_lite::pin_project;
 
+use serde::Serialize;
 use tokio::task::JoinHandle;
 use tokio::time::timeout;
 
 use crate::capability::{EncryptionState, negotiation};
+use crate::core::{
+    AsyncReceiver, AsyncSender, EncMessageReceiver, EncMessageSender, MessageID, MessageReceiver,
+    MessageSender,
+};
 use crate::error::{ErrKind, RpcError, RpcResult};
-use crate::message::{Call, Message, MessageID, MessageType, Reply};
 use crate::report::Reporter;
 use crate::service::{CallContext, RpcService};
-use crate::stream::{
-    AsyncRpcReceiver, AsyncRpcSender, EncryptedRpcReceiver, EncryptedRpcSender, RpcReceiver,
-    RpcSender,
-};
 use crate::sync::{DynamicLatch, IList, INode, NOOP_WAKER};
 use crate::transport::{TransportLayer, TransportListener};
+use crate::{Message, MessageType};
 
 thread_local! {
     // Must be non-zero.
@@ -267,7 +268,7 @@ struct ServerContext<'a, S> {
 
 impl<'a, S> ServerContext<'a, S>
 where
-    S: AsyncRpcSender + Send,
+    S: AsyncSender + Send,
 {
     #[inline(always)]
     const fn new(id: &'a MessageID, sender: &'a mut S) -> Self {
@@ -277,7 +278,7 @@ where
 
 impl<'a, S> CallContext for ServerContext<'a, S>
 where
-    S: AsyncRpcSender + Send,
+    S: AsyncSender + Send,
 {
     type ID = MessageID;
 
@@ -287,27 +288,23 @@ where
     }
 
     #[inline]
-    async fn send_reply(&mut self, reply: Reply) -> RpcResult<()> {
-        self.sender.send(&Message::reply(*self.id, reply)).await
+    async fn send_reply<R: Serialize + Sync>(&mut self, reply: &R) -> RpcResult<()> {
+        self.sender.reply(self.id, reply).await
     }
 
     #[inline]
     async fn send_error(&mut self, err: RpcError) -> RpcResult<()> {
-        self.sender.send(&Message::error(*self.id, err)).await
+        self.sender.error(self.id, err).await
     }
 
     #[inline]
-    async fn call(&mut self, call: Call) -> RpcResult<()> {
-        self.sender
-            .send(&Message::new(*self.id, MessageType::Call(call)))
-            .await
+    async fn call<P: Serialize + Sync>(&mut self, method: u16, params: &P) -> RpcResult<()> {
+        self.sender.call(self.id, method, &params).await
     }
 
     #[inline]
     async fn call_nullary(&mut self, method: u16) -> RpcResult<()> {
-        self.sender
-            .send(&Message::new(*self.id, MessageType::NullaryCall(method)))
-            .await
+        self.sender.call_nullary(self.id, method).await
     }
 }
 
@@ -349,9 +346,9 @@ where
     ///
     /// # Reporting
     ///
-    /// Reporting requires a reporter instance, that must be passed explicitly as parameter.
+    /// Reporting requires a reporter instance that must be passed explicitly as parameter.
     ///
-    /// Reporter is the component responsible for the "logging" of server events.
+    /// Reporter is the component responsible for the "logging" of the server events.
     ///
     /// If reporting is not needed, the no-op implementation `()` can be passed as value.
     ///
@@ -475,13 +472,13 @@ where
         let (r, w) = transport.into_split();
         match encrypted {
             None => {
-                let mut s = RpcSender::new(w);
-                let mut r = RpcReceiver::new(r);
+                let mut s = MessageSender::new(w);
+                let mut r = MessageReceiver::new(r);
                 Self::session(task, &mut s, &mut r).await
             }
             Some((r_key, w_key)) => {
-                let mut s = EncryptedRpcSender::new(w, w_key);
-                let mut r = EncryptedRpcReceiver::new(r, r_key);
+                let mut s = EncMessageSender::new(w, w_key);
+                let mut r = EncMessageReceiver::new(r, r_key);
                 Self::session(task, &mut s, &mut r).await
             }
         }
@@ -522,28 +519,36 @@ where
         receiver: &mut R,
     ) -> RpcResult<()>
     where
-        S: AsyncRpcSender + Send,
-        R: AsyncRpcReceiver,
+        S: AsyncSender + Send,
+        R: AsyncReceiver,
     {
         let service = task.srv_state.service.clone();
         loop {
             match task.wait_cancelable(receiver.receive()).await {
-                Ok(result) => {
-                    let message = result?;
-                    match &message.kind {
-                        MessageType::Call(call) => {
-                            let mut context = ServerContext::new(&message.id, sender);
-                            service.call(call, &mut context).await?
+                Ok(_) => {
+                    let header = Message::decode_header(receiver.message())?;
+                    match header.kind {
+                        MessageType::Call => {
+                            let method = Message::decode_method(receiver.message())?;
+                            let mut context = ServerContext::new(&header.id, sender);
+                            service
+                                .call(
+                                    method,
+                                    Message::param_data(receiver.message()),
+                                    &mut context,
+                                )
+                                .await?
                         }
-                        MessageType::NullaryCall(method) => {
-                            let mut context = ServerContext::new(&message.id, sender);
-                            service.call_nullary(*method, &mut context).await?
+                        MessageType::NullaryCall => {
+                            let method = Message::decode_method(receiver.message())?;
+                            let mut context = ServerContext::new(&header.id, sender);
+                            service.call_nullary(method, &mut context).await?
                         }
-                        MessageType::Ping => sender.send(&Message::pong(message.id)).await?,
+                        MessageType::Ping => sender.pong(&header.id).await?,
                         _ => {
                             task.srv_state
                                 .report
-                                .alert("Received unexpected message type: ", &message.kind);
+                                .alert("Received unexpected message type: ", &header.kind);
                         }
                     }
                 }
@@ -584,32 +589,30 @@ mod tests {
 
     use tokio::net::{TcpListener, TcpStream, UnixListener, UnixStream};
 
+    use crate::Message;
     use crate::capability::{self, RpcCapability};
     use crate::error::{ErrKind, RpcError};
-    use crate::message::{Call, Reply};
     use crate::report::STDIOReporter;
 
     #[derive(Clone)]
     struct RpcTestService {}
 
     impl RpcService for RpcTestService {
-        async fn call<C>(&self, call: &Call, context: &mut C) -> RpcResult<()>
+        async fn call<C>(&self, method: u16, params: &[u8], context: &mut C) -> RpcResult<()>
         where
             C: CallContext + Send,
         {
-            match call.method {
+            match method {
                 1 => {
-                    let src = call.decode_as::<String>().unwrap();
-                    context
-                        .send_reply(Reply::with(&format!("Reply to {src}")).unwrap())
-                        .await
+                    let src = Message::decode_from_slice::<String>(params).unwrap();
+                    context.send_reply(&format!("Reply to {src}")).await
                 }
                 _ => Err(RpcError::error(ErrKind::Unimplemented)),
             }
         }
     }
 
-    async fn make_tcp_rpc_channel(server: &str) -> (impl AsyncRpcSender, impl AsyncRpcReceiver) {
+    async fn make_tcp_rpc_channel(server: &str) -> (impl AsyncSender, impl AsyncReceiver) {
         let mut transport = TcpStream::connect(server).await.unwrap();
 
         capability::negotiation::initiate(&mut transport, RpcCapability::new(1, false))
@@ -617,12 +620,12 @@ mod tests {
             .expect("client negotiation failed");
 
         let (reader, writer) = transport.into_split();
-        (RpcSender::new(writer), RpcReceiver::new(reader))
+        (MessageSender::new(writer), MessageReceiver::new(reader))
     }
 
     async fn make_encrypted_tcp_rpc_channel(
         server: &str,
-    ) -> (impl AsyncRpcSender, impl AsyncRpcReceiver) {
+    ) -> (impl AsyncSender, impl AsyncReceiver) {
         let mut transport = TcpStream::connect(server).await.unwrap();
 
         capability::negotiation::initiate(&mut transport, RpcCapability::new(1, true))
@@ -636,8 +639,8 @@ mod tests {
         let (r, w) = transport.into_split();
 
         (
-            EncryptedRpcSender::new(w, w_key),
-            EncryptedRpcReceiver::new(r, r_key),
+            EncMessageSender::new(w, w_key),
+            EncMessageReceiver::new(r, r_key),
         )
     }
 
@@ -656,23 +659,24 @@ mod tests {
         .await
         .unwrap();
 
-        let (mut rpc_tx_1, mut rpc_rx_1) = make_tcp_rpc_channel(srv_addr).await;
-        let (mut rpc_tx_2, mut rpc_rx_2) = make_tcp_rpc_channel(srv_addr).await;
-        let (mut rpc_tx_3, mut rpc_rx_3) = make_tcp_rpc_channel(srv_addr).await;
+        let (mut msg_sender_1, mut msg_receiver_1) = make_tcp_rpc_channel(srv_addr).await;
+        let (mut msg_sender_2, mut msg_receiver_2) = make_tcp_rpc_channel(srv_addr).await;
+        let (mut msg_sender_3, mut msg_receiver_3) = make_tcp_rpc_channel(srv_addr).await;
 
-        let rpc_call_1 = Message::call_with(1, &"C1").unwrap();
-        let rpc_call_2 = Message::call_with(1, &"C2").unwrap();
-        let rpc_call_3 = Message::call_with(1, &"C3").unwrap();
+        let id = MessageID::new_v4();
 
-        rpc_tx_1.send(&rpc_call_1).await.unwrap();
-        rpc_tx_2.send(&rpc_call_2).await.unwrap();
-        rpc_tx_3.send(&rpc_call_3).await.unwrap();
+        msg_sender_1.call(&id, 1, &"C1").await.unwrap();
+        msg_sender_2.call(&id, 1, &"C2").await.unwrap();
+        msg_sender_3.call(&id, 1, &"C3").await.unwrap();
 
         let t1 = tokio::spawn(async move {
-            let reply_msg = rpc_rx_1.receive().await.unwrap();
-            match reply_msg.kind {
-                MessageType::Reply(reply) => {
-                    let response: String = Message::decode_from_slice(&reply.data).unwrap();
+            msg_receiver_1.receive().await.unwrap();
+
+            let header = Message::decode_header(msg_receiver_1.message()).unwrap();
+
+            match header.kind {
+                MessageType::Reply => {
+                    let response: String = Message::decode_reply(msg_receiver_1.message()).unwrap();
                     assert!(&response == "Reply to C1");
                 }
                 _ => panic!("Expected reply"),
@@ -680,10 +684,13 @@ mod tests {
         });
 
         let t2 = tokio::spawn(async move {
-            let reply_msg = rpc_rx_2.receive().await.unwrap();
-            match reply_msg.kind {
-                MessageType::Reply(reply) => {
-                    let response: String = Message::decode_from_slice(&reply.data).unwrap();
+            msg_receiver_2.receive().await.unwrap();
+
+            let header = Message::decode_header(msg_receiver_2.message()).unwrap();
+
+            match header.kind {
+                MessageType::Reply => {
+                    let response: String = Message::decode_reply(msg_receiver_2.message()).unwrap();
                     assert!(&response == "Reply to C2");
                 }
                 _ => panic!("Expected reply"),
@@ -691,10 +698,13 @@ mod tests {
         });
 
         let t3 = tokio::spawn(async move {
-            let reply_msg = rpc_rx_3.receive().await.unwrap();
-            match reply_msg.kind {
-                MessageType::Reply(reply) => {
-                    let response: String = Message::decode_from_slice(&reply.data).unwrap();
+            msg_receiver_3.receive().await.unwrap();
+
+            let header = Message::decode_header(msg_receiver_3.message()).unwrap();
+
+            match header.kind {
+                MessageType::Reply => {
+                    let response: String = Message::decode_reply(msg_receiver_3.message()).unwrap();
                     assert!(&response == "Reply to C3");
                 }
                 _ => panic!("Expected reply"),
@@ -740,15 +750,19 @@ mod tests {
             assert!(response == Err(RpcError::error(ErrKind::CapabilityMismatch)));
         };
 
-        let (mut rpc_tx, mut rpc_rx) = make_encrypted_tcp_rpc_channel(srv_addr).await;
+        let (mut msg_sender, mut msg_receiver) = make_encrypted_tcp_rpc_channel(srv_addr).await;
 
-        let call_msg = Message::call_with(1, &"C1").unwrap();
-        rpc_tx.send(&call_msg).await.unwrap();
+        let id = MessageID::new_v4();
 
-        let reply_msg = rpc_rx.receive().await.unwrap();
-        match reply_msg.kind {
-            MessageType::Reply(reply) => {
-                let response: String = Message::decode_from_slice(&reply.data).unwrap();
+        msg_sender.call(&id, 1, &"C1").await.unwrap();
+
+        msg_receiver.receive().await.unwrap();
+
+        let header = Message::decode_header(msg_receiver.message()).unwrap();
+
+        match header.kind {
+            MessageType::Reply => {
+                let response: String = Message::decode_reply(msg_receiver.message()).unwrap();
                 assert!(&response == "Reply to C1");
             }
             _ => panic!("Expected reply"),
@@ -780,18 +794,23 @@ mod tests {
             .expect("client negotiation failed");
 
         let (reader, writer) = transport.into_split();
-        let mut rpc_rx = RpcReceiver::new(reader);
-        let mut rpc_tx = RpcSender::new(writer);
+
+        let mut msg_sender = MessageSender::new(writer);
+        let mut msg_receiver = MessageReceiver::new(reader);
 
         tokio::time::sleep(Duration::from_millis(10)).await;
 
-        let call_msg = Message::call_with(1, &"C1").unwrap();
-        rpc_tx.send(&call_msg).await.unwrap();
+        let id = MessageID::new_v4();
 
-        let reply_msg = rpc_rx.receive().await.unwrap();
-        match reply_msg.kind {
-            MessageType::Reply(reply) => {
-                let response: String = Message::decode_from_slice(&reply.data).unwrap();
+        msg_sender.call(&id, 1, &"C1").await.unwrap();
+
+        msg_receiver.receive().await.unwrap();
+
+        let header = Message::decode_header(msg_receiver.message()).unwrap();
+
+        match header.kind {
+            MessageType::Reply => {
+                let response: String = Message::decode_reply(msg_receiver.message()).unwrap();
                 assert!(&response == "Reply to C1");
             }
             _ => panic!("Expected reply"),

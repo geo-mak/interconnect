@@ -1,7 +1,8 @@
 use std::future::Future;
 
+use serde::Serialize;
+
 use crate::error::{ErrKind, RpcError, RpcResult};
-use crate::message::{Call, Reply};
 
 pub trait CallContext {
     type ID: Copy;
@@ -12,7 +13,10 @@ pub trait CallContext {
     /// Sends a reply message back to the caller.
     ///
     /// Unless noted otherwise by the implementation, this method is **not** safe to be canceled.
-    fn send_reply(&mut self, reply: Reply) -> impl Future<Output = RpcResult<()>> + Send;
+    fn send_reply<R: Serialize + Sync>(
+        &mut self,
+        reply: &R,
+    ) -> impl Future<Output = RpcResult<()>> + Send;
 
     /// Sends an error message back to the caller.
     ///
@@ -24,7 +28,11 @@ pub trait CallContext {
     /// Unless noted otherwise by the implementation, this method is **not** safe to be canceled.
     ///
     /// By default, it returns `Unimplemented` error.
-    fn call(&mut self, _call: Call) -> impl Future<Output = RpcResult<()>> + Send {
+    fn call<P: Serialize + Sync>(
+        &mut self,
+        _method: u16,
+        _params: &P,
+    ) -> impl Future<Output = RpcResult<()>> + Send {
         std::future::ready(Err(RpcError::error(ErrKind::Unimplemented)))
     }
 
@@ -47,7 +55,12 @@ pub trait RpcService {
     /// Response to the call is optional and can be done via the context's methods.
     ///
     /// By default, it sends `Unimplemented` error to the caller.
-    fn call<C>(&self, _call: &Call, context: &mut C) -> impl Future<Output = RpcResult<()>> + Send
+    fn call<C>(
+        &self,
+        _method: u16,
+        _params: &[u8],
+        context: &mut C,
+    ) -> impl Future<Output = RpcResult<()>> + Send
     where
         C: CallContext + Send,
     {

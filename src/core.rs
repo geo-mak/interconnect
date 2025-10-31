@@ -27,12 +27,14 @@ use crate::private::Private;
 
 const CONFIG: Configuration = standard();
 
-const HEADER_LEN: usize = 4;
+const STD_MESSAGE_LEN: usize = 4;
 
-const MAX_MESSAGE_SIZE: u32 = 4 * 1024 * 1024;
+const STD_MAX_MESSAGE_SIZE: u32 = 4 * 1024 * 1024;
+
+const STD_FRAMING_MIN_ALLOC: usize = STD_MESSAGE_LEN + Header::BYTES + RpcError::BYTES + 2;
 
 // Definitely not for bulk throughput or streams, but streams are a different story.
-const FRAMING_CAPACITY: usize = 1024;
+const STD_FRAMING_ALLOC: usize = 1024;
 
 /// Message types of the RPC protocol.
 #[derive(Debug, Copy, Clone, PartialEq)]
@@ -155,20 +157,6 @@ impl Message {
     }
 
     #[inline]
-    pub const unsafe fn encode_header_into_unchecked(
-        id: &MessageID,
-        kind: MessageType,
-        output: &mut [u8],
-    ) {
-        debug_assert!(output.len() >= 17);
-        unsafe {
-            let ptr = output.as_mut_ptr();
-            std::ptr::copy_nonoverlapping(id.to_bytes_le().as_ptr(), ptr, 16);
-            *ptr.add(16) = kind as u8;
-        }
-    }
-
-    #[inline]
     pub fn decode_header(message: &[u8]) -> RpcResult<Header> {
         if unlikely(message.len() < 17) {
             return Err(RpcError::error(ErrKind::Decoding));
@@ -200,17 +188,6 @@ impl Message {
     }
 
     #[inline]
-    pub unsafe fn encode_error_into_unchecked(err: RpcError, output: &mut [u8]) {
-        debug_assert!(output.len() >= 5);
-        unsafe {
-            let ptr = output.as_mut_ptr();
-            *ptr = err.kind as u8;
-            ptr.add(1)
-                .copy_from_nonoverlapping(err.refer.to_le_bytes().as_ptr(), 4);
-        }
-    }
-
-    #[inline]
     pub fn decode_error(message: &[u8]) -> RpcResult<RpcError> {
         let seg_err = &message[17..];
         if unlikely(seg_err.len() < 5) {
@@ -224,55 +201,6 @@ impl Message {
         let refer = i32::from_le_bytes(bytes);
 
         Ok(RpcError { kind, refer })
-    }
-
-    pub fn call<P, T>(id: &MessageID, method: u16, params: &P, output: &mut T) -> RpcResult<()>
-    where
-        P: Serialize,
-        T: MessageWriter,
-    {
-        output.write(&Self::encode_header(&id, MessageType::Call))?;
-        output.write(&method.to_le_bytes())?;
-        Message::encode_into_writer(params, output)
-    }
-
-    pub fn call_nullary<T>(id: &MessageID, method: u16, output: &mut T) -> RpcResult<()>
-    where
-        T: MessageWriter,
-    {
-        output.write(&Self::encode_header(&id, MessageType::NullaryCall))?;
-        output.write(&method.to_le_bytes())
-    }
-
-    pub fn reply<R, T>(id: &MessageID, reply: &R, output: &mut T) -> RpcResult<()>
-    where
-        R: Serialize,
-        T: MessageWriter,
-    {
-        output.write(&Self::encode_header(&id, MessageType::Reply))?;
-        Self::encode_into_writer(reply, output)
-    }
-
-    pub fn error<T>(id: &MessageID, err: RpcError, output: &mut T) -> RpcResult<()>
-    where
-        T: MessageWriter,
-    {
-        output.write(&Self::encode_header(&id, MessageType::Error))?;
-        output.write(&Self::encode_error(err))
-    }
-
-    pub fn ping<T>(id: &MessageID, output: &mut T) -> RpcResult<()>
-    where
-        T: MessageWriter,
-    {
-        output.write(&Self::encode_header(&id, MessageType::Ping))
-    }
-
-    pub fn pong<T>(id: &MessageID, output: &mut T) -> RpcResult<()>
-    where
-        T: MessageWriter,
-    {
-        output.write(&Self::encode_header(&id, MessageType::Pong))
     }
 
     pub fn decode_method(message: &[u8]) -> RpcResult<u16> {
@@ -426,7 +354,7 @@ impl<T> MessageSender<T> {
         Self {
             writer,
             buffer: MessageBuffer {
-                data: Vec::with_capacity(FRAMING_CAPACITY),
+                data: Vec::with_capacity(STD_FRAMING_ALLOC),
             },
         }
     }
@@ -436,7 +364,7 @@ impl<T> MessageSender<T> {
         Self {
             writer,
             buffer: MessageBuffer {
-                data: Vec::with_capacity(framing_cap.max(HEADER_LEN)),
+                data: Vec::with_capacity(framing_cap.max(STD_FRAMING_MIN_ALLOC)),
             },
         }
     }
@@ -445,9 +373,9 @@ impl<T> MessageSender<T> {
 impl<T: AsyncIOWrite + Send + Unpin> MessageSender<T> {
     #[inline]
     async fn write_all(&mut self) -> RpcResult<()> {
-        let len = (self.buffer.data.len() - HEADER_LEN) as u32;
+        let len = (self.buffer.data.len() - STD_MESSAGE_LEN) as u32;
 
-        self.buffer.data[0..HEADER_LEN].copy_from_slice(&len.to_le_bytes());
+        self.buffer.data[0..STD_MESSAGE_LEN].copy_from_slice(&len.to_le_bytes());
 
         self.writer.write_all(&self.buffer.data).await?;
         Ok(())
@@ -461,38 +389,49 @@ impl<T: AsyncIOWrite + Send + Unpin> AsyncSender for MessageSender<T> {
         method: u16,
         params: &P,
     ) -> RpcResult<()> {
-        unsafe { self.buffer.data.set_len(HEADER_LEN) };
-        Message::call(id, method, params, &mut self.buffer)?;
+        unsafe { self.buffer.data.set_len(STD_MESSAGE_LEN) };
+        self.buffer
+            .write(&Message::encode_header(id, MessageType::Call))?;
+        self.buffer.write(&method.to_le_bytes())?;
+        Message::encode_into_writer(params, &mut self.buffer)?;
         self.write_all().await
     }
 
     async fn call_nullary(&mut self, id: &MessageID, method: u16) -> RpcResult<()> {
-        unsafe { self.buffer.data.set_len(HEADER_LEN) };
-        Message::call_nullary(id, method, &mut self.buffer)?;
+        unsafe { self.buffer.data.set_len(STD_MESSAGE_LEN) };
+        self.buffer
+            .write(&Message::encode_header(id, MessageType::NullaryCall))?;
+        self.buffer.write(&method.to_le_bytes())?;
         self.write_all().await
     }
 
     async fn reply<R: Serialize + Sync>(&mut self, id: &MessageID, reply: &R) -> RpcResult<()> {
-        unsafe { self.buffer.data.set_len(HEADER_LEN) };
-        Message::reply(id, reply, &mut self.buffer)?;
+        unsafe { self.buffer.data.set_len(STD_MESSAGE_LEN) };
+        self.buffer
+            .write(&Message::encode_header(id, MessageType::Reply))?;
+        Message::encode_into_writer(reply, &mut self.buffer)?;
         self.write_all().await
     }
 
     async fn error(&mut self, id: &MessageID, err: RpcError) -> RpcResult<()> {
-        unsafe { self.buffer.data.set_len(HEADER_LEN) };
-        Message::error(id, err, &mut self.buffer)?;
+        unsafe { self.buffer.data.set_len(STD_MESSAGE_LEN) };
+        self.buffer
+            .write(&Message::encode_header(id, MessageType::Error))?;
+        self.buffer.write(&Message::encode_error(err))?;
         self.write_all().await
     }
 
     async fn ping(&mut self, id: &MessageID) -> RpcResult<()> {
-        unsafe { self.buffer.data.set_len(HEADER_LEN) };
-        Message::ping(id, &mut self.buffer)?;
+        unsafe { self.buffer.data.set_len(STD_MESSAGE_LEN) };
+        self.buffer
+            .write(&Message::encode_header(id, MessageType::Ping))?;
         self.write_all().await
     }
 
     async fn pong(&mut self, id: &MessageID) -> RpcResult<()> {
-        unsafe { self.buffer.data.set_len(HEADER_LEN) };
-        Message::pong(id, &mut self.buffer)?;
+        unsafe { self.buffer.data.set_len(STD_MESSAGE_LEN) };
+        self.buffer
+            .write(&Message::encode_header(id, MessageType::Pong))?;
         self.write_all().await
     }
 
@@ -591,7 +530,7 @@ impl<T> EncMessageSender<T> {
         Self {
             writer,
             state,
-            buffer: MessageBuffer::with_capacity(FRAMING_CAPACITY),
+            buffer: MessageBuffer::with_capacity(STD_FRAMING_ALLOC),
         }
     }
 
@@ -600,7 +539,7 @@ impl<T> EncMessageSender<T> {
         Self {
             writer,
             state,
-            buffer: MessageBuffer::with_capacity(framing_cap.max(HEADER_LEN)),
+            buffer: MessageBuffer::with_capacity(framing_cap.max(STD_FRAMING_MIN_ALLOC)),
         }
     }
 }
@@ -609,14 +548,14 @@ impl<T: AsyncIOWrite + Send + Unpin> EncMessageSender<T> {
     async fn write_all(&mut self) -> RpcResult<()> {
         let mut enc_buf = ExtBufferView {
             buf: &mut self.buffer.data,
-            offset: HEADER_LEN,
+            offset: STD_MESSAGE_LEN,
         };
 
         self.state.encrypt(&mut enc_buf, b"")?;
 
-        let len = (self.buffer.data.len() - HEADER_LEN) as u32;
+        let len = (self.buffer.data.len() - STD_MESSAGE_LEN) as u32;
 
-        self.buffer.data[0..HEADER_LEN].copy_from_slice(&len.to_le_bytes());
+        self.buffer.data[0..STD_MESSAGE_LEN].copy_from_slice(&len.to_le_bytes());
 
         self.writer.write_all(&self.buffer.data).await?;
         Ok(())
@@ -630,50 +569,49 @@ impl<T: AsyncIOWrite + Send + Unpin> AsyncSender for EncMessageSender<T> {
         method: u16,
         params: &P,
     ) -> RpcResult<()> {
-        unsafe { self.buffer.data.set_len(HEADER_LEN) };
-
-        Message::call(id, method, params, &mut self.buffer)?;
-
+        unsafe { self.buffer.data.set_len(STD_MESSAGE_LEN) };
+        self.buffer
+            .write(&Message::encode_header(id, MessageType::Call))?;
+        self.buffer.write(&method.to_le_bytes())?;
+        Message::encode_into_writer(params, &mut self.buffer)?;
         self.write_all().await
     }
 
     async fn call_nullary(&mut self, id: &MessageID, method: u16) -> RpcResult<()> {
-        unsafe { self.buffer.data.set_len(HEADER_LEN) };
-
-        Message::call_nullary(id, method, &mut self.buffer)?;
-
+        unsafe { self.buffer.data.set_len(STD_MESSAGE_LEN) };
+        self.buffer
+            .write(&Message::encode_header(id, MessageType::NullaryCall))?;
+        self.buffer.write(&method.to_le_bytes())?;
         self.write_all().await
     }
 
     async fn reply<R: Serialize>(&mut self, id: &MessageID, reply: &R) -> RpcResult<()> {
-        unsafe { self.buffer.data.set_len(HEADER_LEN) };
-
-        Message::reply(id, reply, &mut self.buffer)?;
-
+        unsafe { self.buffer.data.set_len(STD_MESSAGE_LEN) };
+        self.buffer
+            .write(&Message::encode_header(id, MessageType::Reply))?;
+        Message::encode_into_writer(reply, &mut self.buffer)?;
         self.write_all().await
     }
 
     async fn error(&mut self, id: &MessageID, err: RpcError) -> RpcResult<()> {
-        unsafe { self.buffer.data.set_len(HEADER_LEN) };
-
-        Message::error(id, err, &mut self.buffer)?;
-
+        unsafe { self.buffer.data.set_len(STD_MESSAGE_LEN) };
+        self.buffer
+            .write(&Message::encode_header(id, MessageType::Error))?;
+        self.buffer.write(&Message::encode_error(err))?;
         self.write_all().await
     }
 
     async fn ping(&mut self, id: &MessageID) -> RpcResult<()> {
-        unsafe { self.buffer.data.set_len(HEADER_LEN) };
-
-        Message::ping(id, &mut self.buffer)?;
-
+        unsafe { self.buffer.data.set_len(STD_MESSAGE_LEN) };
+        self.buffer
+            .write(&Message::encode_header(id, MessageType::Ping))?;
         self.write_all().await
     }
 
     async fn pong(&mut self, id: &MessageID) -> RpcResult<()> {
-        unsafe { self.buffer.data.set_len(HEADER_LEN) };
-
-        Message::pong(id, &mut self.buffer)?;
-
+        unsafe { self.buffer.data.set_len(STD_MESSAGE_LEN) };
+        self.buffer
+            .write(&Message::encode_header(id, MessageType::Pong))?;
         self.write_all().await
     }
 
@@ -693,7 +631,7 @@ impl<T> MessageReceiver<T> {
     pub fn new(reader: T) -> Self {
         Self {
             reader,
-            buffer: MessageBuffer::with_capacity(FRAMING_CAPACITY),
+            buffer: MessageBuffer::with_capacity(STD_FRAMING_ALLOC),
         }
     }
 
@@ -714,7 +652,7 @@ impl<T: AsyncIORead + Send + Unpin> AsyncReceiver for MessageReceiver<T> {
 
         let len = u32::from_le_bytes(len_bytes);
 
-        if unlikely(len > MAX_MESSAGE_SIZE) {
+        if unlikely(len > STD_MAX_MESSAGE_SIZE) {
             return Err(RpcError::error(ErrKind::LargeMessage));
         }
 
@@ -751,7 +689,7 @@ impl<T> EncMessageReceiver<T> {
         Self {
             reader,
             state,
-            buffer: MessageBuffer::with_capacity(FRAMING_CAPACITY),
+            buffer: MessageBuffer::with_capacity(STD_FRAMING_ALLOC),
         }
     }
 
@@ -773,7 +711,7 @@ impl<T: AsyncIORead + Send + Unpin> AsyncReceiver for EncMessageReceiver<T> {
 
         let len = u32::from_le_bytes(len_bytes);
 
-        if unlikely(len > MAX_MESSAGE_SIZE) {
+        if unlikely(len > STD_MAX_MESSAGE_SIZE) {
             return Err(RpcError::error(ErrKind::LargeMessage));
         }
 

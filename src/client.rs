@@ -70,6 +70,7 @@ pub trait AsyncRpcClient {
 struct Oneshot<T> {
     state: AtomicU8,
     waker: UnsafeCell<Waker>,
+    // TODO: Maybeuninit?
     value: UnsafeCell<Option<T>>,
     _pin: PhantomPinned,
 }
@@ -87,6 +88,12 @@ impl<T> Oneshot<T> {
             value: UnsafeCell::new(None),
             _pin: PhantomPinned,
         }
+    }
+
+    #[inline(always)]
+    const fn take_value(&self) -> Option<T> {
+        let value_ptr = self.value.get();
+        unsafe { (*value_ptr).take() }
     }
 }
 
@@ -133,7 +140,7 @@ impl<'a, T> OneshotReceiver<'a, T> {
 }
 
 impl<'a, T> Future for OneshotReceiver<'a, T> {
-    type Output = T;
+    type Output = ();
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let oneshot = unsafe { self.get_unchecked_mut().oneshot };
@@ -153,9 +160,7 @@ impl<'a, T> Future for OneshotReceiver<'a, T> {
         }
 
         // Safety: RCV_READY indicates that writing has been completed.
-        let value_ptr = oneshot.value.get();
-        let received_value = unsafe { (*value_ptr).take().unwrap() };
-        Poll::Ready(received_value)
+        Poll::Ready(())
     }
 }
 
@@ -504,8 +509,10 @@ where
             .await?;
 
         match tokio::time::timeout(timeout, OneshotReceiver::new(&pinned_oneshot)).await {
-            Ok(result) => {
+            Ok(_) => {
                 on_drop.do_nothing();
+                // RT_ASSERT
+                let result = pinned_oneshot.take_value().unwrap();
                 match result {
                     Ok(response) => {
                         if let Response::Reply(reply) = response {
@@ -571,8 +578,10 @@ where
             .await?;
 
         match tokio::time::timeout(timeout, OneshotReceiver::new(&pinned_oneshot)).await {
-            Ok(result) => {
+            Ok(_) => {
                 on_drop.do_nothing();
+                // RT_ASSERT
+                let result = pinned_oneshot.take_value().unwrap();
                 match result {
                     Ok(response) => {
                         if let Response::Reply(reply) = response {

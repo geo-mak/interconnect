@@ -95,7 +95,7 @@ impl core::fmt::Display for MessageType {
 pub type MessageID = Uuid;
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct MessageHeader {
+pub struct Header {
     /// A 128-bit (16 byte) unique identifier for the message
     pub id: MessageID,
 
@@ -103,7 +103,7 @@ pub struct MessageHeader {
     pub kind: MessageType,
 }
 
-impl MessageHeader {
+impl Header {
     pub const BYTES: usize = 17;
 
     #[inline]
@@ -117,37 +117,6 @@ impl MessageHeader {
             id: Uuid::new_v4(),
             kind,
         }
-    }
-
-    #[inline]
-    pub fn encode(&self) -> [u8; 17] {
-        let mut buf = [0u8; 17];
-        buf[..16].copy_from_slice(&self.id.to_bytes_le());
-        buf[16] = self.kind as u8;
-        buf
-    }
-
-    #[inline]
-    pub fn encode_into(&self, output: &mut [u8]) -> RpcResult<()> {
-        if unlikely(output.len() < 17) {
-            return Err(RpcError::error(ErrKind::Encoding));
-        }
-        output[..16].copy_from_slice(&self.id.to_bytes_le());
-        output[16] = self.kind as u8;
-        Ok(())
-    }
-
-    #[inline]
-    pub fn decode(input: &[u8]) -> RpcResult<Self> {
-        if unlikely(input.len() < 17) {
-            return Err(RpcError::error(ErrKind::Decoding));
-        }
-        let mut id_bytes = [0u8; 16];
-        id_bytes.copy_from_slice(&input[..16]);
-        let id = Uuid::from_bytes_le(id_bytes);
-        let kind =
-            MessageType::from_le_byte(input[16]).ok_or(RpcError::error(ErrKind::Decoding))?;
-        Ok(Self { id, kind })
     }
 }
 
@@ -163,13 +132,106 @@ pub trait MessageWriter {
 pub struct Message;
 
 impl Message {
+    #[inline]
+    pub fn encode_header(id: &MessageID, kind: MessageType) -> [u8; 17] {
+        let mut buf = [0u8; 17];
+        buf[..16].copy_from_slice(&id.to_bytes_le());
+        buf[16] = kind as u8;
+        buf
+    }
+
+    #[inline]
+    pub fn encode_header_into(
+        id: &MessageID,
+        kind: MessageType,
+        output: &mut [u8],
+    ) -> RpcResult<()> {
+        if unlikely(output.len() < 17) {
+            return Err(RpcError::error(ErrKind::Encoding));
+        }
+        output[..16].copy_from_slice(&id.to_bytes_le());
+        output[16] = kind as u8;
+        Ok(())
+    }
+
+    #[inline]
+    pub const unsafe fn encode_header_into_unchecked(
+        id: &MessageID,
+        kind: MessageType,
+        output: &mut [u8],
+    ) {
+        debug_assert!(output.len() >= 17);
+        unsafe {
+            let ptr = output.as_mut_ptr();
+            std::ptr::copy_nonoverlapping(id.to_bytes_le().as_ptr(), ptr, 16);
+            *ptr.add(16) = kind as u8;
+        }
+    }
+
+    #[inline]
+    pub fn decode_header(message: &[u8]) -> RpcResult<Header> {
+        if unlikely(message.len() < 17) {
+            return Err(RpcError::error(ErrKind::Decoding));
+        }
+        let mut id_bytes = [0u8; 16];
+        id_bytes.copy_from_slice(&message[..16]);
+        let id = Uuid::from_bytes_le(id_bytes);
+        let kind =
+            MessageType::from_le_byte(message[16]).ok_or(RpcError::error(ErrKind::Decoding))?;
+        Ok(Header { id, kind })
+    }
+
+    #[inline]
+    pub fn encode_error(err: RpcError) -> [u8; 5] {
+        let mut buf = [0u8; 5];
+        buf[0] = err.kind as u8;
+        buf[1..5].copy_from_slice(&err.refer.to_le_bytes());
+        buf
+    }
+
+    #[inline]
+    pub fn encode_error_into(err: RpcError, output: &mut [u8]) -> RpcResult<()> {
+        if unlikely(output.len() < 5) {
+            return Err(RpcError::error(ErrKind::Encoding));
+        }
+        output[0] = err.kind as u8;
+        output[1..5].copy_from_slice(&err.refer.to_le_bytes());
+        Ok(())
+    }
+
+    #[inline]
+    pub unsafe fn encode_error_into_unchecked(err: RpcError, output: &mut [u8]) {
+        debug_assert!(output.len() >= 5);
+        unsafe {
+            let ptr = output.as_mut_ptr();
+            *ptr = err.kind as u8;
+            ptr.add(1)
+                .copy_from_nonoverlapping(err.refer.to_le_bytes().as_ptr(), 4);
+        }
+    }
+
+    #[inline]
+    pub fn decode_error(message: &[u8]) -> RpcResult<RpcError> {
+        let seg_err = &message[17..];
+        if unlikely(seg_err.len() < 5) {
+            return Err(RpcError::error(ErrKind::Decoding));
+        }
+
+        let kind = ErrKind::from_le_byte(seg_err[0]).ok_or(RpcError::error(ErrKind::Decoding))?;
+
+        let mut bytes = [0u8; 4];
+        bytes.copy_from_slice(&seg_err[1..5]);
+        let refer = i32::from_le_bytes(bytes);
+
+        Ok(RpcError { kind, refer })
+    }
+
     pub fn call<P, T>(id: &MessageID, method: u16, params: &P, output: &mut T) -> RpcResult<()>
     where
         P: Serialize,
         T: MessageWriter,
     {
-        let header = MessageHeader::new(*id, MessageType::Call);
-        output.write(&header.encode())?;
+        output.write(&Self::encode_header(&id, MessageType::Call))?;
         output.write(&method.to_le_bytes())?;
         Message::encode_into_writer(params, output)
     }
@@ -178,8 +240,7 @@ impl Message {
     where
         T: MessageWriter,
     {
-        let header = MessageHeader::new(*id, MessageType::NullaryCall);
-        output.write(&header.encode())?;
+        output.write(&Self::encode_header(&id, MessageType::NullaryCall))?;
         output.write(&method.to_le_bytes())
     }
 
@@ -188,8 +249,7 @@ impl Message {
         R: Serialize,
         T: MessageWriter,
     {
-        let header = MessageHeader::new(*id, MessageType::Reply);
-        output.write(&header.encode())?;
+        output.write(&Self::encode_header(&id, MessageType::Reply))?;
         Self::encode_into_writer(reply, output)
     }
 
@@ -197,29 +257,22 @@ impl Message {
     where
         T: MessageWriter,
     {
-        let header = MessageHeader::new(*id, MessageType::Error);
-        output.write(&header.encode())?;
-        output.write(&err.encode())
+        output.write(&Self::encode_header(&id, MessageType::Error))?;
+        output.write(&Self::encode_error(err))
     }
 
     pub fn ping<T>(id: &MessageID, output: &mut T) -> RpcResult<()>
     where
         T: MessageWriter,
     {
-        let header = MessageHeader::new(*id, MessageType::Ping);
-        output.write(&header.encode())
+        output.write(&Self::encode_header(&id, MessageType::Ping))
     }
 
     pub fn pong<T>(id: &MessageID, output: &mut T) -> RpcResult<()>
     where
         T: MessageWriter,
     {
-        let header = MessageHeader::new(*id, MessageType::Pong);
-        output.write(&header.encode())
-    }
-
-    pub fn decode_header(message: &[u8]) -> RpcResult<MessageHeader> {
-        MessageHeader::decode(message)
+        output.write(&Self::encode_header(&id, MessageType::Pong))
     }
 
     pub fn decode_method(message: &[u8]) -> RpcResult<u16> {
@@ -248,10 +301,6 @@ impl Message {
         R: for<'de> Deserialize<'de>,
     {
         Self::decode_from_slice::<R>(&message[17..])
-    }
-
-    pub fn decode_error(message: &[u8]) -> RpcResult<RpcError> {
-        RpcError::decode(&message[17..])
     }
 
     /// Encodes a value to binary format.

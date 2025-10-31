@@ -4,8 +4,6 @@ use std::io;
 use serde::{Deserialize, Serialize};
 use tokio::time::error::Elapsed;
 
-use crate::opt::branch_prediction::unlikely;
-
 /// Result type alias for RPC operations.
 pub type RpcResult<T> = Result<T, RpcError>;
 
@@ -117,39 +115,6 @@ impl RpcError {
     #[inline(always)]
     pub const fn error(kind: ErrKind) -> Self {
         Self::new(kind, 0)
-    }
-
-    #[inline]
-    pub fn encode(&self) -> [u8; 5] {
-        let mut buf = [0u8; 5];
-        buf[..4].copy_from_slice(&self.refer.to_le_bytes());
-        buf[4] = self.kind as u8;
-        buf
-    }
-
-    #[inline]
-    pub fn encode_into(&self, output: &mut [u8]) -> RpcResult<()> {
-        if unlikely(output.len() < 5) {
-            return Err(RpcError::error(ErrKind::Encoding));
-        }
-        output[..4].copy_from_slice(&self.refer.to_le_bytes());
-        output[4] = self.kind as u8;
-        Ok(())
-    }
-
-    #[inline]
-    pub fn decode(input: &[u8]) -> RpcResult<Self> {
-        if unlikely(input.len() < 5) {
-            return Err(RpcError::error(ErrKind::Decoding));
-        }
-
-        let mut refer_bytes = [0u8; 4];
-        refer_bytes.copy_from_slice(&input[..4]);
-        let refer = i32::from_le_bytes(refer_bytes);
-
-        let kind = ErrKind::from_le_byte(input[4]).ok_or(RpcError::error(ErrKind::Decoding))?;
-
-        Ok(Self { kind, refer })
     }
 }
 

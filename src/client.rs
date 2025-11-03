@@ -67,7 +67,7 @@ pub trait AsyncRpcClient {
     fn shutdown(&mut self) -> impl Future<Output = RpcResult<()>>;
 }
 
-struct Oneshot<T> {
+struct UnicastDataBus<T> {
     state: AtomicU8,
     waker: UnsafeCell<Waker>,
     // TODO: Maybeuninit?
@@ -75,15 +75,15 @@ struct Oneshot<T> {
     _pin: PhantomPinned,
 }
 
-const RCV_WAIT: u8 = 0;
-const RCV_SET: u8 = 1;
-const RCV_READY: u8 = 2;
+const BUS_WAIT: u8 = 0;
+const BUS_INIT: u8 = 1;
+const BUS_READY: u8 = 2;
 
-impl<T> Oneshot<T> {
+impl<T> UnicastDataBus<T> {
     #[inline(always)]
     const fn new() -> Self {
         Self {
-            state: AtomicU8::new(RCV_WAIT),
+            state: AtomicU8::new(BUS_WAIT),
             waker: UnsafeCell::new(NOOP_WAKER),
             value: UnsafeCell::new(None),
             _pin: PhantomPinned,
@@ -97,87 +97,87 @@ impl<T> Oneshot<T> {
     }
 }
 
-struct OneshotSender<T> {
-    stack_ptr: NonNull<Oneshot<T>>,
+struct UnicastPublisher<T> {
+    bus_ptr: NonNull<UnicastDataBus<T>>,
 }
 
-unsafe impl<T> Send for OneshotSender<T> {}
-unsafe impl<T> Sync for OneshotSender<T> {}
+unsafe impl<T> Send for UnicastPublisher<T> {}
+unsafe impl<T> Sync for UnicastPublisher<T> {}
 
-impl<T> OneshotSender<T> {
+impl<T> UnicastPublisher<T> {
     #[inline(always)]
-    const fn new(oneshot: &Oneshot<T>) -> Self {
+    const fn new(bus: &UnicastDataBus<T>) -> Self {
         Self {
-            stack_ptr: NonNull::from_ref(oneshot),
+            bus_ptr: NonNull::from_ref(bus),
         }
     }
 
     #[inline]
-    fn send(mut self, value: T) {
-        let oneshot = unsafe { self.stack_ptr.as_mut() };
+    fn publish(mut self, value: T) {
+        let bus = unsafe { self.bus_ptr.as_mut() };
 
-        let value_ptr = oneshot.value.get();
+        let value_ptr = bus.value.get();
 
         debug_assert!(unsafe { (*value_ptr).is_none() });
 
         unsafe { value_ptr.write(Some(value)) };
 
-        if oneshot.state.fetch_or(RCV_READY, AcqRel) == RCV_WAIT {
-            unsafe { (*oneshot.waker.get()).wake_by_ref() };
+        if bus.state.fetch_or(BUS_READY, AcqRel) == BUS_WAIT {
+            unsafe { (*bus.waker.get()).wake_by_ref() };
         }
     }
 }
 
-struct WaitOneshot<'a, T> {
-    oneshot: &'a Oneshot<T>,
+struct WaitPublishing<'a, T> {
+    bus: &'a UnicastDataBus<T>,
 }
 
-impl<'a, T> WaitOneshot<'a, T> {
+impl<'a, T> WaitPublishing<'a, T> {
     #[inline(always)]
-    const fn new(oneshot: &'a Oneshot<T>) -> Self {
-        Self { oneshot }
+    const fn new(bus: &'a UnicastDataBus<T>) -> Self {
+        Self { bus }
     }
 }
 
-impl<'a, T> Future for WaitOneshot<'a, T> {
+impl<'a, T> Future for WaitPublishing<'a, T> {
     type Output = ();
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let oneshot = unsafe { self.get_unchecked_mut().oneshot };
-        let state = &oneshot.state;
+        let bus = unsafe { self.get_unchecked_mut().bus };
+        let state = &bus.state;
 
-        match state.compare_exchange(RCV_WAIT, RCV_SET, Acquire, Acquire) {
+        match state.compare_exchange(BUS_WAIT, BUS_INIT, Acquire, Acquire) {
             Ok(_) => {
-                let waker_ptr = oneshot.waker.get();
+                let waker_ptr = bus.waker.get();
                 unsafe { *waker_ptr = cx.waker().clone() };
 
-                match state.compare_exchange(RCV_SET, RCV_WAIT, AcqRel, Acquire) {
+                match state.compare_exchange(BUS_INIT, BUS_WAIT, AcqRel, Acquire) {
                     Ok(_) => return Poll::Pending,
-                    Err(current) => debug_assert!(current & RCV_READY != 0),
+                    Err(current) => debug_assert!(current & BUS_READY != 0),
                 };
             }
-            Err(current) => debug_assert!(current & RCV_READY != 0),
+            Err(current) => debug_assert!(current & BUS_READY != 0),
         }
 
-        // Safety: RCV_READY indicates that writing has been completed.
+        // Safety: BUS_READY indicates that writing has been completed.
         Poll::Ready(())
     }
 }
 
-struct OnOneshotDrop<'a, I, T>
+struct OnBusDrop<'a, I, T>
 where
     I: Hash + Eq,
 {
     id: &'a I,
-    entries: &'a PendingStore<I, T>,
+    entries: &'a ReservationStation<I, T>,
 }
 
-impl<'a, I, T> OnOneshotDrop<'a, I, T>
+impl<'a, I, T> OnBusDrop<'a, I, T>
 where
     I: Hash + Eq,
 {
     #[inline(always)]
-    const fn new(id: &'a I, entries: &'a PendingStore<I, T>) -> Self {
+    const fn new(id: &'a I, entries: &'a ReservationStation<I, T>) -> Self {
         Self { id, entries }
     }
 
@@ -187,7 +187,7 @@ where
     }
 }
 
-impl<'a, I, T> Drop for OnOneshotDrop<'a, I, T>
+impl<'a, I, T> Drop for OnBusDrop<'a, I, T>
 where
     I: Hash + Eq,
 {
@@ -196,11 +196,11 @@ where
     }
 }
 
-struct PendingStore<I, T> {
-    entries: parking_lot::Mutex<HashMap<I, OneshotSender<T>>>,
+struct ReservationStation<I, T> {
+    entries: parking_lot::Mutex<HashMap<I, UnicastPublisher<T>>>,
 }
 
-impl<I, T> PendingStore<I, T>
+impl<I, T> ReservationStation<I, T>
 where
     I: Hash + Eq,
 {
@@ -212,7 +212,7 @@ where
     }
 
     #[inline(always)]
-    fn store(&self, id: I, sender: OneshotSender<T>) {
+    fn store(&self, id: I, sender: UnicastPublisher<T>) {
         self.entries.lock().insert(id, sender);
     }
 
@@ -222,11 +222,11 @@ where
     }
 
     #[inline]
-    fn send_back(&self, id: &I, value: T) {
-        // Safety: Locking is required to prevent receiver from dropping the state while in use.
+    fn publish(&self, id: &I, value: T) {
+        // Safety: Locking is required to prevent cancellation from dropping the bus while it is in use.
         let mut map_lock = self.entries.lock();
-        if let Some(sender) = map_lock.remove(id) {
-            sender.send(value)
+        if let Some(publisher) = map_lock.remove(id) {
+            publisher.publish(value)
         }
     }
 }
@@ -238,7 +238,7 @@ enum Response {
 
 struct ClientState<S, H, E> {
     abort_lock: DynamicLatch,
-    pending: PendingStore<MessageID, RpcResult<Response>>,
+    station: ReservationStation<MessageID, RpcResult<Response>>,
     sender: Mutex<S>,
     service: H,
     reporter: E,
@@ -249,7 +249,7 @@ impl<S, H, E> ClientState<S, H, E> {
     fn new(sender: S, capacity: usize, reporter: E, service: H) -> ClientState<S, H, E> {
         ClientState {
             abort_lock: DynamicLatch::new(),
-            pending: PendingStore::new(capacity),
+            station: ReservationStation::new(capacity),
             sender: Mutex::const_new(sender),
             service,
             reporter,
@@ -377,14 +377,14 @@ where
                 let mut reply = MessageBuffer::with_capacity(data.len());
                 unsafe { reply.copy_from(data) };
                 state
-                    .pending
-                    .send_back(&header.id, Ok(Response::Reply(reply)));
+                    .station
+                    .publish(&header.id, Ok(Response::Reply(reply)));
             }
             Directive::Error => {
                 let err = Message::decode_error(message)?;
-                state.pending.send_back(&header.id, Err(err))
+                state.station.publish(&header.id, Err(err))
             }
-            Directive::Pong => state.pending.send_back(&header.id, Ok(Response::Pong)),
+            Directive::Pong => state.station.publish(&header.id, Ok(Response::Pong)),
             Directive::Call => {
                 if let Some(_lock) = state.abort_lock.acquire() {
                     let method = Message::decode_method(message)?;
@@ -491,15 +491,15 @@ where
         R: for<'de> Deserialize<'de>,
     {
         // Safety: This value must not move.
-        let pinned_oneshot = Oneshot::new();
+        let pinned_bus = UnicastDataBus::new();
 
-        let entries = &self.state.pending;
+        let entries = &self.state.station;
 
         let id = MessageID::new_v4();
 
-        entries.store(id, OneshotSender::new(&pinned_oneshot));
+        entries.store(id, UnicastPublisher::new(&pinned_bus));
 
-        let on_drop = OnOneshotDrop::new(&id, entries);
+        let on_drop = OnBusDrop::new(&id, entries);
 
         self.state
             .sender
@@ -508,14 +508,14 @@ where
             .call(&id, method, params)
             .await?;
 
-        tokio::time::timeout(timeout, WaitOneshot::new(&pinned_oneshot)).await?;
+        tokio::time::timeout(timeout, WaitPublishing::new(&pinned_bus)).await?;
 
         on_drop.do_nothing();
 
         // RT_ASSERT
-        let result = pinned_oneshot.take_value().unwrap();
+        let published = pinned_bus.take_value().unwrap();
 
-        match result {
+        match published {
             Ok(response) => {
                 if let Response::Reply(reply) = response {
                     return Message::decode_from_slice(&reply.data);
@@ -559,15 +559,15 @@ where
         R: for<'de> Deserialize<'de>,
     {
         // Safety: This value must not move.
-        let pinned_oneshot = Oneshot::new();
+        let pinned_bus = UnicastDataBus::new();
 
-        let entries = &self.state.pending;
+        let entries = &self.state.station;
 
         let id = MessageID::new_v4();
 
-        entries.store(id, OneshotSender::new(&pinned_oneshot));
+        entries.store(id, UnicastPublisher::new(&pinned_bus));
 
-        let on_drop = OnOneshotDrop::new(&id, entries);
+        let on_drop = OnBusDrop::new(&id, entries);
 
         self.state
             .sender
@@ -576,13 +576,14 @@ where
             .call_nullary(&id, method)
             .await?;
 
-        tokio::time::timeout(timeout, WaitOneshot::new(&pinned_oneshot)).await?;
+        tokio::time::timeout(timeout, WaitPublishing::new(&pinned_bus)).await?;
 
         on_drop.do_nothing();
 
         // RT_ASSERT
-        let result = pinned_oneshot.take_value().unwrap();
-        match result {
+        let published = pinned_bus.take_value().unwrap();
+
+        match published {
             Ok(response) => {
                 if let Response::Reply(reply) = response {
                     return Message::decode_from_slice(&reply.data);
@@ -610,19 +611,19 @@ where
     /// Sends a `ping`` message.
     async fn ping(&self, timeout: Duration) -> RpcResult<()> {
         // Safety: This value must not move.
-        let pinned_oneshot = Oneshot::new();
+        let pinned_bus = UnicastDataBus::new();
 
-        let entries = &self.state.pending;
+        let entries = &self.state.station;
 
         let id = MessageID::new_v4();
 
-        entries.store(id, OneshotSender::new(&pinned_oneshot));
+        entries.store(id, UnicastPublisher::new(&pinned_bus));
 
-        let on_drop = OnOneshotDrop::new(&id, entries);
+        let on_drop = OnBusDrop::new(&id, entries);
 
         self.state.sender.lock().await.ping(&id).await?;
 
-        tokio::time::timeout(timeout, WaitOneshot::new(&pinned_oneshot)).await?;
+        tokio::time::timeout(timeout, WaitPublishing::new(&pinned_bus)).await?;
 
         on_drop.do_nothing();
         Ok(())

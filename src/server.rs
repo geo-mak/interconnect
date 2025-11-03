@@ -25,7 +25,7 @@ use crate::report::Reporter;
 use crate::service::{Call, CallContext, RpcService};
 use crate::sync::{DynamicLatch, IList, INode, NOOP_WAKER};
 use crate::transport::{TransportLayer, TransportListener};
-use crate::{Message, MessageType};
+use crate::{Directive, Message};
 
 thread_local! {
     // Must be non-zero.
@@ -528,8 +528,8 @@ where
                 Ok(_) => {
                     let message = receiver.message();
                     let header = Message::decode_header(message)?;
-                    match header.kind {
-                        MessageType::Call => {
+                    match header.directive {
+                        Directive::Call => {
                             let call = Call {
                                 method: Message::decode_method(message)?,
                                 params: Message::param_data(message),
@@ -537,16 +537,16 @@ where
                             let mut context = ServerContext::new(&header.id, sender);
                             service.call(call, &mut context).await?
                         }
-                        MessageType::NullaryCall => {
+                        Directive::NullaryCall => {
                             let method = Message::decode_method(message)?;
                             let mut context = ServerContext::new(&header.id, sender);
                             service.call_nullary(method, &mut context).await?
                         }
-                        MessageType::Ping => sender.pong(&header.id).await?,
+                        Directive::Ping => sender.pong(&header.id).await?,
                         _ => {
                             task.srv_state
                                 .report
-                                .alert("Received unexpected message type: ", &header.kind);
+                                .alert("Received unexpected message type: ", &header.directive);
                         }
                     }
                 }
@@ -673,8 +673,8 @@ mod tests {
 
             let header = Message::decode_header(msg_receiver_1.message()).unwrap();
 
-            match header.kind {
-                MessageType::Reply => {
+            match header.directive {
+                Directive::Reply => {
                     let response: String = Message::decode_reply(msg_receiver_1.message()).unwrap();
                     assert!(&response == "Reply to C1");
                 }
@@ -687,8 +687,8 @@ mod tests {
 
             let header = Message::decode_header(msg_receiver_2.message()).unwrap();
 
-            match header.kind {
-                MessageType::Reply => {
+            match header.directive {
+                Directive::Reply => {
                     let response: String = Message::decode_reply(msg_receiver_2.message()).unwrap();
                     assert!(&response == "Reply to C2");
                 }
@@ -701,8 +701,8 @@ mod tests {
 
             let header = Message::decode_header(msg_receiver_3.message()).unwrap();
 
-            match header.kind {
-                MessageType::Reply => {
+            match header.directive {
+                Directive::Reply => {
                     let response: String = Message::decode_reply(msg_receiver_3.message()).unwrap();
                     assert!(&response == "Reply to C3");
                 }
@@ -759,8 +759,8 @@ mod tests {
 
         let header = Message::decode_header(msg_receiver.message()).unwrap();
 
-        match header.kind {
-            MessageType::Reply => {
+        match header.directive {
+            Directive::Reply => {
                 let response: String = Message::decode_reply(msg_receiver.message()).unwrap();
                 assert!(&response == "Reply to C1");
             }
@@ -807,8 +807,8 @@ mod tests {
 
         let header = Message::decode_header(msg_receiver.message()).unwrap();
 
-        match header.kind {
-            MessageType::Reply => {
+        match header.directive {
+            Directive::Reply => {
                 let response: String = Message::decode_reply(msg_receiver.message()).unwrap();
                 assert!(&response == "Reply to C1");
             }

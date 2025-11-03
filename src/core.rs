@@ -21,9 +21,9 @@ use crate::private::Private;
 
 // RPC FRAME
 //   Header (unencrypted?)   Payload (encrypted)
-// +----------------------+---------------------------------+
-// |  Total len           | Header (ID, Type) + Data (Maybe)
-// +----------------------+---------------------------------+
+// +----------------------+--------------------------------------+
+// |  Total len           | Header (ID, Directive) + Data (Maybe)
+// +----------------------+--------------------------------------+
 
 const CONFIG: Configuration = standard();
 
@@ -36,39 +36,46 @@ const STD_FRAMING_MIN_ALLOC: usize = STD_MESSAGE_LEN + Header::BYTES + RpcError:
 // Definitely not for bulk throughput or streams, but streams are a different story.
 const STD_FRAMING_ALLOC: usize = 1024;
 
-/// Message types of the RPC protocol.
+/// Message directives of the RPC protocol.
 #[derive(Debug, Copy, Clone, PartialEq)]
 #[repr(u8)]
-pub enum MessageType {
-    /// A call message that may or may not have reply.
+pub enum Directive {
+    /// A call directive that may or may not have reply.
     ///
-    /// This call targets methods that take extra parameters.
+    /// This directive targets methods that take extra parameters.
     Call = 0,
 
-    /// A call message that may or may not have reply.
+    /// A call directive that may or may not have reply.
     ///
-    /// This call targets methods that don't take any extra parameters.
+    /// This directive targets methods that don't take any extra parameters.
     NullaryCall = 1,
 
-    /// A response message (can be returned by either side).
+    /// A reply directive as a response to a previously sent call.
     Reply = 2,
 
-    /// Error message is a lightweight structure for operational errors.
+    /// Error directive as a response to a previously sent call.
+    ///
+    /// This directive instructs decoding `RpcError` from the message which is
+    /// a lightweight structure for operational errors.
+    ///
     /// Rich and detailed errors are considered part of the service design,
     /// and subject to the documented reply type of a particular method.
+    ///
+    /// However, it is strongly recommended to limit communicating errors to `RpcError`
+    /// where possible.
     Error = 3,
 
-    /// A heartbeat/ping message.
+    /// A heartbeat/ping directive.
     Ping = 4,
 
-    /// A heartbeat/pong response.
+    /// A heartbeat/pong directive.
     Pong = 5,
 }
 
-impl MessageType {
+impl Directive {
     #[inline]
     pub const fn from_le_byte(byte: u8) -> Option<Self> {
-        use MessageType::*;
+        use Directive::*;
         Some(match byte {
             0 => Call,
             1 => NullaryCall,
@@ -81,7 +88,7 @@ impl MessageType {
     }
 }
 
-impl core::fmt::Display for MessageType {
+impl core::fmt::Display for Directive {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Self::Call => f.write_str("Variadic Call"),
@@ -101,23 +108,23 @@ pub struct Header {
     /// A 128-bit (16 byte) unique identifier for the message
     pub id: MessageID,
 
-    /// The payload of the message.
-    pub kind: MessageType,
+    /// The directive of the message.
+    pub directive: Directive,
 }
 
 impl Header {
     pub const BYTES: usize = 17;
 
     #[inline]
-    pub fn new(id: Uuid, kind: MessageType) -> Self {
-        Self { id, kind }
+    pub fn new(id: Uuid, directive: Directive) -> Self {
+        Self { id, directive }
     }
 
     #[inline]
-    pub fn auto(kind: MessageType) -> Self {
+    pub fn auto(directive: Directive) -> Self {
         Self {
             id: Uuid::new_v4(),
-            kind,
+            directive,
         }
     }
 }
@@ -135,24 +142,24 @@ pub struct Message;
 
 impl Message {
     #[inline]
-    pub fn encode_header(id: &MessageID, kind: MessageType) -> [u8; 17] {
+    pub fn encode_header(id: &MessageID, directive: Directive) -> [u8; 17] {
         let mut buf = [0u8; 17];
         buf[..16].copy_from_slice(&id.to_bytes_le());
-        buf[16] = kind as u8;
+        buf[16] = directive as u8;
         buf
     }
 
     #[inline]
     pub fn encode_header_into(
         id: &MessageID,
-        kind: MessageType,
+        directive: Directive,
         output: &mut [u8],
     ) -> RpcResult<()> {
         if unlikely(output.len() < 17) {
             return Err(RpcError::error(ErrKind::Encoding));
         }
         output[..16].copy_from_slice(&id.to_bytes_le());
-        output[16] = kind as u8;
+        output[16] = directive as u8;
         Ok(())
     }
 
@@ -164,9 +171,9 @@ impl Message {
         let mut id_bytes = [0u8; 16];
         id_bytes.copy_from_slice(&message[..16]);
         let id = Uuid::from_bytes_le(id_bytes);
-        let kind =
-            MessageType::from_le_byte(message[16]).ok_or(RpcError::error(ErrKind::Decoding))?;
-        Ok(Header { id, kind })
+        let directive =
+            Directive::from_le_byte(message[16]).ok_or(RpcError::error(ErrKind::Decoding))?;
+        Ok(Header { id, directive })
     }
 
     #[inline]
@@ -391,7 +398,7 @@ impl<T: AsyncIOWrite + Send + Unpin> AsyncSender for MessageSender<T> {
     ) -> RpcResult<()> {
         unsafe { self.buffer.data.set_len(STD_MESSAGE_LEN) };
         self.buffer
-            .write(&Message::encode_header(id, MessageType::Call))?;
+            .write(&Message::encode_header(id, Directive::Call))?;
         self.buffer.write(&method.to_le_bytes())?;
         Message::encode_into_writer(params, &mut self.buffer)?;
         self.write_all().await
@@ -400,7 +407,7 @@ impl<T: AsyncIOWrite + Send + Unpin> AsyncSender for MessageSender<T> {
     async fn call_nullary(&mut self, id: &MessageID, method: u16) -> RpcResult<()> {
         unsafe { self.buffer.data.set_len(STD_MESSAGE_LEN) };
         self.buffer
-            .write(&Message::encode_header(id, MessageType::NullaryCall))?;
+            .write(&Message::encode_header(id, Directive::NullaryCall))?;
         self.buffer.write(&method.to_le_bytes())?;
         self.write_all().await
     }
@@ -408,7 +415,7 @@ impl<T: AsyncIOWrite + Send + Unpin> AsyncSender for MessageSender<T> {
     async fn reply<R: Serialize + Sync>(&mut self, id: &MessageID, reply: &R) -> RpcResult<()> {
         unsafe { self.buffer.data.set_len(STD_MESSAGE_LEN) };
         self.buffer
-            .write(&Message::encode_header(id, MessageType::Reply))?;
+            .write(&Message::encode_header(id, Directive::Reply))?;
         Message::encode_into_writer(reply, &mut self.buffer)?;
         self.write_all().await
     }
@@ -416,7 +423,7 @@ impl<T: AsyncIOWrite + Send + Unpin> AsyncSender for MessageSender<T> {
     async fn error(&mut self, id: &MessageID, err: RpcError) -> RpcResult<()> {
         unsafe { self.buffer.data.set_len(STD_MESSAGE_LEN) };
         self.buffer
-            .write(&Message::encode_header(id, MessageType::Error))?;
+            .write(&Message::encode_header(id, Directive::Error))?;
         self.buffer.write(&Message::encode_error(err))?;
         self.write_all().await
     }
@@ -424,14 +431,14 @@ impl<T: AsyncIOWrite + Send + Unpin> AsyncSender for MessageSender<T> {
     async fn ping(&mut self, id: &MessageID) -> RpcResult<()> {
         unsafe { self.buffer.data.set_len(STD_MESSAGE_LEN) };
         self.buffer
-            .write(&Message::encode_header(id, MessageType::Ping))?;
+            .write(&Message::encode_header(id, Directive::Ping))?;
         self.write_all().await
     }
 
     async fn pong(&mut self, id: &MessageID) -> RpcResult<()> {
         unsafe { self.buffer.data.set_len(STD_MESSAGE_LEN) };
         self.buffer
-            .write(&Message::encode_header(id, MessageType::Pong))?;
+            .write(&Message::encode_header(id, Directive::Pong))?;
         self.write_all().await
     }
 
@@ -571,7 +578,7 @@ impl<T: AsyncIOWrite + Send + Unpin> AsyncSender for EncMessageSender<T> {
     ) -> RpcResult<()> {
         unsafe { self.buffer.data.set_len(STD_MESSAGE_LEN) };
         self.buffer
-            .write(&Message::encode_header(id, MessageType::Call))?;
+            .write(&Message::encode_header(id, Directive::Call))?;
         self.buffer.write(&method.to_le_bytes())?;
         Message::encode_into_writer(params, &mut self.buffer)?;
         self.write_all().await
@@ -580,7 +587,7 @@ impl<T: AsyncIOWrite + Send + Unpin> AsyncSender for EncMessageSender<T> {
     async fn call_nullary(&mut self, id: &MessageID, method: u16) -> RpcResult<()> {
         unsafe { self.buffer.data.set_len(STD_MESSAGE_LEN) };
         self.buffer
-            .write(&Message::encode_header(id, MessageType::NullaryCall))?;
+            .write(&Message::encode_header(id, Directive::NullaryCall))?;
         self.buffer.write(&method.to_le_bytes())?;
         self.write_all().await
     }
@@ -588,7 +595,7 @@ impl<T: AsyncIOWrite + Send + Unpin> AsyncSender for EncMessageSender<T> {
     async fn reply<R: Serialize>(&mut self, id: &MessageID, reply: &R) -> RpcResult<()> {
         unsafe { self.buffer.data.set_len(STD_MESSAGE_LEN) };
         self.buffer
-            .write(&Message::encode_header(id, MessageType::Reply))?;
+            .write(&Message::encode_header(id, Directive::Reply))?;
         Message::encode_into_writer(reply, &mut self.buffer)?;
         self.write_all().await
     }
@@ -596,7 +603,7 @@ impl<T: AsyncIOWrite + Send + Unpin> AsyncSender for EncMessageSender<T> {
     async fn error(&mut self, id: &MessageID, err: RpcError) -> RpcResult<()> {
         unsafe { self.buffer.data.set_len(STD_MESSAGE_LEN) };
         self.buffer
-            .write(&Message::encode_header(id, MessageType::Error))?;
+            .write(&Message::encode_header(id, Directive::Error))?;
         self.buffer.write(&Message::encode_error(err))?;
         self.write_all().await
     }
@@ -604,14 +611,14 @@ impl<T: AsyncIOWrite + Send + Unpin> AsyncSender for EncMessageSender<T> {
     async fn ping(&mut self, id: &MessageID) -> RpcResult<()> {
         unsafe { self.buffer.data.set_len(STD_MESSAGE_LEN) };
         self.buffer
-            .write(&Message::encode_header(id, MessageType::Ping))?;
+            .write(&Message::encode_header(id, Directive::Ping))?;
         self.write_all().await
     }
 
     async fn pong(&mut self, id: &MessageID) -> RpcResult<()> {
         unsafe { self.buffer.data.set_len(STD_MESSAGE_LEN) };
         self.buffer
-            .write(&Message::encode_header(id, MessageType::Pong))?;
+            .write(&Message::encode_header(id, Directive::Pong))?;
         self.write_all().await
     }
 
@@ -761,7 +768,7 @@ mod tests {
                 match msg_receiver.receive().await {
                     Ok(_) => {
                         let header = Message::decode_header(msg_receiver.message()).unwrap();
-                        assert!(header.kind == MessageType::Call);
+                        assert!(header.directive == Directive::Call);
 
                         let method = Message::decode_method(msg_receiver.message()).unwrap();
                         assert!(method == 1);
@@ -798,7 +805,7 @@ mod tests {
 
         let header = Message::decode_header(msg_receiver.message()).unwrap();
 
-        assert!(header.kind == MessageType::Reply);
+        assert!(header.directive == Directive::Reply);
 
         let reply: String = Message::decode_reply(msg_receiver.message()).unwrap();
         assert_eq!(reply, "Reply: hi there");
@@ -825,7 +832,7 @@ mod tests {
                 match msg_receiver.receive().await {
                     Ok(_) => {
                         let header = Message::decode_header(msg_receiver.message()).unwrap();
-                        assert!(header.kind == MessageType::Call);
+                        assert!(header.directive == Directive::Call);
 
                         let method = Message::decode_method(msg_receiver.message()).unwrap();
                         assert!(method == 1);
@@ -862,7 +869,7 @@ mod tests {
 
         let header = Message::decode_header(msg_receiver.message()).unwrap();
 
-        assert!(header.kind == MessageType::Reply);
+        assert!(header.directive == Directive::Reply);
 
         assert_eq!(
             Message::decode_reply::<String>(msg_receiver.message()).unwrap(),

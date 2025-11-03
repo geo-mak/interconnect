@@ -18,8 +18,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::capability::{RpcCapability, negotiation};
 use crate::core::{
-    AsyncReceiver, AsyncSender, EncMessageReceiver, EncMessageSender, Message, MessageBuffer,
-    MessageID, MessageReceiver, MessageSender, MessageType,
+    AsyncReceiver, AsyncSender, Directive, EncMessageReceiver, EncMessageSender, Message,
+    MessageBuffer, MessageID, MessageReceiver, MessageSender,
 };
 use crate::error::{ErrKind, RpcError, RpcResult};
 use crate::report::Reporter;
@@ -371,8 +371,8 @@ where
     {
         let message = receiver.message();
         let header = Message::decode_header(message)?;
-        match header.kind {
-            MessageType::Reply => {
+        match header.directive {
+            Directive::Reply => {
                 let data = Message::reply_data(message);
                 let mut reply = MessageBuffer::with_capacity(data.len());
                 unsafe { reply.copy_from(data) };
@@ -380,12 +380,12 @@ where
                     .pending
                     .send_back(&header.id, Ok(Response::Reply(reply)));
             }
-            MessageType::Error => {
+            Directive::Error => {
                 let err = Message::decode_error(message)?;
                 state.pending.send_back(&header.id, Err(err))
             }
-            MessageType::Pong => state.pending.send_back(&header.id, Ok(Response::Pong)),
-            MessageType::Call => {
+            Directive::Pong => state.pending.send_back(&header.id, Ok(Response::Pong)),
+            Directive::Call => {
                 if let Some(_lock) = state.abort_lock.acquire() {
                     let method = Message::decode_method(message)?;
                     let params = Message::param_data(message);
@@ -396,14 +396,14 @@ where
                         .await;
                 }
             }
-            MessageType::NullaryCall => {
+            Directive::NullaryCall => {
                 if let Some(_lock) = state.abort_lock.acquire() {
                     let method = Message::decode_method(message)?;
                     let mut context = ClientContext::new(&header.id, state);
                     return state.service.call_nullary(method, &mut context).await;
                 }
             }
-            MessageType::Ping => return state.sender.lock().await.pong(&header.id).await,
+            Directive::Ping => return state.sender.lock().await.pong(&header.id).await,
         }
         Ok(())
     }
@@ -682,8 +682,8 @@ mod tests {
                 match msg_receiver.receive().await {
                     Ok(_) => {
                         let header = Message::decode_header(msg_receiver.message()).unwrap();
-                        match header.kind {
-                            MessageType::Call => {
+                        match header.directive {
+                            Directive::Call => {
                                 let method =
                                     Message::decode_method(msg_receiver.message()).unwrap();
                                 match method {
@@ -706,7 +706,7 @@ mod tests {
                                     _ => panic!("undefined method"),
                                 }
                             }
-                            MessageType::NullaryCall => {
+                            Directive::NullaryCall => {
                                 let method =
                                     Message::decode_method(msg_receiver.message()).unwrap();
                                 assert_eq!(method, 1);
@@ -779,8 +779,8 @@ mod tests {
             match msg_receiver.receive().await {
                 Ok(_) => {
                     let header = Message::decode_header(msg_receiver.message()).unwrap();
-                    match header.kind {
-                        MessageType::Call => {
+                    match header.directive {
+                        Directive::Call => {
                             let method = Message::decode_method(msg_receiver.message()).unwrap();
                             assert_eq!(method, 1);
                             let params: String =

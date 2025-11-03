@@ -11,22 +11,5 @@ High performance remote procedure call protocol.
 
 This project aims at providing the best possible usability and performance compared to an application-specific protocol.
 
-## Architectural Overview.
-```
-┌─────────────────────────────────────────────┐
-│                Service Layer                │
-│     (Method Handlers, Extensions, etc.)     │
-├─────────────────────────────────────────────┤
-│                Session Layer                │
-│         (Client, Server, Policies)          │
-├─────────────────────────────────────────────┤
-│               RPC Stream Layer              │
-│         (Framing, Encoding/Decoding)        │
-├─────────────────────────────────────────────┤
-│             RPC Capability Layer            │
-│    (Specs Negotiation, Establishing etc.)   │
-├─────────────────────────────────────────────┤
-│               Transport Layer               │
-│             (TCP / Unix Sockets)            │
-└─────────────────────────────────────────────┘
-```
+For more technical details, please refer to DESIGN.md, where more in-depth technical details are documented and updated
+regularly.

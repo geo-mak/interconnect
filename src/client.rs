@@ -128,18 +128,18 @@ impl<T> OneshotSender<T> {
     }
 }
 
-struct OneshotReceiver<'a, T> {
+struct WaitOneshot<'a, T> {
     oneshot: &'a Oneshot<T>,
 }
 
-impl<'a, T> OneshotReceiver<'a, T> {
+impl<'a, T> WaitOneshot<'a, T> {
     #[inline(always)]
     const fn new(oneshot: &'a Oneshot<T>) -> Self {
         Self { oneshot }
     }
 }
 
-impl<'a, T> Future for OneshotReceiver<'a, T> {
+impl<'a, T> Future for WaitOneshot<'a, T> {
     type Output = ();
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
@@ -508,22 +508,21 @@ where
             .call(&id, method, params)
             .await?;
 
-        match tokio::time::timeout(timeout, OneshotReceiver::new(&pinned_oneshot)).await {
-            Ok(_) => {
-                on_drop.do_nothing();
-                // RT_ASSERT
-                let result = pinned_oneshot.take_value().unwrap();
-                match result {
-                    Ok(response) => {
-                        if let Response::Reply(reply) = response {
-                            return Message::decode_from_slice(&reply.data);
-                        }
-                        Err(RpcError::error(ErrKind::UnexpectedMsg))
-                    }
-                    Err(err) => Err(err),
+        tokio::time::timeout(timeout, WaitOneshot::new(&pinned_oneshot)).await?;
+
+        on_drop.do_nothing();
+
+        // RT_ASSERT
+        let result = pinned_oneshot.take_value().unwrap();
+
+        match result {
+            Ok(response) => {
+                if let Response::Reply(reply) = response {
+                    return Message::decode_from_slice(&reply.data);
                 }
+                Err(RpcError::error(ErrKind::UnexpectedMsg))
             }
-            Err(_) => Err(RpcError::error(ErrKind::Timeout)),
+            Err(err) => Err(err),
         }
     }
 
@@ -577,22 +576,20 @@ where
             .call_nullary(&id, method)
             .await?;
 
-        match tokio::time::timeout(timeout, OneshotReceiver::new(&pinned_oneshot)).await {
-            Ok(_) => {
-                on_drop.do_nothing();
-                // RT_ASSERT
-                let result = pinned_oneshot.take_value().unwrap();
-                match result {
-                    Ok(response) => {
-                        if let Response::Reply(reply) = response {
-                            return Message::decode_from_slice(&reply.data);
-                        }
-                        Err(RpcError::error(ErrKind::UnexpectedMsg))
-                    }
-                    Err(err) => Err(err),
+        tokio::time::timeout(timeout, WaitOneshot::new(&pinned_oneshot)).await?;
+
+        on_drop.do_nothing();
+
+        // RT_ASSERT
+        let result = pinned_oneshot.take_value().unwrap();
+        match result {
+            Ok(response) => {
+                if let Response::Reply(reply) = response {
+                    return Message::decode_from_slice(&reply.data);
                 }
+                Err(RpcError::error(ErrKind::UnexpectedMsg))
             }
-            Err(_) => Err(RpcError::error(ErrKind::Timeout)),
+            Err(err) => Err(err),
         }
     }
 
@@ -625,13 +622,10 @@ where
 
         self.state.sender.lock().await.ping(&id).await?;
 
-        match tokio::time::timeout(timeout, OneshotReceiver::new(&pinned_oneshot)).await {
-            Ok(_) => {
-                on_drop.do_nothing();
-                Ok(())
-            }
-            Err(_) => Err(RpcError::error(ErrKind::Timeout)),
-        }
+        tokio::time::timeout(timeout, WaitOneshot::new(&pinned_oneshot)).await?;
+
+        on_drop.do_nothing();
+        Ok(())
     }
 
     /// Closes its sender and shutdowns the receiving task in graceful manner.

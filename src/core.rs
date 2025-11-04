@@ -342,7 +342,7 @@ pub trait AsyncSender: Private {
     ) -> impl Future<Output = RpcResult<()>> + Send;
     fn ping(&mut self, id: &MessageID) -> impl Future<Output = RpcResult<()>> + Send;
     fn pong(&mut self, id: &MessageID) -> impl Future<Output = RpcResult<()>> + Send;
-    fn close(&mut self) -> impl Future<Output = RpcResult<()>> + Send;
+    fn terminate(&mut self) -> impl Future<Output = RpcResult<()>> + Send;
 }
 
 pub trait AsyncReceiver: Private {
@@ -452,7 +452,7 @@ impl<T: AsyncIOWrite + Send + Unpin> AsyncSender for MessageSender<T> {
     }
 
     #[inline(always)]
-    async fn close(&mut self) -> RpcResult<()> {
+    async fn terminate(&mut self) -> RpcResult<()> {
         self.writer.shutdown().await.map_err(Into::into)
     }
 }
@@ -627,7 +627,7 @@ impl<T: AsyncIOWrite + Send + Unpin> AsyncSender for EncMessageSender<T> {
     }
 
     #[inline(always)]
-    async fn close(&mut self) -> RpcResult<()> {
+    async fn terminate(&mut self) -> RpcResult<()> {
         self.writer.shutdown().await.map_err(Into::into)
     }
 }
@@ -815,7 +815,7 @@ mod tests {
         let reply: String = Message::decode_returned(msg_receiver.message()).unwrap();
         assert_eq!(reply, "Reply: hi there");
 
-        msg_sender.close().await.unwrap();
+        msg_sender.terminate().await.unwrap();
         handle.await.unwrap()
     }
 
@@ -882,7 +882,7 @@ mod tests {
             "Reply: hi there"
         );
 
-        msg_sender.close().await.unwrap();
+        msg_sender.terminate().await.unwrap();
         handle.await.unwrap();
 
         std::fs::remove_file(&path).unwrap();

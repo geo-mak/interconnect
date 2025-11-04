@@ -64,7 +64,7 @@ pub trait AsyncRpcClient {
 
     fn ping(&self, timeout: Duration) -> impl Future<Output = RpcResult<()>>;
 
-    fn shutdown(&mut self) -> impl Future<Output = RpcResult<()>>;
+    fn terminate(&mut self) -> impl Future<Output = RpcResult<()>>;
 }
 
 struct UnicastDataBus<T> {
@@ -620,16 +620,16 @@ where
     /// Buffered data will be sent followed by FIN message.
     ///
     /// Any attempts to send messages after this call will return `Broken pipe` I/O error.
-    async fn shutdown(&mut self) -> RpcResult<()> {
+    async fn terminate(&mut self) -> RpcResult<()> {
         self.state.abort_lock.open();
 
         self.state.abort_lock.wait().await;
 
         self.recv_task.abort();
 
-        self.state.sender.lock().await.close().await?;
+        self.state.sender.lock().await.terminate().await?;
 
-        self.state.app.shutdown().await
+        self.state.app.terminate().await
     }
 }
 
@@ -725,7 +725,7 @@ mod tests {
         let err: RpcError = client.call::<&str, String>(2, &"call").await.unwrap_err();
         assert!(err.kind == ErrKind::Unimplemented);
 
-        client.shutdown().await.unwrap();
+        client.terminate().await.unwrap();
         server_task.await.unwrap()
     }
 
@@ -791,6 +791,6 @@ mod tests {
         assert_eq!(reply, "reply");
 
         server_task.await.unwrap();
-        client.shutdown().await.unwrap();
+        client.terminate().await.unwrap();
     }
 }

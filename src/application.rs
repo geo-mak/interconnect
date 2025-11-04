@@ -103,7 +103,7 @@ pub trait RpcApplication {
 
     /// Informs the application to terminate its state machines and waits for completion.
     /// By default, it returns immediately.
-    fn shutdown(&self) -> impl Future<Output = RpcResult<()>> + Send {
+    fn terminate(&self) -> impl Future<Output = RpcResult<()>> + Send {
         std::future::ready(Ok(()))
     }
 }

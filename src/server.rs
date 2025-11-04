@@ -565,7 +565,7 @@ where
     ///
     /// This call doesn't have immediate effect and may take longer time,
     /// because it allows active sessions to complete processing the current received message.
-    pub async fn shutdown(&mut self) -> RpcResult<()> {
+    pub async fn terminate(&mut self) -> RpcResult<()> {
         self.state.tasks.observer.open();
         self.listener.abort();
 
@@ -575,7 +575,7 @@ where
 
         self.state.tasks.observer.wait().await;
 
-        self.state.app.shutdown().await
+        self.state.app.terminate().await
     }
 }
 
@@ -718,7 +718,7 @@ mod tests {
         assert!(server.sessions() == 3);
         assert!(Arc::strong_count(&server.state) == 5);
 
-        server.shutdown().await.unwrap();
+        server.terminate().await.unwrap();
 
         assert!(server.listener.is_finished());
         assert!(server.sessions() == 0);
@@ -770,7 +770,7 @@ mod tests {
             _ => panic!("Expected reply"),
         }
 
-        server.shutdown().await.unwrap();
+        server.terminate().await.unwrap();
     }
 
     #[tokio::test]
@@ -818,7 +818,7 @@ mod tests {
             _ => panic!("Expected reply"),
         }
 
-        server.shutdown().await.unwrap();
+        server.terminate().await.unwrap();
         std::fs::remove_file(path).unwrap();
     }
 }

@@ -1,8 +1,8 @@
 Interconnect is a collection of connectivity primitives and interfaces for constructing inter-process communication pathways.
 
-The RPC aspect is the main focus, and the main area of development.
+The RPC aspect is currently the main focus, and the main area of development.
 
-## Architectural Overview.
+## Main Layers Overview.
 ```
 ┌─────────────────────────────────────────────┐
 │                Service Layer                │
@@ -21,4 +21,3 @@ The RPC aspect is the main focus, and the main area of development.
 │             (TCP / Unix Sockets)            │
 └─────────────────────────────────────────────┘
 ```
-

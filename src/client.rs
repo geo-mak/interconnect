@@ -233,12 +233,12 @@ where
 
 enum Response {
     Pong,
-    Reply(MessageBuffer),
+    Data(MessageBuffer),
 }
 
 struct ClientState<S, H, E> {
     abort_lock: DynamicLatch,
-    station: ReservationStation<MessageID, RpcResult<Response>>,
+    rs: ReservationStation<MessageID, RpcResult<Response>>,
     sender: Mutex<S>,
     service: H,
     reporter: E,
@@ -249,7 +249,7 @@ impl<S, H, E> ClientState<S, H, E> {
     fn new(sender: S, capacity: usize, reporter: E, service: H) -> ClientState<S, H, E> {
         ClientState {
             abort_lock: DynamicLatch::new(),
-            station: ReservationStation::new(capacity),
+            rs: ReservationStation::new(capacity),
             sender: Mutex::const_new(sender),
             service,
             reporter,
@@ -372,19 +372,17 @@ where
         let message = receiver.message();
         let header = Message::decode_header(message)?;
         match header.directive {
-            Directive::Reply => {
-                let data = Message::reply_data(message);
-                let mut reply = MessageBuffer::with_capacity(data.len());
-                unsafe { reply.copy_from(data) };
-                state
-                    .station
-                    .publish(&header.id, Ok(Response::Reply(reply)));
+            Directive::Return => {
+                let data = Message::returned_data(message);
+                let mut ret = MessageBuffer::with_capacity(data.len());
+                unsafe { ret.copy_from(data) };
+                state.rs.publish(&header.id, Ok(Response::Data(ret)));
             }
             Directive::Error => {
                 let err = Message::decode_error(message)?;
-                state.station.publish(&header.id, Err(err))
+                state.rs.publish(&header.id, Err(err))
             }
-            Directive::Pong => state.station.publish(&header.id, Ok(Response::Pong)),
+            Directive::Pong => state.rs.publish(&header.id, Ok(Response::Pong)),
             Directive::Call => {
                 if let Some(_lock) = state.abort_lock.acquire() {
                     let method = Message::decode_method(message)?;
@@ -493,7 +491,7 @@ where
         // Safety: This value must not move.
         let pinned_bus = UnicastDataBus::new();
 
-        let entries = &self.state.station;
+        let entries = &self.state.rs;
 
         let id = MessageID::new_v4();
 
@@ -517,7 +515,7 @@ where
 
         match published {
             Ok(response) => {
-                if let Response::Reply(reply) = response {
+                if let Response::Data(reply) = response {
                     return Message::decode_from_slice(&reply.data);
                 }
                 Err(RpcError::error(ErrKind::UnexpectedMsg))
@@ -561,7 +559,7 @@ where
         // Safety: This value must not move.
         let pinned_bus = UnicastDataBus::new();
 
-        let entries = &self.state.station;
+        let entries = &self.state.rs;
 
         let id = MessageID::new_v4();
 
@@ -585,7 +583,7 @@ where
 
         match published {
             Ok(response) => {
-                if let Response::Reply(reply) = response {
+                if let Response::Data(reply) = response {
                     return Message::decode_from_slice(&reply.data);
                 }
                 Err(RpcError::error(ErrKind::UnexpectedMsg))
@@ -613,7 +611,7 @@ where
         // Safety: This value must not move.
         let pinned_bus = UnicastDataBus::new();
 
-        let entries = &self.state.station;
+        let entries = &self.state.rs;
 
         let id = MessageID::new_v4();
 

@@ -674,8 +674,9 @@ mod tests {
             let header = Message::decode_header(msg_receiver_1.message()).unwrap();
 
             match header.directive {
-                Directive::Reply => {
-                    let response: String = Message::decode_reply(msg_receiver_1.message()).unwrap();
+                Directive::Return => {
+                    let response: String =
+                        Message::decode_returned(msg_receiver_1.message()).unwrap();
                     assert!(&response == "Reply to C1");
                 }
                 _ => panic!("Expected reply"),
@@ -688,8 +689,9 @@ mod tests {
             let header = Message::decode_header(msg_receiver_2.message()).unwrap();
 
             match header.directive {
-                Directive::Reply => {
-                    let response: String = Message::decode_reply(msg_receiver_2.message()).unwrap();
+                Directive::Return => {
+                    let response: String =
+                        Message::decode_returned(msg_receiver_2.message()).unwrap();
                     assert!(&response == "Reply to C2");
                 }
                 _ => panic!("Expected reply"),
@@ -702,8 +704,9 @@ mod tests {
             let header = Message::decode_header(msg_receiver_3.message()).unwrap();
 
             match header.directive {
-                Directive::Reply => {
-                    let response: String = Message::decode_reply(msg_receiver_3.message()).unwrap();
+                Directive::Return => {
+                    let response: String =
+                        Message::decode_returned(msg_receiver_3.message()).unwrap();
                     assert!(&response == "Reply to C3");
                 }
                 _ => panic!("Expected reply"),
@@ -760,8 +763,8 @@ mod tests {
         let header = Message::decode_header(msg_receiver.message()).unwrap();
 
         match header.directive {
-            Directive::Reply => {
-                let response: String = Message::decode_reply(msg_receiver.message()).unwrap();
+            Directive::Return => {
+                let response: String = Message::decode_returned(msg_receiver.message()).unwrap();
                 assert!(&response == "Reply to C1");
             }
             _ => panic!("Expected reply"),
@@ -808,8 +811,8 @@ mod tests {
         let header = Message::decode_header(msg_receiver.message()).unwrap();
 
         match header.directive {
-            Directive::Reply => {
-                let response: String = Message::decode_reply(msg_receiver.message()).unwrap();
+            Directive::Return => {
+                let response: String = Message::decode_returned(msg_receiver.message()).unwrap();
                 assert!(&response == "Reply to C1");
             }
             _ => panic!("Expected reply"),

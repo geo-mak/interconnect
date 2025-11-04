@@ -40,29 +40,34 @@ const STD_FRAMING_ALLOC: usize = 1024;
 #[derive(Debug, Copy, Clone, PartialEq)]
 #[repr(u8)]
 pub enum Directive {
-    /// A call directive that may or may not have reply.
+    /// A directive that instructs executing an operation.
     ///
-    /// This directive targets methods that take extra parameters.
+    /// This directive targets methods that take parameters (data dependencies).
+    ///
+    /// Depending on the implementation, the target method may not return a value.
     Call = 0,
 
-    /// A call directive that may or may not have reply.
+    /// A directive that instructs executing an operation.
     ///
-    /// This directive targets methods that don't take any extra parameters.
+    /// This directive targets methods that don't take parameters (data dependencies).
+    ///
+    /// Depending on the implementation, the target method may not return a value.
     NullaryCall = 1,
 
-    /// A reply directive as a response to a previously sent call.
-    Reply = 2,
+    /// A directive that instructs processing data returned by an operation.
+    Return = 2,
 
-    /// Error directive as a response to a previously sent call.
+    /// Error directive as a response to a call.
     ///
-    /// This directive instructs decoding `RpcError` from the message which is
-    /// a lightweight structure for operational errors.
+    /// This directive instructs decoding `RpcError` from the message.
     ///
-    /// Rich and detailed errors are considered part of the service design,
-    /// and subject to the documented reply type of a particular method.
+    /// `RpcError` is a lightweight data structure for communicating errors.
+    ///
+    /// Rich and detailed errors are application specific, and subject to the documented
+    /// return type of a particular method.
     ///
     /// However, it is strongly recommended to limit communicating errors to `RpcError`
-    /// where possible.
+    /// if possible, because it has an integrated and optimized decoding mechanism.
     Error = 3,
 
     /// A heartbeat/ping directive.
@@ -79,7 +84,7 @@ impl Directive {
         Some(match byte {
             0 => Call,
             1 => NullaryCall,
-            2 => Reply,
+            2 => Return,
             3 => Error,
             4 => Ping,
             5 => Pong,
@@ -93,7 +98,7 @@ impl core::fmt::Display for Directive {
         match self {
             Self::Call => f.write_str("Variadic Call"),
             Self::NullaryCall => f.write_str("Niladic Call"),
-            Self::Reply => f.write_str("Reply"),
+            Self::Return => f.write_str("Return"),
             Self::Error => f.write_str("Error"),
             Self::Ping => f.write_str("Ping"),
             Self::Pong => f.write_str("Pong"),
@@ -227,11 +232,11 @@ impl Message {
         Self::decode_from_slice::<R>(&message[19..])
     }
 
-    pub fn reply_data(message: &[u8]) -> &[u8] {
+    pub fn returned_data(message: &[u8]) -> &[u8] {
         &message[17..]
     }
 
-    pub fn decode_reply<R>(message: &[u8]) -> RpcResult<R>
+    pub fn decode_returned<R>(message: &[u8]) -> RpcResult<R>
     where
         R: for<'de> Deserialize<'de>,
     {
@@ -415,7 +420,7 @@ impl<T: AsyncIOWrite + Send + Unpin> AsyncSender for MessageSender<T> {
     async fn reply<R: Serialize + Sync>(&mut self, id: &MessageID, reply: &R) -> RpcResult<()> {
         unsafe { self.buffer.data.set_len(STD_MESSAGE_LEN) };
         self.buffer
-            .write(&Message::encode_header(id, Directive::Reply))?;
+            .write(&Message::encode_header(id, Directive::Return))?;
         Message::encode_into_writer(reply, &mut self.buffer)?;
         self.write_all().await
     }
@@ -595,7 +600,7 @@ impl<T: AsyncIOWrite + Send + Unpin> AsyncSender for EncMessageSender<T> {
     async fn reply<R: Serialize>(&mut self, id: &MessageID, reply: &R) -> RpcResult<()> {
         unsafe { self.buffer.data.set_len(STD_MESSAGE_LEN) };
         self.buffer
-            .write(&Message::encode_header(id, Directive::Reply))?;
+            .write(&Message::encode_header(id, Directive::Return))?;
         Message::encode_into_writer(reply, &mut self.buffer)?;
         self.write_all().await
     }
@@ -805,9 +810,9 @@ mod tests {
 
         let header = Message::decode_header(msg_receiver.message()).unwrap();
 
-        assert!(header.directive == Directive::Reply);
+        assert!(header.directive == Directive::Return);
 
-        let reply: String = Message::decode_reply(msg_receiver.message()).unwrap();
+        let reply: String = Message::decode_returned(msg_receiver.message()).unwrap();
         assert_eq!(reply, "Reply: hi there");
 
         msg_sender.close().await.unwrap();
@@ -869,10 +874,10 @@ mod tests {
 
         let header = Message::decode_header(msg_receiver.message()).unwrap();
 
-        assert!(header.directive == Directive::Reply);
+        assert!(header.directive == Directive::Return);
 
         assert_eq!(
-            Message::decode_reply::<String>(msg_receiver.message()).unwrap(),
+            Message::decode_returned::<String>(msg_receiver.message()).unwrap(),
             "Reply: hi there"
         );
 

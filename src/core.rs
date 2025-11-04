@@ -20,7 +20,7 @@ use crate::{
 use crate::private::Private;
 
 // RPC FRAME
-//   Header (unencrypted?)   Payload (encrypted)
+//   Header (unencrypted?)   Message (encrypted)
 // +----------------------+--------------------------------------+
 // |  Total len           | Header (ID, Directive) + Data (Maybe)
 // +----------------------+--------------------------------------+

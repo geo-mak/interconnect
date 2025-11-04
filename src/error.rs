@@ -12,8 +12,8 @@ pub type RpcResult<T> = Result<T, RpcError>;
 #[non_exhaustive]
 #[repr(u8)]
 pub enum ErrKind {
-    /// Service-defined error.
-    Service,
+    /// Application-defined error.
+    Application,
 
     /// Unmapped I/O error.
     IO,
@@ -58,7 +58,7 @@ impl ErrKind {
     pub fn from_le_byte(byte: u8) -> Option<Self> {
         use ErrKind::*;
         Some(match byte {
-            0 => Service,
+            0 => Application,
             1 => IO,
             2 => Disconnected,
             3 => Canceled,

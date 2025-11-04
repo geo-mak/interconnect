@@ -9,7 +9,7 @@ use crate::{
 
 #[derive(Debug, PartialEq)]
 pub struct Call<'a> {
-    pub method: u16,
+    pub op: u16,
     pub params: &'a [u8],
 }
 
@@ -27,18 +27,18 @@ pub trait CallContext {
     /// The identifier of the call.
     fn id(&self) -> &Self::ID;
 
-    /// Sends a reply message back to the caller.
+    /// Sends data as returning message back to the caller.
     ///
     /// Unless noted otherwise by the implementation, this method is **not** safe to be canceled.
-    fn send_reply<R: Serialize + Sync>(
+    fn return_data<R: Serialize + Sync>(
         &mut self,
-        reply: &R,
+        data: &R,
     ) -> impl Future<Output = RpcResult<()>> + Send;
 
     /// Sends an error message back to the caller.
     ///
     /// Unless noted otherwise by the implementation, this method is **not** safe to be canceled.
-    fn send_error(&mut self, err: RpcError) -> impl Future<Output = RpcResult<()>> + Send;
+    fn return_error(&mut self, error: RpcError) -> impl Future<Output = RpcResult<()>> + Send;
 
     /// Sends a one-way call back to the caller.
     ///
@@ -47,7 +47,7 @@ pub trait CallContext {
     /// By default, it returns `Unimplemented` error.
     fn call<P: Serialize + Sync>(
         &mut self,
-        _method: u16,
+        _op: u16,
         _params: &P,
     ) -> impl Future<Output = RpcResult<()>> + Send {
         std::future::ready(Err(RpcError::error(ErrKind::Unimplemented)))
@@ -58,15 +58,17 @@ pub trait CallContext {
     /// Unless noted otherwise by the implementation, this method is **not** safe to be canceled.
     ///
     /// By default, it returns `Unimplemented` error.
-    fn call_nullary(&mut self, _method: u16) -> impl Future<Output = RpcResult<()>> + Send {
+    fn call_nullary(&mut self, _op: u16) -> impl Future<Output = RpcResult<()>> + Send {
         std::future::ready(Err(RpcError::error(ErrKind::Unimplemented)))
     }
 }
 
-/// Trait for implementing RPC service handler.
+/// Trait for implementing RPC applications.
 ///
-/// The host may impose restrictions on the service implementation according to its needs.
-pub trait RpcService {
+/// RPC applications match and execute received calls.
+///
+/// The host may impose restrictions on the implementation of the application.
+pub trait RpcApplication {
     /// Handles a call to a method with parameters.
     ///
     /// Response to the call is optional and can be done via the context's methods.
@@ -80,30 +82,30 @@ pub trait RpcService {
     where
         C: CallContext + Send,
     {
-        context.send_error(RpcError::error(ErrKind::Unimplemented))
+        context.return_error(RpcError::error(ErrKind::Unimplemented))
     }
 
-    /// Handles a call to a nullary method.
+    /// Handles a call to a nullary operation.
     ///
     /// Response to the call is optional and can be done via the context's methods.
     ///
     /// By default, it sends `Unimplemented` error to the caller.
     fn call_nullary<C>(
         &self,
-        _method: u16,
+        _op: u16,
         context: &mut C,
     ) -> impl Future<Output = RpcResult<()>> + Send
     where
         C: CallContext + Send,
     {
-        context.send_error(RpcError::error(ErrKind::Unimplemented))
+        context.return_error(RpcError::error(ErrKind::Unimplemented))
     }
 
-    /// Informs the service to terminate its state machines and waits for completion.
+    /// Informs the application to terminate its state machines and waits for completion.
     /// By default, it returns immediately.
     fn shutdown(&self) -> impl Future<Output = RpcResult<()>> + Send {
         std::future::ready(Ok(()))
     }
 }
 
-impl RpcService for () {}
+impl RpcApplication for () {}

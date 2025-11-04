@@ -5,8 +5,8 @@ The RPC aspect is currently the main focus, and the main area of development.
 ## Main Layers Overview.
 ```
 ┌─────────────────────────────────────────────┐
-│                Service Layer                │
-│     (Method Handlers, Extensions, etc.)     │
+│              Application Layer              │
+│  (Operations' Handlers, Extensions, etc.)   │
 ├─────────────────────────────────────────────┤
 │                Session Layer                │
 │         (Client, Server, Policies)          │

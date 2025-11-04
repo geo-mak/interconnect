@@ -16,6 +16,7 @@ use tokio::task::JoinHandle;
 
 use serde::{Deserialize, Serialize};
 
+use crate::application::{Call, CallContext, RpcApplication};
 use crate::capability::{RpcCapability, negotiation};
 use crate::core::{
     AsyncReceiver, AsyncSender, Directive, EncMessageReceiver, EncMessageSender, Message,
@@ -23,20 +24,19 @@ use crate::core::{
 };
 use crate::error::{ErrKind, RpcError, RpcResult};
 use crate::report::Reporter;
-use crate::service::{Call, CallContext, RpcService};
 use crate::sync::{DynamicLatch, NOOP_WAKER};
 use crate::transport::TransportLayer;
 
 /// The common RPC client interface of async clients.
 pub trait AsyncRpcClient {
-    fn call<P, R>(&self, method: u16, params: &P) -> impl Future<Output = RpcResult<R>>
+    fn call<P, R>(&self, op: u16, params: &P) -> impl Future<Output = RpcResult<R>>
     where
         P: Serialize + Sync,
         R: for<'de> Deserialize<'de>;
 
     fn call_timeout<P, R>(
         &self,
-        method: u16,
+        op: u16,
         params: &P,
         timeout: Duration,
     ) -> impl Future<Output = RpcResult<R>>
@@ -44,23 +44,23 @@ pub trait AsyncRpcClient {
         P: Serialize + Sync,
         R: for<'de> Deserialize<'de>;
 
-    fn call_one_way<P>(&self, method: u16, params: &P) -> impl Future<Output = RpcResult<()>>
+    fn call_one_way<P>(&self, op: u16, params: &P) -> impl Future<Output = RpcResult<()>>
     where
         P: Serialize + Sync;
 
-    fn call_nullary<R>(&self, method: u16) -> impl Future<Output = RpcResult<R>>
+    fn call_nullary<R>(&self, op: u16) -> impl Future<Output = RpcResult<R>>
     where
         R: for<'de> Deserialize<'de>;
 
     fn call_nullary_timeout<R>(
         &self,
-        method: u16,
+        op: u16,
         timeout: Duration,
     ) -> impl Future<Output = RpcResult<R>>
     where
         R: for<'de> Deserialize<'de>;
 
-    fn call_nullary_one_way(&self, method: u16) -> impl Future<Output = RpcResult<()>>;
+    fn call_nullary_one_way(&self, op: u16) -> impl Future<Output = RpcResult<()>>;
 
     fn ping(&self, timeout: Duration) -> impl Future<Output = RpcResult<()>>;
 
@@ -240,18 +240,18 @@ struct ClientState<S, H, E> {
     abort_lock: DynamicLatch,
     rs: ReservationStation<MessageID, RpcResult<Response>>,
     sender: Mutex<S>,
-    service: H,
+    app: H,
     reporter: E,
 }
 
 impl<S, H, E> ClientState<S, H, E> {
     #[inline(always)]
-    fn new(sender: S, capacity: usize, reporter: E, service: H) -> ClientState<S, H, E> {
+    fn new(sender: S, capacity: usize, reporter: E, app: H) -> ClientState<S, H, E> {
         ClientState {
             abort_lock: DynamicLatch::new(),
             rs: ReservationStation::new(capacity),
             sender: Mutex::const_new(sender),
-            service,
+            app,
             reporter,
         }
     }
@@ -275,7 +275,7 @@ where
 impl<'a, S, H, E> CallContext for ClientContext<'a, S, H, E>
 where
     S: AsyncSender + Send,
-    H: RpcService + Sync,
+    H: RpcApplication + Sync,
     E: Reporter + Sync,
 {
     type ID = MessageID;
@@ -286,32 +286,42 @@ where
     }
 
     #[inline]
-    async fn send_reply<R: Serialize + Sync>(&mut self, reply: &R) -> RpcResult<()> {
-        self.state.sender.lock().await.reply(self.id, reply).await
-    }
-
-    #[inline]
-    async fn send_error(&mut self, err: RpcError) -> RpcResult<()> {
-        self.state.sender.lock().await.error(self.id, err).await
-    }
-
-    #[inline]
-    async fn call<P: Serialize + Sync>(&mut self, method: u16, params: &P) -> RpcResult<()> {
+    async fn return_data<R: Serialize + Sync>(&mut self, reply: &R) -> RpcResult<()> {
         self.state
             .sender
             .lock()
             .await
-            .call(self.id, method, &params)
+            .return_data(self.id, reply)
             .await
     }
 
     #[inline]
-    async fn call_nullary(&mut self, method: u16) -> RpcResult<()> {
+    async fn return_error(&mut self, err: RpcError) -> RpcResult<()> {
         self.state
             .sender
             .lock()
             .await
-            .call_nullary(self.id, method)
+            .return_error(self.id, err)
+            .await
+    }
+
+    #[inline]
+    async fn call<P: Serialize + Sync>(&mut self, op: u16, params: &P) -> RpcResult<()> {
+        self.state
+            .sender
+            .lock()
+            .await
+            .call(self.id, op, &params)
+            .await
+    }
+
+    #[inline]
+    async fn call_nullary(&mut self, op: u16) -> RpcResult<()> {
+        self.state
+            .sender
+            .lock()
+            .await
+            .call_nullary(self.id, op)
             .await
     }
 }
@@ -328,7 +338,7 @@ pub struct RpcAsyncClient<S, H, E> {
 impl<S, H, E> RpcAsyncClient<S, H, E>
 where
     S: AsyncSender + Send + 'static,
-    H: RpcService + Send + Sync + 'static,
+    H: RpcApplication + Send + Sync + 'static,
     E: Reporter + Send + Sync + 'static,
 {
     fn init<R>(
@@ -350,7 +360,7 @@ where
                 match receiver.receive().await {
                     Ok(_) => {
                         if let Err(err) = Self::process_message(&receiver, &client_state).await {
-                            client_state.reporter.error("Handling error", &err);
+                            client_state.reporter.error("Processing error", &err);
                             break;
                         }
                     }
@@ -385,20 +395,17 @@ where
             Directive::Pong => state.rs.publish(&header.id, Ok(Response::Pong)),
             Directive::Call => {
                 if let Some(_lock) = state.abort_lock.acquire() {
-                    let method = Message::decode_method(message)?;
+                    let op = Message::decode_op(message)?;
                     let params = Message::param_data(message);
                     let mut context = ClientContext::new(&header.id, state);
-                    return state
-                        .service
-                        .call(Call { method, params }, &mut context)
-                        .await;
+                    return state.app.call(Call { op, params }, &mut context).await;
                 }
             }
             Directive::NullaryCall => {
                 if let Some(_lock) = state.abort_lock.acquire() {
-                    let method = Message::decode_method(message)?;
+                    let op = Message::decode_op(message)?;
                     let mut context = ClientContext::new(&header.id, state);
-                    return state.service.call_nullary(method, &mut context).await;
+                    return state.app.call_nullary(op, &mut context).await;
                 }
             }
             Directive::Ping => return state.sender.lock().await.pong(&header.id).await,
@@ -410,14 +417,14 @@ where
 impl<T, H, E> RpcAsyncClient<MessageSender<T>, H, E>
 where
     T: TransportLayer + 'static,
-    H: RpcService + Send + Sync + 'static,
+    H: RpcApplication + Send + Sync + 'static,
     E: Reporter + Send + Sync + 'static,
 {
     pub async fn connect(
         capacity: usize,
         mut transport: T,
         reporter: E,
-        handler: H,
+        application: H,
     ) -> RpcResult<RpcAsyncClient<MessageSender<T::OwnedWriteHalf>, H, E>> {
         negotiation::initiate(&mut transport, RpcCapability::new(1, false)).await?;
 
@@ -428,7 +435,7 @@ where
             MessageSender::new(w),
             MessageReceiver::new(r),
             reporter,
-            handler,
+            application,
         );
 
         Ok(instance)
@@ -438,14 +445,14 @@ where
 impl<T, H, E> RpcAsyncClient<EncMessageSender<T>, H, E>
 where
     T: TransportLayer + 'static,
-    H: RpcService + Send + Sync + 'static,
+    H: RpcApplication + Send + Sync + 'static,
     E: Reporter + Send + Sync + 'static,
 {
     pub async fn connect_encrypted(
         capacity: usize,
         mut transport: T,
         reporter: E,
-        handler: H,
+        application: H,
     ) -> RpcResult<RpcAsyncClient<EncMessageSender<T::OwnedWriteHalf>, H, E>> {
         negotiation::initiate(&mut transport, RpcCapability::new(1, true)).await?;
 
@@ -458,7 +465,7 @@ where
             EncMessageSender::new(w, w_key),
             EncMessageReceiver::new(r, r_key),
             reporter,
-            handler,
+            application,
         );
 
         Ok(instance)
@@ -468,22 +475,21 @@ where
 impl<S, H, E> AsyncRpcClient for RpcAsyncClient<S, H, E>
 where
     S: AsyncSender + Send + 'static,
-    H: RpcService + Send + Sync + 'static,
+    H: RpcApplication + Send + Sync + 'static,
     E: Reporter + Send + Sync + 'static,
 {
     /// Makes a remote procedure call.
     /// Default timeout is `30` seconds.
-    async fn call<P, R>(&self, method: u16, params: &P) -> RpcResult<R>
+    async fn call<P, R>(&self, op: u16, params: &P) -> RpcResult<R>
     where
         P: Serialize + Sync,
         R: for<'de> Deserialize<'de>,
     {
-        self.call_timeout(method, params, Duration::from_secs(30))
-            .await
+        self.call_timeout(op, params, Duration::from_secs(30)).await
     }
 
     /// Makes a remote procedure call with custom timeout.
-    async fn call_timeout<P, R>(&self, method: u16, params: &P, timeout: Duration) -> RpcResult<R>
+    async fn call_timeout<P, R>(&self, op: u16, params: &P, timeout: Duration) -> RpcResult<R>
     where
         P: Serialize + Sync,
         R: for<'de> Deserialize<'de>,
@@ -499,12 +505,7 @@ where
 
         let on_drop = OnBusDrop::new(&id, entries);
 
-        self.state
-            .sender
-            .lock()
-            .await
-            .call(&id, method, params)
-            .await?;
+        self.state.sender.lock().await.call(&id, op, params).await?;
 
         tokio::time::timeout(timeout, WaitPublishing::new(&pinned_bus)).await?;
 
@@ -526,33 +527,27 @@ where
 
     /// Sends a one-way call without response.
     ///
-    /// This call is untracked, if the target method returns response,
+    /// This call is untracked, if the target operation returns response,
     /// the response will be discarded.
-    async fn call_one_way<P>(&self, method: u16, params: &P) -> RpcResult<()>
+    async fn call_one_way<P>(&self, op: u16, params: &P) -> RpcResult<()>
     where
         P: Serialize + Sync,
     {
         let id = MessageID::new_v4();
-        self.state
-            .sender
-            .lock()
-            .await
-            .call(&id, method, params)
-            .await
+        self.state.sender.lock().await.call(&id, op, params).await
     }
 
     /// Makes a remote procedure call.
     /// Default timeout is `30` seconds.
-    async fn call_nullary<R>(&self, method: u16) -> RpcResult<R>
+    async fn call_nullary<R>(&self, op: u16) -> RpcResult<R>
     where
         R: for<'de> Deserialize<'de>,
     {
-        self.call_nullary_timeout(method, Duration::from_secs(30))
-            .await
+        self.call_nullary_timeout(op, Duration::from_secs(30)).await
     }
 
     /// Makes a remote procedure call with custom timeout.
-    async fn call_nullary_timeout<R>(&self, method: u16, timeout: Duration) -> RpcResult<R>
+    async fn call_nullary_timeout<R>(&self, op: u16, timeout: Duration) -> RpcResult<R>
     where
         R: for<'de> Deserialize<'de>,
     {
@@ -567,12 +562,7 @@ where
 
         let on_drop = OnBusDrop::new(&id, entries);
 
-        self.state
-            .sender
-            .lock()
-            .await
-            .call_nullary(&id, method)
-            .await?;
+        self.state.sender.lock().await.call_nullary(&id, op).await?;
 
         tokio::time::timeout(timeout, WaitPublishing::new(&pinned_bus)).await?;
 
@@ -594,16 +584,11 @@ where
 
     /// Sends a one-way nullary call without response.
     ///
-    /// This call is untracked, if the target method returns response,
+    /// This call is untracked, if the target operation returns response,
     /// the response will be discarded.
-    async fn call_nullary_one_way(&self, method: u16) -> RpcResult<()> {
+    async fn call_nullary_one_way(&self, op: u16) -> RpcResult<()> {
         let id = MessageID::new_v4();
-        self.state
-            .sender
-            .lock()
-            .await
-            .call_nullary(&id, method)
-            .await
+        self.state.sender.lock().await.call_nullary(&id, op).await
     }
 
     /// Sends a `ping`` message.
@@ -644,7 +629,7 @@ where
 
         self.state.sender.lock().await.close().await?;
 
-        self.state.service.shutdown().await
+        self.state.app.shutdown().await
     }
 }
 
@@ -683,35 +668,33 @@ mod tests {
                         let header = Message::decode_header(msg_receiver.message()).unwrap();
                         match header.directive {
                             Directive::Call => {
-                                let method =
-                                    Message::decode_method(msg_receiver.message()).unwrap();
-                                match method {
+                                let op = Message::decode_op(msg_receiver.message()).unwrap();
+                                match op {
                                     1 => {
                                         let params: String =
                                             Message::decode_params(msg_receiver.message()).unwrap();
                                         assert_eq!(params, "call");
 
-                                        msg_sender.reply(&header.id, &"reply").await.unwrap();
+                                        msg_sender.return_data(&header.id, &"reply").await.unwrap();
                                     }
                                     2 => {
                                         msg_sender
-                                            .error(
+                                            .return_error(
                                                 &header.id,
                                                 RpcError::error(ErrKind::Unimplemented),
                                             )
                                             .await
                                             .unwrap();
                                     }
-                                    _ => panic!("undefined method"),
+                                    _ => panic!("undefined op"),
                                 }
                             }
                             Directive::NullaryCall => {
-                                let method =
-                                    Message::decode_method(msg_receiver.message()).unwrap();
-                                assert_eq!(method, 1);
+                                let op = Message::decode_op(msg_receiver.message()).unwrap();
+                                assert_eq!(op, 1);
 
                                 msg_sender
-                                    .reply(&header.id, &"nullary call reply")
+                                    .return_data(&header.id, &"nullary call reply")
                                     .await
                                     .unwrap();
                             }
@@ -780,13 +763,13 @@ mod tests {
                     let header = Message::decode_header(msg_receiver.message()).unwrap();
                     match header.directive {
                         Directive::Call => {
-                            let method = Message::decode_method(msg_receiver.message()).unwrap();
-                            assert_eq!(method, 1);
+                            let op = Message::decode_op(msg_receiver.message()).unwrap();
+                            assert_eq!(op, 1);
                             let params: String =
                                 Message::decode_params(msg_receiver.message()).unwrap();
                             assert_eq!(params, "call");
 
-                            msg_sender.reply(&header.id, &"reply").await.unwrap();
+                            msg_sender.return_data(&header.id, &"reply").await.unwrap();
                         }
                         _ => panic!("Expected call message"),
                     }

@@ -7,9 +7,9 @@ pub mod core;
 pub mod error;
 pub mod io;
 
+pub mod application;
 pub mod report;
 pub mod server;
-pub mod service;
 pub mod sync;
 pub mod transport;
 

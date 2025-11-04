@@ -15,6 +15,7 @@ use serde::Serialize;
 use tokio::task::JoinHandle;
 use tokio::time::timeout;
 
+use crate::application::{Call, CallContext, RpcApplication};
 use crate::capability::{EncryptionState, negotiation};
 use crate::core::{
     AsyncReceiver, AsyncSender, EncMessageReceiver, EncMessageSender, MessageID, MessageReceiver,
@@ -22,7 +23,6 @@ use crate::core::{
 };
 use crate::error::{ErrKind, RpcError, RpcResult};
 use crate::report::Reporter;
-use crate::service::{Call, CallContext, RpcService};
 use crate::sync::{DynamicLatch, IList, INode, NOOP_WAKER};
 use crate::transport::{TransportLayer, TransportListener};
 use crate::{Directive, Message};
@@ -244,17 +244,17 @@ impl<'a, H, E> AttachedTask<'a, H, E> {
 
 struct ServerState<H, E> {
     tasks: Tasks,
-    service: H,
+    app: H,
     report: E,
     timeout: Duration,
 }
 
 impl<H, E> ServerState<H, E> {
     #[inline]
-    fn new(shards: usize, service: H, timeout: Duration, reporter: E) -> ServerState<H, E> {
+    fn new(shards: usize, app: H, timeout: Duration, reporter: E) -> ServerState<H, E> {
         ServerState {
             tasks: Tasks::new(shards),
-            service,
+            app,
             report: reporter,
             timeout,
         }
@@ -288,23 +288,23 @@ where
     }
 
     #[inline]
-    async fn send_reply<R: Serialize + Sync>(&mut self, reply: &R) -> RpcResult<()> {
-        self.sender.reply(self.id, reply).await
+    async fn return_data<R: Serialize + Sync>(&mut self, reply: &R) -> RpcResult<()> {
+        self.sender.return_data(self.id, reply).await
     }
 
     #[inline]
-    async fn send_error(&mut self, err: RpcError) -> RpcResult<()> {
-        self.sender.error(self.id, err).await
+    async fn return_error(&mut self, err: RpcError) -> RpcResult<()> {
+        self.sender.return_error(self.id, err).await
     }
 
     #[inline]
-    async fn call<P: Serialize + Sync>(&mut self, method: u16, params: &P) -> RpcResult<()> {
-        self.sender.call(self.id, method, &params).await
+    async fn call<P: Serialize + Sync>(&mut self, op: u16, params: &P) -> RpcResult<()> {
+        self.sender.call(self.id, op, &params).await
     }
 
     #[inline]
-    async fn call_nullary(&mut self, method: u16) -> RpcResult<()> {
-        self.sender.call_nullary(self.id, method).await
+    async fn call_nullary(&mut self, op: u16) -> RpcResult<()> {
+        self.sender.call_nullary(self.id, op).await
     }
 }
 
@@ -317,7 +317,7 @@ pub struct RpcServer<A, H, E> {
 
 impl<A, H, E> RpcServer<A, H, E>
 where
-    H: RpcService + Send + Sync + Clone + 'static,
+    H: RpcApplication + Send + Sync + Clone + 'static,
     E: Reporter + Send + Sync + 'static,
 {
     /// Initializes server state and starts accepting connections according to the given address and port.
@@ -340,9 +340,9 @@ where
     /// timeout determines the allowed negotiation time before establishing session.
     /// There is no default, the provided value is used as it is.
     ///
-    /// # Service
+    /// # Application
     ///
-    /// Each new session gets its own clone of the service.
+    /// Each new session gets its own instance of the application by calling its `Clone` implementation.
     ///
     /// # Reporting
     ///
@@ -361,12 +361,12 @@ where
     /// 1 - Stops accepting new connections with immediate effect.
     /// 2 - Signals termination to active sessions.
     /// 3 - Waits for all active sessions to finish properly.
-    /// 4 - Calls shutdown on the service to inform it to terminates its state machines,
+    /// 4 - Calls shutdown on the application to inform it to terminates its state machines,
     ///     and waits for its completion.
     pub async fn serve<L>(
         shards: usize,
         addr: A,
-        service: H,
+        application: H,
         encrypted_only: bool,
         negotiation_timeout: Duration,
         reporter: E,
@@ -380,7 +380,7 @@ where
 
         let state = Arc::new(ServerState::new(
             shards,
-            service,
+            application,
             negotiation_timeout,
             reporter,
         ));
@@ -522,7 +522,7 @@ where
         S: AsyncSender + Send,
         R: AsyncReceiver,
     {
-        let service = task.srv_state.service.clone();
+        let app = task.srv_state.app.clone();
         loop {
             match task.wait_cancelable(receiver.receive()).await {
                 Ok(_) => {
@@ -531,16 +531,16 @@ where
                     match header.directive {
                         Directive::Call => {
                             let call = Call {
-                                method: Message::decode_method(message)?,
+                                op: Message::decode_op(message)?,
                                 params: Message::param_data(message),
                             };
                             let mut context = ServerContext::new(&header.id, sender);
-                            service.call(call, &mut context).await?
+                            app.call(call, &mut context).await?
                         }
                         Directive::NullaryCall => {
-                            let method = Message::decode_method(message)?;
+                            let op = Message::decode_op(message)?;
                             let mut context = ServerContext::new(&header.id, sender);
-                            service.call_nullary(method, &mut context).await?
+                            app.call_nullary(op, &mut context).await?
                         }
                         Directive::Ping => sender.pong(&header.id).await?,
                         _ => {
@@ -561,7 +561,7 @@ where
         self.state.tasks.observer.count()
     }
 
-    /// Shutdowns the server and the service in planned mode.
+    /// Shutdowns the server and the application in planned mode.
     ///
     /// This call doesn't have immediate effect and may take longer time,
     /// because it allows active sessions to complete processing the current received message.
@@ -575,7 +575,7 @@ where
 
         self.state.tasks.observer.wait().await;
 
-        self.state.service.shutdown().await
+        self.state.app.shutdown().await
     }
 }
 
@@ -588,23 +588,23 @@ mod tests {
     use tokio::net::{TcpListener, TcpStream, UnixListener, UnixStream};
 
     use crate::Message;
+    use crate::application::Call;
     use crate::capability::{self, RpcCapability};
     use crate::error::{ErrKind, RpcError};
     use crate::report::STDIOReporter;
-    use crate::service::Call;
 
     #[derive(Clone)]
-    struct RpcTestService {}
+    struct TestApplication {}
 
-    impl RpcService for RpcTestService {
+    impl RpcApplication for TestApplication {
         async fn call<C>(&self, call: Call<'_>, context: &mut C) -> RpcResult<()>
         where
             C: CallContext + Send,
         {
-            match call.method {
+            match call.op {
                 1 => {
                     let src: String = call.decode_as().unwrap();
-                    context.send_reply(&format!("Reply to {src}")).await
+                    context.return_data(&format!("Reply to {src}")).await
                 }
                 _ => Err(RpcError::error(ErrKind::Unimplemented)),
             }
@@ -646,11 +646,11 @@ mod tests {
     #[tokio::test]
     async fn test_tcp_rpc_server_core() {
         let srv_addr = "127.0.0.1:8000";
-        let service = RpcTestService {};
+        let application = TestApplication {};
         let mut server = RpcServer::serve::<TcpListener>(
             2,
             srv_addr,
-            service,
+            application,
             false,
             Duration::from_secs(1),
             STDIOReporter::new(),
@@ -729,13 +729,13 @@ mod tests {
     #[tokio::test]
     async fn test_tcp_rpc_server_encryption_policy() {
         let srv_addr = "127.0.0.1:8001";
-        let service = RpcTestService {};
+        let application = TestApplication {};
 
         // Server with encryption-only policy.
         let mut server = RpcServer::serve::<TcpListener>(
             2,
             srv_addr,
-            service,
+            application,
             true,
             Duration::from_secs(1),
             STDIOReporter::new(),
@@ -777,11 +777,11 @@ mod tests {
     async fn test_unix_rpc_server() {
         let path = "unix_server_test.sock";
 
-        let service = RpcTestService {};
+        let application = TestApplication {};
         let mut server = RpcServer::serve::<UnixListener>(
             2,
             path,
-            service,
+            application,
             false,
             Duration::from_secs(1),
             STDIOReporter::new(),

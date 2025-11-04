@@ -42,16 +42,16 @@ const STD_FRAMING_ALLOC: usize = 1024;
 pub enum Directive {
     /// A directive that instructs executing an operation.
     ///
-    /// This directive targets methods that take parameters (data dependencies).
+    /// This directive targets operations that take parameters (data dependencies).
     ///
-    /// Depending on the implementation, the target method may not return a value.
+    /// Depending on the implementation, the target operation may not return a value.
     Call = 0,
 
     /// A directive that instructs executing an operation.
     ///
-    /// This directive targets methods that don't take parameters (data dependencies).
+    /// This directive targets operations that don't take parameters (data dependencies).
     ///
-    /// Depending on the implementation, the target method may not return a value.
+    /// Depending on the implementation, the target operation may not return a value.
     NullaryCall = 1,
 
     /// A directive that instructs processing data returned by an operation.
@@ -64,7 +64,7 @@ pub enum Directive {
     /// `RpcError` is a lightweight data structure for communicating errors.
     ///
     /// Rich and detailed errors are application specific, and subject to the documented
-    /// return type of a particular method.
+    /// return type of a particular operation.
     ///
     /// However, it is strongly recommended to limit communicating errors to `RpcError`
     /// if possible, because it has an integrated and optimized decoding mechanism.
@@ -215,10 +215,10 @@ impl Message {
         Ok(RpcError { kind, refer })
     }
 
-    pub fn decode_method(message: &[u8]) -> RpcResult<u16> {
-        let mut method = [0u8; 2];
-        method.copy_from_slice(&message[17..19]);
-        Ok(u16::from_le_bytes(method))
+    pub fn decode_op(message: &[u8]) -> RpcResult<u16> {
+        let mut op = [0u8; 2];
+        op.copy_from_slice(&message[17..19]);
+        Ok(u16::from_le_bytes(op))
     }
 
     pub fn param_data(message: &[u8]) -> &[u8] {
@@ -322,23 +322,23 @@ pub trait AsyncSender: Private {
     fn call<P: Serialize + Sync>(
         &mut self,
         id: &MessageID,
-        method: u16,
+        op: u16,
         params: &P,
     ) -> impl Future<Output = RpcResult<()>> + Send;
     fn call_nullary(
         &mut self,
         id: &MessageID,
-        method: u16,
+        op: u16,
     ) -> impl Future<Output = RpcResult<()>> + Send;
-    fn reply<R: Serialize + Sync>(
+    fn return_data<R: Serialize + Sync>(
         &mut self,
         id: &MessageID,
-        reply: &R,
+        data: &R,
     ) -> impl Future<Output = RpcResult<()>> + Send;
-    fn error(
+    fn return_error(
         &mut self,
         id: &MessageID,
-        err: RpcError,
+        error: RpcError,
     ) -> impl Future<Output = RpcResult<()>> + Send;
     fn ping(&mut self, id: &MessageID) -> impl Future<Output = RpcResult<()>> + Send;
     fn pong(&mut self, id: &MessageID) -> impl Future<Output = RpcResult<()>> + Send;
@@ -398,26 +398,30 @@ impl<T: AsyncIOWrite + Send + Unpin> AsyncSender for MessageSender<T> {
     async fn call<P: Serialize + Sync>(
         &mut self,
         id: &MessageID,
-        method: u16,
+        op: u16,
         params: &P,
     ) -> RpcResult<()> {
         unsafe { self.buffer.data.set_len(STD_MESSAGE_LEN) };
         self.buffer
             .write(&Message::encode_header(id, Directive::Call))?;
-        self.buffer.write(&method.to_le_bytes())?;
+        self.buffer.write(&op.to_le_bytes())?;
         Message::encode_into_writer(params, &mut self.buffer)?;
         self.write_all().await
     }
 
-    async fn call_nullary(&mut self, id: &MessageID, method: u16) -> RpcResult<()> {
+    async fn call_nullary(&mut self, id: &MessageID, op: u16) -> RpcResult<()> {
         unsafe { self.buffer.data.set_len(STD_MESSAGE_LEN) };
         self.buffer
             .write(&Message::encode_header(id, Directive::NullaryCall))?;
-        self.buffer.write(&method.to_le_bytes())?;
+        self.buffer.write(&op.to_le_bytes())?;
         self.write_all().await
     }
 
-    async fn reply<R: Serialize + Sync>(&mut self, id: &MessageID, reply: &R) -> RpcResult<()> {
+    async fn return_data<R: Serialize + Sync>(
+        &mut self,
+        id: &MessageID,
+        reply: &R,
+    ) -> RpcResult<()> {
         unsafe { self.buffer.data.set_len(STD_MESSAGE_LEN) };
         self.buffer
             .write(&Message::encode_header(id, Directive::Return))?;
@@ -425,7 +429,7 @@ impl<T: AsyncIOWrite + Send + Unpin> AsyncSender for MessageSender<T> {
         self.write_all().await
     }
 
-    async fn error(&mut self, id: &MessageID, err: RpcError) -> RpcResult<()> {
+    async fn return_error(&mut self, id: &MessageID, err: RpcError) -> RpcResult<()> {
         unsafe { self.buffer.data.set_len(STD_MESSAGE_LEN) };
         self.buffer
             .write(&Message::encode_header(id, Directive::Error))?;
@@ -575,29 +579,24 @@ impl<T: AsyncIOWrite + Send + Unpin> EncMessageSender<T> {
 }
 
 impl<T: AsyncIOWrite + Send + Unpin> AsyncSender for EncMessageSender<T> {
-    async fn call<P: Serialize>(
-        &mut self,
-        id: &MessageID,
-        method: u16,
-        params: &P,
-    ) -> RpcResult<()> {
+    async fn call<P: Serialize>(&mut self, id: &MessageID, op: u16, params: &P) -> RpcResult<()> {
         unsafe { self.buffer.data.set_len(STD_MESSAGE_LEN) };
         self.buffer
             .write(&Message::encode_header(id, Directive::Call))?;
-        self.buffer.write(&method.to_le_bytes())?;
+        self.buffer.write(&op.to_le_bytes())?;
         Message::encode_into_writer(params, &mut self.buffer)?;
         self.write_all().await
     }
 
-    async fn call_nullary(&mut self, id: &MessageID, method: u16) -> RpcResult<()> {
+    async fn call_nullary(&mut self, id: &MessageID, op: u16) -> RpcResult<()> {
         unsafe { self.buffer.data.set_len(STD_MESSAGE_LEN) };
         self.buffer
             .write(&Message::encode_header(id, Directive::NullaryCall))?;
-        self.buffer.write(&method.to_le_bytes())?;
+        self.buffer.write(&op.to_le_bytes())?;
         self.write_all().await
     }
 
-    async fn reply<R: Serialize>(&mut self, id: &MessageID, reply: &R) -> RpcResult<()> {
+    async fn return_data<R: Serialize>(&mut self, id: &MessageID, reply: &R) -> RpcResult<()> {
         unsafe { self.buffer.data.set_len(STD_MESSAGE_LEN) };
         self.buffer
             .write(&Message::encode_header(id, Directive::Return))?;
@@ -605,7 +604,7 @@ impl<T: AsyncIOWrite + Send + Unpin> AsyncSender for EncMessageSender<T> {
         self.write_all().await
     }
 
-    async fn error(&mut self, id: &MessageID, err: RpcError) -> RpcResult<()> {
+    async fn return_error(&mut self, id: &MessageID, err: RpcError) -> RpcResult<()> {
         unsafe { self.buffer.data.set_len(STD_MESSAGE_LEN) };
         self.buffer
             .write(&Message::encode_header(id, Directive::Error))?;
@@ -775,13 +774,14 @@ mod tests {
                         let header = Message::decode_header(msg_receiver.message()).unwrap();
                         assert!(header.directive == Directive::Call);
 
-                        let method = Message::decode_method(msg_receiver.message()).unwrap();
-                        assert!(method == 1);
+                        let op = Message::decode_op(msg_receiver.message()).unwrap();
+                        assert!(op == 1);
 
                         let data: String = Message::decode_params(msg_receiver.message()).unwrap();
                         assert_eq!(&data, &"hi there");
 
-                        if let Err(e) = msg_sender.reply(&header.id, &"Reply: hi there").await {
+                        if let Err(e) = msg_sender.return_data(&header.id, &"Reply: hi there").await
+                        {
                             println!("Server error: {:?}", e);
                         }
                     }
@@ -839,13 +839,14 @@ mod tests {
                         let header = Message::decode_header(msg_receiver.message()).unwrap();
                         assert!(header.directive == Directive::Call);
 
-                        let method = Message::decode_method(msg_receiver.message()).unwrap();
-                        assert!(method == 1);
+                        let op = Message::decode_op(msg_receiver.message()).unwrap();
+                        assert!(op == 1);
 
                         let data: String = Message::decode_params(msg_receiver.message()).unwrap();
                         assert_eq!(data, "hi there");
 
-                        if let Err(e) = msg_sender.reply(&header.id, &"Reply: hi there").await {
+                        if let Err(e) = msg_sender.return_data(&header.id, &"Reply: hi there").await
+                        {
                             println!("Server error: {:?}", e);
                         }
                     }

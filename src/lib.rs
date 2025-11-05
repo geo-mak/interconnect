@@ -1,11 +1,11 @@
 mod opt;
 mod private;
 
-pub mod capability;
 pub mod client;
 pub mod core;
 pub mod error;
 pub mod io;
+pub mod specs;
 
 pub mod application;
 pub mod report;

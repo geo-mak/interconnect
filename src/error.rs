@@ -24,7 +24,7 @@ pub enum ErrKind {
 
     InvalidNegotiation,
 
-    CapabilityMismatch,
+    SpecsMismatch,
 
     KeyDerivation,
 
@@ -63,7 +63,7 @@ impl ErrKind {
             2 => Disconnected,
             3 => Canceled,
             4 => InvalidNegotiation,
-            5 => CapabilityMismatch,
+            5 => SpecsMismatch,
             6 => KeyDerivation,
             7 => InvalidKey,
             8 => Encryption,

@@ -9,11 +9,11 @@ use crate::error::{ErrKind, RpcError, RpcResult};
 use crate::opt::branch_prediction::unlikely;
 
 // ----------------------------------------------
-// |         RPC CAPABILITY PROTOCOL            |
+// |         RPC SPECIFICATION PROTOCOL         |
 // ----------------------------------------------
 //
-// Currently, the client initiates capability negotiation by sending an 8-byte
-// capability frame. The server either accepts it or rejects it with a 1-byte
+// Currently, the client initiates negotiation of specifications by sending an 8-byte
+// specification frame. The server either accepts it or rejects it with a 1-byte
 // confirmation:
 //
 //                         ----------------
@@ -22,7 +22,7 @@ use crate::opt::branch_prediction::unlikely;
 //
 //              CLIENT                           SERVER
 //                |                                 |
-//                | Capability Frame (8 bytes)      |
+//                | Specification Frame (8 bytes)   |
 //                |-------------------------------> |
 //                |                                 |
 //                | Server applies its policy then: |
@@ -49,16 +49,16 @@ use crate::opt::branch_prediction::unlikely;
 //
 
 // ----------------------------------------------
-// |           CAPABILITY FRAME DATA            |
+// |         SPECIFICATION FRAME DATA           |
 // ----------------------------------------------
 //
-// Capability frame (8 bytes)
-// [0..4]   protocol signature (and version)
-// [4]      rpc stream version
-// [5]      other flags:
+// Specification frame (8 bytes)
+// [0..4]   Specification protocol signature (and version)
+// [4]      Stream version
+// [5]      Flags:
 //            0x01 = encryption enabled
 //            0x02 = identity required (not implemented, future use)
-// [6..8]   reserved = 0 (2 bytes)
+// [6..8]   Reserved = 0 (2 bytes)
 //
 // Confirmation byte (1 byte):
 // 0x01 = accepted
@@ -74,13 +74,13 @@ const CAPABILITY_FRAME_LEN: usize = 8;
 const PROTO: &[u8; 4] = b"RPC0";
 
 #[derive(Debug, Clone, Copy)]
-pub struct RpcCapability {
-    /// Announced stream version. This is similar to the version of application data in TLS.
+pub struct RpcSpecification {
+    /// Announced stream version.
     pub version: u8,
     pub encryption: bool,
 }
 
-impl RpcCapability {
+impl RpcSpecification {
     #[inline(always)]
     pub const fn new(version: u8, encryption: bool) -> Self {
         Self {
@@ -155,7 +155,7 @@ pub mod negotiation {
     use crate::TransportLayer;
     use x25519_dalek::{EphemeralSecret, PublicKey};
 
-    pub async fn read_frame<T>(transport: &mut T) -> io::Result<RpcCapability>
+    pub async fn read_frame<T>(transport: &mut T) -> io::Result<RpcSpecification>
     where
         T: TransportLayer,
     {
@@ -173,13 +173,13 @@ pub mod negotiation {
         let flags = buf[5];
         let encryption = (flags & 0x01) != 0;
 
-        Ok(RpcCapability {
+        Ok(RpcSpecification {
             version,
             encryption,
         })
     }
 
-    pub async fn write_frame<T>(transport: &mut T, capability: &RpcCapability) -> io::Result<()>
+    pub async fn write_frame<T>(transport: &mut T, capability: &RpcSpecification) -> io::Result<()>
     where
         T: TransportLayer,
     {
@@ -210,7 +210,7 @@ pub mod negotiation {
     }
 
     /// Initiates a capability negotiation.
-    pub async fn initiate<T>(transport: &mut T, capability: RpcCapability) -> RpcResult<()>
+    pub async fn initiate<T>(transport: &mut T, capability: RpcSpecification) -> RpcResult<()>
     where
         T: TransportLayer,
     {
@@ -221,7 +221,7 @@ pub mod negotiation {
 
         match confirm[0] {
             0x01 => Ok(()),
-            0x00 => Err(RpcError::error(ErrKind::CapabilityMismatch)),
+            0x00 => Err(RpcError::error(ErrKind::SpecsMismatch)),
             _ => Err(RpcError::error(ErrKind::InvalidNegotiation)),
         }
     }
@@ -349,7 +349,7 @@ mod test {
 
         let mut transport = TcpStream::connect(addr).await.unwrap();
 
-        let capability = RpcCapability {
+        let capability = RpcSpecification {
             version: 1,
             encryption: true,
         };

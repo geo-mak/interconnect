@@ -9,9 +9,9 @@ use aead::Buffer;
 
 use uuid::Uuid;
 
-use crate::capability::EncryptionState;
 use crate::error::ErrKind;
 use crate::opt::branch_prediction::unlikely;
+use crate::specs::EncryptionState;
 use crate::{
     RpcError, RpcResult,
     io::{AsyncIORead, AsyncIOWrite},

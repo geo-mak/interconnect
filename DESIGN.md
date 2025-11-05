@@ -6,18 +6,18 @@ The RPC aspect is currently the main focus, and the main area of development.
 ```
 ┌─────────────────────────────────────────────┐
 │              Application Layer              │
-│  (Operations' Handlers, Extensions, etc.)   │
+│   (Operations' Handlers, Extensions, etc.)  │
 ├─────────────────────────────────────────────┤
 │                Session Layer                │
 │         (Client, Server, Policies)          │
 ├─────────────────────────────────────────────┤
-│               RPC Stream Layer              │
-│         (Framing, Encoding/Decoding)        │
+│                 Stream Layer                │
+│     (Framing, Encryption, Encoding etc.)    │
 ├─────────────────────────────────────────────┤
-│             RPC Capability Layer            │
+│               Connection Layer              │
 │    (Specs Negotiation, Establishing etc.)   │
 ├─────────────────────────────────────────────┤
-│               Transport Layer               │
-│             (TCP / Unix Sockets)            │
+│                Transport Layer              │
+│           (TCP, Unix Sockets etc.)          │
 └─────────────────────────────────────────────┘
 ```

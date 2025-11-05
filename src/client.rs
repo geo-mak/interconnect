@@ -17,13 +17,13 @@ use tokio::task::JoinHandle;
 use serde::{Deserialize, Serialize};
 
 use crate::application::{Call, CallContext, RpcApplication};
-use crate::capability::{RpcCapability, negotiation};
 use crate::core::{
     AsyncReceiver, AsyncSender, Directive, EncMessageReceiver, EncMessageSender, Message,
     MessageBuffer, MessageID, MessageReceiver, MessageSender,
 };
 use crate::error::{ErrKind, RpcError, RpcResult};
 use crate::report::Reporter;
+use crate::specs::{RpcSpecification, negotiation};
 use crate::sync::{DynamicLatch, NOOP_WAKER};
 use crate::transport::TransportLayer;
 
@@ -426,7 +426,7 @@ where
         reporter: E,
         application: H,
     ) -> RpcResult<RpcAsyncClient<MessageSender<T::OwnedWriteHalf>, H, E>> {
-        negotiation::initiate(&mut transport, RpcCapability::new(1, false)).await?;
+        negotiation::initiate(&mut transport, RpcSpecification::new(1, false)).await?;
 
         let (r, w) = transport.into_split();
 
@@ -454,7 +454,7 @@ where
         reporter: E,
         application: H,
     ) -> RpcResult<RpcAsyncClient<EncMessageSender<T::OwnedWriteHalf>, H, E>> {
-        negotiation::initiate(&mut transport, RpcCapability::new(1, true)).await?;
+        negotiation::initiate(&mut transport, RpcSpecification::new(1, true)).await?;
 
         let (r_key, w_key) = negotiation::initiate_key_exchange(&mut transport).await?;
 

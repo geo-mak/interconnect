@@ -16,13 +16,13 @@ use tokio::task::JoinHandle;
 use tokio::time::timeout;
 
 use crate::application::{Call, CallContext, RpcApplication};
-use crate::capability::{EncryptionState, negotiation};
 use crate::core::{
     AsyncReceiver, AsyncSender, EncMessageReceiver, EncMessageSender, MessageID, MessageReceiver,
     MessageSender,
 };
 use crate::error::{ErrKind, RpcError, RpcResult};
 use crate::report::Reporter;
+use crate::specs::{EncryptionState, negotiation};
 use crate::sync::{DynamicLatch, IList, INode, NOOP_WAKER};
 use crate::transport::{TransportLayer, TransportListener};
 use crate::{Directive, Message};
@@ -496,7 +496,7 @@ where
 
         if proposed.version != 1 {
             negotiation::reject(transport).await?;
-            return Err(RpcError::error(ErrKind::CapabilityMismatch));
+            return Err(RpcError::error(ErrKind::SpecsMismatch));
         };
 
         if proposed.encryption {
@@ -506,7 +506,7 @@ where
         } else {
             if encryption_required {
                 negotiation::reject(transport).await?;
-                return Err(RpcError::error(ErrKind::CapabilityMismatch));
+                return Err(RpcError::error(ErrKind::SpecsMismatch));
             }
             negotiation::confirm(transport).await?;
             Ok(None)
@@ -589,9 +589,9 @@ mod tests {
 
     use crate::Message;
     use crate::application::Call;
-    use crate::capability::{self, RpcCapability};
     use crate::error::{ErrKind, RpcError};
     use crate::report::STDIOReporter;
+    use crate::specs::{self, RpcSpecification};
 
     #[derive(Clone)]
     struct TestApplication {}
@@ -614,7 +614,7 @@ mod tests {
     async fn make_tcp_rpc_channel(server: &str) -> (impl AsyncSender, impl AsyncReceiver) {
         let mut transport = TcpStream::connect(server).await.unwrap();
 
-        capability::negotiation::initiate(&mut transport, RpcCapability::new(1, false))
+        specs::negotiation::initiate(&mut transport, RpcSpecification::new(1, false))
             .await
             .expect("client negotiation failed");
 
@@ -627,7 +627,7 @@ mod tests {
     ) -> (impl AsyncSender, impl AsyncReceiver) {
         let mut transport = TcpStream::connect(server).await.unwrap();
 
-        capability::negotiation::initiate(&mut transport, RpcCapability::new(1, true))
+        specs::negotiation::initiate(&mut transport, RpcSpecification::new(1, true))
             .await
             .expect("client negotiation failed");
 
@@ -747,9 +747,8 @@ mod tests {
         {
             let mut transport = TcpStream::connect(srv_addr).await.unwrap();
             let response =
-                capability::negotiation::initiate(&mut transport, RpcCapability::new(1, false))
-                    .await;
-            assert!(response == Err(RpcError::error(ErrKind::CapabilityMismatch)));
+                specs::negotiation::initiate(&mut transport, RpcSpecification::new(1, false)).await;
+            assert!(response == Err(RpcError::error(ErrKind::SpecsMismatch)));
         };
 
         let (mut msg_sender, mut msg_receiver) = make_encrypted_tcp_rpc_channel(srv_addr).await;
@@ -791,7 +790,7 @@ mod tests {
 
         let mut transport = UnixStream::connect(path).await.unwrap();
 
-        capability::negotiation::initiate(&mut transport, RpcCapability::new(1, false))
+        specs::negotiation::initiate(&mut transport, RpcSpecification::new(1, false))
             .await
             .expect("client negotiation failed");
 

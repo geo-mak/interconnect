@@ -453,7 +453,7 @@ impl<T: AsyncIOWrite + Send + Unpin> AsyncSender for MessageSender<T> {
 
     #[inline(always)]
     async fn terminate(&mut self) -> RpcResult<()> {
-        self.writer.shutdown().await.map_err(Into::into)
+        self.writer.terminate().await.map_err(Into::into)
     }
 }
 
@@ -628,7 +628,7 @@ impl<T: AsyncIOWrite + Send + Unpin> AsyncSender for EncMessageSender<T> {
 
     #[inline(always)]
     async fn terminate(&mut self) -> RpcResult<()> {
-        self.writer.shutdown().await.map_err(Into::into)
+        self.writer.terminate().await.map_err(Into::into)
     }
 }
 

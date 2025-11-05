@@ -110,7 +110,7 @@ impl AsyncIOWrite for TcpStream {
     }
 
     #[inline(always)]
-    async fn shutdown(&mut self) -> std::io::Result<()>
+    async fn terminate(&mut self) -> std::io::Result<()>
     where
         Self: Unpin,
     {
@@ -154,7 +154,7 @@ impl AsyncIOWrite for tcp::OwnedWriteHalf {
     }
 
     #[inline(always)]
-    async fn shutdown(&mut self) -> std::io::Result<()>
+    async fn terminate(&mut self) -> std::io::Result<()>
     where
         Self: Unpin,
     {
@@ -198,7 +198,7 @@ impl AsyncIOWrite for UnixStream {
     }
 
     #[inline(always)]
-    async fn shutdown(&mut self) -> std::io::Result<()>
+    async fn terminate(&mut self) -> std::io::Result<()>
     where
         Self: Unpin,
     {
@@ -242,7 +242,7 @@ impl AsyncIOWrite for unix::OwnedWriteHalf {
     }
 
     #[inline(always)]
-    async fn shutdown(&mut self) -> std::io::Result<()>
+    async fn terminate(&mut self) -> std::io::Result<()>
     where
         Self: Unpin,
     {

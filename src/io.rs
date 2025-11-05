@@ -44,7 +44,7 @@ pub trait AsyncIOWrite {
     where
         Self: Unpin;
 
-    fn shutdown(&mut self) -> impl Future<Output = io::Result<()>> + Send
+    fn terminate(&mut self) -> impl Future<Output = io::Result<()>> + Send
     where
         Self: Unpin;
 }

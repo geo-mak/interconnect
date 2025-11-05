@@ -142,9 +142,9 @@ impl fmt::Debug for AtomicWaker {
 ///
 /// - Attest (`A` operation): Checks if `O` operation has been started, signaling void protection if it `true`.
 ///
-/// - Increment (`I` operation): increments the reference count of active locks.
+/// - Increment (`I` operation): increments the count of active locks.
 ///
-/// - Decrement (`D` operation): decrements the reference count of active locks.
+/// - Decrement (`D` operation): decrements the count of active locks.
 ///
 /// - Open (`O` operation): Sets the open flag.
 ///   This operation is irreversible per instance.
@@ -160,7 +160,7 @@ impl fmt::Debug for AtomicWaker {
 pub struct DynamicLatch {
     /// Bits array:
     /// Lower bit: 1 is open, 0 is closed.
-    /// Higher bits: locks count as usize value.
+    /// Higher bits: locks' count as usize value.
     state: AtomicUsize,
     waiter: AtomicWaker,
 }

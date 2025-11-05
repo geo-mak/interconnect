@@ -356,16 +356,17 @@ where
         let client_state = Arc::clone(&state);
 
         let recv_task = tokio::spawn(async move {
+            let reporter = &client_state.reporter;
             loop {
                 match receiver.receive().await {
                     Ok(_) => {
                         if let Err(err) = Self::process_message(&receiver, &client_state).await {
-                            client_state.reporter.error("Processing error", &err);
+                            reporter.error("Processing error", &err);
                             break;
                         }
                     }
                     Err(err) => {
-                        client_state.reporter.error("Receiving error", &err);
+                        reporter.error("Receiving error", &err);
                         break;
                     }
                 }

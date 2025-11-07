@@ -51,5 +51,4 @@ Concurrency is treated like parallelism withing the context of this project, bec
 must assume parallelism to enure sound access to data stores and the proper data transformation.
 
 The challenges and complexities of these models are inherent to the dominant **"Von Neumann"** hardware architecture,
-where the "control flow" drives computation, and problems like multiple "runtimes" (CPU, OS, Process), memory ordering, 
-synchronizations..etc are just a byproduct.
+where the "control flow" drives computation, and problems like multiple "runtimes" (CPU scheduler, OS scheduler, Process scheduler), memory ordering, synchronizations..etc are just a byproduct.

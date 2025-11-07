@@ -5,7 +5,7 @@ High performance remote procedure call protocol.
 > **⚠️ This project is in early development stage.**
 
 ## Features
-- Layered extensible architecture with high efficiency abstractions and clear semantics.
+- Compositional design with high efficiency components and clear semantics.
 - Lightweight message format.
 - Out-of-the-box support for TCP and Unix domain sockets.
 

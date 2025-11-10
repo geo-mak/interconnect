@@ -36,7 +36,7 @@ Statically sized types with static memory allocation are the main way of creatin
 
 ## Async, concurrency and parallelism
 
-Withing the context of this project, these terms are understood as defined:
+Within the context of this project, these terms are understood as defined:
 
 - Async: An event-based execution model, where the control flow of the thread can switch to a notification broker,
   instead of entering a loop for continuously checking the availability of a resource.
@@ -47,7 +47,7 @@ Withing the context of this project, these terms are understood as defined:
 
 - Parallelism: The ability of a particular system to operate multiple instances of its execution units at the same time.
 
-Concurrency is treated like parallelism withing the context of this project, because the programming model
+Concurrency is treated like parallelism within the context of this project, because the programming model
 must assume parallelism to enure sound access to data stores and the proper data transformation.
 
 The challenges and complexities of these models are inherent to the dominant **"Von Neumann"** hardware architecture,

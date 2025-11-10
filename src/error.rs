@@ -38,7 +38,9 @@ pub enum ErrKind {
 
     Decoding,
 
-    MaxLimit,
+    RoundLimit,
+
+    CapacityLimit,
 
     Timeout,
 
@@ -70,13 +72,14 @@ impl ErrKind {
             9 => Decryption,
             10 => Encoding,
             11 => Decoding,
-            12 => MaxLimit,
-            13 => Timeout,
-            14 => LargeMessage,
-            15 => UnexpectedMsg,
-            16 => DroppedMessage,
-            17 => Unidentified,
-            18 => Unimplemented,
+            12 => RoundLimit,
+            13 => CapacityLimit,
+            14 => Timeout,
+            15 => LargeMessage,
+            16 => UnexpectedMsg,
+            17 => DroppedMessage,
+            18 => Unidentified,
+            19 => Unimplemented,
             _ => return None,
         })
     }

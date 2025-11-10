@@ -129,7 +129,7 @@ impl EncryptionState {
     pub fn encrypt(&mut self, data: &mut impl Buffer, associated_data: &[u8]) -> RpcResult<()> {
         // TODO: Make limit configurable.
         if unlikely(self.sequence == u64::MAX) {
-            return Err(RpcError::error(ErrKind::MaxLimit));
+            return Err(RpcError::error(ErrKind::RoundLimit));
         }
         let next = self.next_nonce();
         let nonce = Nonce::<Aes128Gcm>::from_slice(&next);

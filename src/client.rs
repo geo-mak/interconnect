@@ -316,7 +316,7 @@ impl<T> MatchingUnit<T> {
         }
     }
 
-    /// Releases the slots at the provided index by making it available for ownership.
+    /// Releases the slot at the provided index by making it available for ownership.
     ///
     /// Safety: This call doesn't verify the ownership of the slot which might be still in use.
     unsafe fn unconditional_release(&self, index: u32, cycle: u32) {

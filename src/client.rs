@@ -1,13 +1,14 @@
 use std::cell::UnsafeCell;
-use std::collections::HashMap;
-use std::hash::Hash;
 use std::marker::PhantomPinned;
-use std::mem;
 use std::pin::Pin;
-use std::ptr::NonNull;
 use std::sync::Arc;
-use std::sync::atomic::AtomicU8;
-use std::sync::atomic::Ordering::{AcqRel, Acquire};
+use std::{mem, ptr};
+
+#[cfg(test)]
+use std::sync::atomic::AtomicBool;
+
+use std::sync::atomic::Ordering::{AcqRel, Acquire, Relaxed, Release};
+use std::sync::atomic::{AtomicU8, AtomicU32, AtomicU64};
 use std::task::{Context, Poll, Waker};
 use std::time::Duration;
 
@@ -67,7 +68,7 @@ pub trait AsyncRpcClient {
     fn terminate(&mut self) -> impl Future<Output = RpcResult<()>>;
 }
 
-struct UnicastDataBus<T> {
+struct FrameData<T> {
     state: AtomicU8,
     waker: UnsafeCell<Waker>,
     // TODO: Maybeuninit?
@@ -75,15 +76,15 @@ struct UnicastDataBus<T> {
     _pin: PhantomPinned,
 }
 
-const BUS_WAIT: u8 = 0;
-const BUS_INIT: u8 = 1;
-const BUS_READY: u8 = 2;
+const DATA_WAIT: u8 = 0;
+const DATA_INIT: u8 = 1;
+const DATA_READY: u8 = 2;
 
-impl<T> UnicastDataBus<T> {
+impl<T> FrameData<T> {
     #[inline(always)]
     const fn new() -> Self {
         Self {
-            state: AtomicU8::new(BUS_WAIT),
+            state: AtomicU8::new(DATA_WAIT),
             waker: UnsafeCell::new(NOOP_WAKER),
             value: UnsafeCell::new(None),
             _pin: PhantomPinned,
@@ -97,45 +98,14 @@ impl<T> UnicastDataBus<T> {
     }
 }
 
-struct UnicastPublisher<T> {
-    bus_ptr: NonNull<UnicastDataBus<T>>,
-}
-
-unsafe impl<T> Send for UnicastPublisher<T> {}
-unsafe impl<T> Sync for UnicastPublisher<T> {}
-
-impl<T> UnicastPublisher<T> {
-    #[inline(always)]
-    const fn new(bus: &UnicastDataBus<T>) -> Self {
-        Self {
-            bus_ptr: NonNull::from_ref(bus),
-        }
-    }
-
-    #[inline]
-    fn publish(mut self, value: T) {
-        let bus = unsafe { self.bus_ptr.as_mut() };
-
-        let value_ptr = bus.value.get();
-
-        debug_assert!(unsafe { (*value_ptr).is_none() });
-
-        unsafe { value_ptr.write(Some(value)) };
-
-        if bus.state.fetch_or(BUS_READY, AcqRel) == BUS_WAIT {
-            unsafe { (*bus.waker.get()).wake_by_ref() };
-        }
-    }
-}
-
 struct WaitPublishing<'a, T> {
-    bus: &'a UnicastDataBus<T>,
+    frame: &'a FrameData<T>,
 }
 
 impl<'a, T> WaitPublishing<'a, T> {
     #[inline(always)]
-    const fn new(bus: &'a UnicastDataBus<T>) -> Self {
-        Self { bus }
+    const fn new(frame: &'a FrameData<T>) -> Self {
+        Self { frame }
     }
 }
 
@@ -143,91 +113,265 @@ impl<'a, T> Future for WaitPublishing<'a, T> {
     type Output = ();
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let bus = unsafe { self.get_unchecked_mut().bus };
-        let state = &bus.state;
+        let frame = unsafe { self.get_unchecked_mut().frame };
+        let state = &frame.state;
 
-        match state.compare_exchange(BUS_WAIT, BUS_INIT, Acquire, Acquire) {
+        match state.compare_exchange(DATA_WAIT, DATA_INIT, Acquire, Acquire) {
             Ok(_) => {
-                let waker_ptr = bus.waker.get();
+                let waker_ptr = frame.waker.get();
                 unsafe { *waker_ptr = cx.waker().clone() };
 
-                match state.compare_exchange(BUS_INIT, BUS_WAIT, AcqRel, Acquire) {
+                match state.compare_exchange(DATA_INIT, DATA_WAIT, AcqRel, Acquire) {
                     Ok(_) => return Poll::Pending,
-                    Err(current) => debug_assert!(current & BUS_READY != 0),
+                    Err(current) => debug_assert!(current & DATA_READY != 0),
                 };
             }
-            Err(current) => debug_assert!(current & BUS_READY != 0),
+            Err(current) => debug_assert!(current & DATA_READY != 0),
         }
 
-        // Safety: BUS_READY indicates that writing has been completed.
+        // Safety: DATA_READY indicates that writing has been completed.
         Poll::Ready(())
     }
 }
 
-struct OnBusDrop<'a, I, T>
-where
-    I: Hash + Eq,
-{
-    id: &'a I,
-    entries: &'a ReservationStation<I, T>,
+struct FramePublisher<T> {
+    data_ptr: *mut FrameData<T>,
 }
 
-impl<'a, I, T> OnBusDrop<'a, I, T>
-where
-    I: Hash + Eq,
-{
+unsafe impl<T: Send> Send for FramePublisher<T> {}
+
+impl<T> FramePublisher<T> {
     #[inline(always)]
-    const fn new(id: &'a I, entries: &'a ReservationStation<I, T>) -> Self {
-        Self { id, entries }
+    const fn new(bus: &mut FrameData<T>) -> Self {
+        Self { data_ptr: bus }
+    }
+
+    const fn null() -> Self {
+        Self {
+            data_ptr: ptr::null_mut(),
+        }
+    }
+
+    const fn is_null(&self) -> bool {
+        self.data_ptr.is_null()
+    }
+
+    #[inline]
+    fn publish(&mut self, value: T) {
+        let frame_data = unsafe { &mut (*self.data_ptr) };
+
+        let value_ptr = frame_data.value.get();
+
+        debug_assert!(unsafe { (*value_ptr).is_none() });
+
+        unsafe { value_ptr.write(Some(value)) };
+
+        if frame_data.state.fetch_or(DATA_READY, AcqRel) == DATA_WAIT {
+            unsafe { (*frame_data.waker.get()).wake_by_ref() };
+        }
+    }
+}
+
+struct Slot<T> {
+    next: AtomicU32,
+    cycle: AtomicU32,
+    guard: parking_lot::Mutex<()>,
+    publisher: UnsafeCell<FramePublisher<T>>,
+
+    #[cfg(test)]
+    reserved: AtomicBool,
+}
+
+unsafe impl<T> Sync for Slot<T> {}
+
+struct MatchingUnit<T> {
+    // Practically, it is static, but const N will force full type annotation.
+    slots: Box<[Slot<T>]>,
+    free: AtomicU64,
+}
+
+impl<T> MatchingUnit<T> {
+    const INVALID_INDEX: u32 = u32::MAX;
+
+    fn new(capacity: usize) -> Self {
+        assert!(
+            capacity > 0 && capacity <= u32::MAX as usize,
+            "Capacity must be > 0 and <= u32::MAX"
+        );
+
+        let mut slots = Vec::with_capacity(capacity);
+
+        let cap_u32 = capacity as u32;
+
+        for i in 0..cap_u32 {
+            slots.push(Slot {
+                next: AtomicU32::new(i + 1),
+                cycle: AtomicU32::new(0),
+                guard: parking_lot::Mutex::new(()),
+                publisher: UnsafeCell::new(FramePublisher::null()),
+
+                #[cfg(test)]
+                reserved: AtomicBool::new(false),
+            });
+        }
+
+        slots[capacity - 1].next.store(Self::INVALID_INDEX, Relaxed);
+
+        Self {
+            slots: slots.into_boxed_slice(),
+            free: AtomicU64::new(0),
+        }
+    }
+
+    const fn split(id: MessageID) -> (u32, u32) {
+        (id as u32, (id >> 32) as u32)
+    }
+
+    const fn combine(index: u32, tag: u32) -> u64 {
+        ((tag as u64) << 32) | index as u64
+    }
+
+    fn acquire(&self, publisher: FramePublisher<T>) -> Option<SlotRef<'_, T>> {
+        loop {
+            let current = self.free.load(Acquire);
+            let (current_index, current_tag) = Self::split(current);
+
+            if current_index == Self::INVALID_INDEX {
+                return None;
+            }
+
+            let current_slot = &self.slots[current_index as usize];
+            let next_index = current_slot.next.load(Relaxed);
+
+            let new = Self::combine(next_index, current_tag.wrapping_add(1));
+
+            if self
+                .free
+                .compare_exchange(current, new, AcqRel, Relaxed)
+                .is_ok()
+            {
+                let cycle = current_slot.cycle.load(Relaxed);
+
+                unsafe { (*current_slot.publisher.get()) = publisher };
+
+                let acquired = Self::combine(current_index, cycle);
+
+                #[cfg(test)]
+                current_slot.reserved.store(true, Release);
+
+                return Some(SlotRef::new(acquired, self));
+            }
+        }
+    }
+
+    /// Tries to published the value to the identified slot.
+    ///
+    /// If the slot is unidentified, the value is dropped.
+    ///
+    /// This call blocks access to the releasing path.
+    fn publish(&self, id: MessageID, value: T) {
+        let (index, prev_cycle) = Self::split(id);
+        let index_usize = index as usize;
+
+        if index_usize >= self.slots.len() {
+            return;
+        }
+
+        let slot = &self.slots[index_usize];
+
+        // Failure to acquire a lock means cancelling has been started.
+        if let Some(_lock) = slot.guard.try_lock() {
+            // Safety: lock until release finishes.
+
+            let current_cycle = slot.cycle.load(Acquire);
+
+            if current_cycle == prev_cycle {
+                unsafe {
+                    let publisher = &mut (*slot.publisher.get());
+                    // RT_ASSERT
+                    // Guard against accidental matching.
+                    assert!(!publisher.is_null());
+                    publisher.publish(value);
+                    self.unconditional_release(index, prev_cycle)
+                };
+            }
+        }
+    }
+
+    /// Tries to cancel in-flight issue.
+    ///
+    /// This call blocks or gets blocked by overlapping access to the releasing path.
+    fn cancel(&self, id: MessageID) {
+        let (index, prev_cycle) = Self::split(id);
+
+        let slot = &self.slots[index as usize];
+
+        // Safety: block or get blocked until release finishes.
+        let _release_lock = slot.guard.lock();
+
+        let current_cycle = slot.cycle.load(Acquire);
+
+        if current_cycle == prev_cycle {
+            unsafe { self.unconditional_release(index, prev_cycle) };
+        }
+    }
+
+    /// Releases the slots at the provided index by making it available for ownership.
+    ///
+    /// Safety: This call doesn't verify the ownership of the slot which might be still in use.
+    unsafe fn unconditional_release(&self, index: u32, cycle: u32) {
+        let slot = &self.slots[index as usize];
+
+        let new_cycle = cycle.wrapping_add(1);
+
+        // Sync with publish/cancel.
+        slot.cycle.store(new_cycle, Release);
+
+        // Guard against accidental matching.
+        unsafe { ptr::write(slot.publisher.get(), FramePublisher::null()) }
+
+        #[cfg(test)]
+        slot.reserved.store(false, Release);
+
+        loop {
+            let current = self.free.load(Acquire);
+            let (current_index, current_tag) = Self::split(current);
+
+            slot.next.store(current_index, Relaxed);
+
+            let new = Self::combine(index, current_tag.wrapping_add(1));
+
+            if self
+                .free
+                .compare_exchange(current, new, AcqRel, Relaxed)
+                .is_ok()
+            {
+                return;
+            }
+        }
+    }
+}
+
+pub struct SlotRef<'a, T> {
+    id: MessageID,
+    mu: &'a MatchingUnit<T>,
+}
+
+impl<'a, T> SlotRef<'a, T> {
+    #[inline(always)]
+    const fn new(id: MessageID, mu: &'a MatchingUnit<T>) -> Self {
+        Self { id, mu }
     }
 
     #[inline(always)]
-    const fn do_nothing(self) {
+    pub fn forget(self) {
         mem::forget(self);
     }
 }
 
-impl<'a, I, T> Drop for OnBusDrop<'a, I, T>
-where
-    I: Hash + Eq,
-{
+impl<'a, T> Drop for SlotRef<'a, T> {
     fn drop(&mut self) {
-        self.entries.remove(self.id);
-    }
-}
-
-struct ReservationStation<I, T> {
-    entries: parking_lot::Mutex<HashMap<I, UnicastPublisher<T>>>,
-}
-
-impl<I, T> ReservationStation<I, T>
-where
-    I: Hash + Eq,
-{
-    #[inline(always)]
-    fn new(capacity: usize) -> Self {
-        Self {
-            entries: parking_lot::Mutex::new(HashMap::with_capacity(capacity)),
-        }
-    }
-
-    #[inline(always)]
-    fn store(&self, id: I, sender: UnicastPublisher<T>) {
-        self.entries.lock().insert(id, sender);
-    }
-
-    #[inline(always)]
-    fn remove(&self, id: &I) {
-        self.entries.lock().remove(id);
-    }
-
-    #[inline]
-    fn publish(&self, id: &I, value: T) {
-        // Safety: Locking is required to prevent cancellation from dropping the bus while it is in use.
-        let mut map_lock = self.entries.lock();
-        if let Some(publisher) = map_lock.remove(id) {
-            publisher.publish(value)
-        }
+        self.mu.cancel(self.id);
     }
 }
 
@@ -238,7 +382,7 @@ enum Response {
 
 struct ClientState<S, H, E> {
     abort_lock: DynamicLatch,
-    rs: ReservationStation<MessageID, RpcResult<Response>>,
+    entries: MatchingUnit<RpcResult<Response>>,
     sender: Mutex<S>,
     app: H,
     reporter: E,
@@ -249,7 +393,7 @@ impl<S, H, E> ClientState<S, H, E> {
     fn new(sender: S, capacity: usize, reporter: E, app: H) -> ClientState<S, H, E> {
         ClientState {
             abort_lock: DynamicLatch::new(),
-            rs: ReservationStation::new(capacity),
+            entries: MatchingUnit::new(capacity),
             sender: Mutex::const_new(sender),
             app,
             reporter,
@@ -387,13 +531,15 @@ where
                 let data = Message::returned_data(message);
                 let mut ret = MessageBuffer::with_capacity(data.len());
                 unsafe { ret.copy_from(data) };
-                state.rs.publish(&header.id, Ok(Response::Data(ret)));
+                state.entries.publish(header.id, Ok(Response::Data(ret)));
             }
             Directive::Error => {
                 let err = Message::decode_error(message)?;
-                state.rs.publish(&header.id, Err(err))
+                state.entries.publish(header.id, Err(err));
             }
-            Directive::Pong => state.rs.publish(&header.id, Ok(Response::Pong)),
+            Directive::Pong => {
+                state.entries.publish(header.id, Ok(Response::Pong));
+            }
             Directive::Call => {
                 if let Some(_lock) = state.abort_lock.acquire() {
                     let op = Message::decode_op(message)?;
@@ -496,34 +642,37 @@ where
         R: for<'de> Deserialize<'de>,
     {
         // Safety: This value must not move.
-        let pinned_bus = UnicastDataBus::new();
+        let mut pinned_mem = FrameData::new();
 
-        let entries = &self.state.rs;
+        let entries = &self.state.entries;
 
-        let id = MessageID::new_v4();
+        if let Some(slot) = entries.acquire(FramePublisher::new(&mut pinned_mem)) {
+            self.state
+                .sender
+                .lock()
+                .await
+                .call(&slot.id, op, params)
+                .await?;
 
-        entries.store(id, UnicastPublisher::new(&pinned_bus));
+            tokio::time::timeout(timeout, WaitPublishing::new(&pinned_mem)).await?;
 
-        let on_drop = OnBusDrop::new(&id, entries);
+            slot.forget();
 
-        self.state.sender.lock().await.call(&id, op, params).await?;
+            // RT_ASSERT
+            let published = pinned_mem.take_value().unwrap();
 
-        tokio::time::timeout(timeout, WaitPublishing::new(&pinned_bus)).await?;
-
-        on_drop.do_nothing();
-
-        // RT_ASSERT
-        let published = pinned_bus.take_value().unwrap();
-
-        match published {
-            Ok(response) => {
-                if let Response::Data(reply) = response {
-                    return Message::decode_from_slice(&reply.data);
+            match published {
+                Ok(response) => {
+                    if let Response::Data(reply) = response {
+                        return Message::decode_from_slice(&reply.data);
+                    }
+                    return Err(RpcError::error(ErrKind::UnexpectedMsg));
                 }
-                Err(RpcError::error(ErrKind::UnexpectedMsg))
+                Err(err) => return Err(err),
             }
-            Err(err) => Err(err),
         }
+
+        Err(RpcError::error(ErrKind::CapacityLimit))
     }
 
     /// Sends a one-way call without response.
@@ -534,8 +683,7 @@ where
     where
         P: Serialize + Sync,
     {
-        let id = MessageID::new_v4();
-        self.state.sender.lock().await.call(&id, op, params).await
+        self.state.sender.lock().await.call(&0, op, params).await
     }
 
     /// Makes a remote procedure call.
@@ -553,34 +701,37 @@ where
         R: for<'de> Deserialize<'de>,
     {
         // Safety: This value must not move.
-        let pinned_bus = UnicastDataBus::new();
+        let mut pinned_mem = FrameData::new();
 
-        let entries = &self.state.rs;
+        let entries = &self.state.entries;
 
-        let id = MessageID::new_v4();
+        if let Some(slot) = entries.acquire(FramePublisher::new(&mut pinned_mem)) {
+            self.state
+                .sender
+                .lock()
+                .await
+                .call_nullary(&slot.id, op)
+                .await?;
 
-        entries.store(id, UnicastPublisher::new(&pinned_bus));
+            tokio::time::timeout(timeout, WaitPublishing::new(&pinned_mem)).await?;
 
-        let on_drop = OnBusDrop::new(&id, entries);
+            slot.forget();
 
-        self.state.sender.lock().await.call_nullary(&id, op).await?;
+            // RT_ASSERT
+            let published = pinned_mem.take_value().unwrap();
 
-        tokio::time::timeout(timeout, WaitPublishing::new(&pinned_bus)).await?;
-
-        on_drop.do_nothing();
-
-        // RT_ASSERT
-        let published = pinned_bus.take_value().unwrap();
-
-        match published {
-            Ok(response) => {
-                if let Response::Data(reply) = response {
-                    return Message::decode_from_slice(&reply.data);
+            match published {
+                Ok(response) => {
+                    if let Response::Data(reply) = response {
+                        return Message::decode_from_slice(&reply.data);
+                    }
+                    return Err(RpcError::error(ErrKind::UnexpectedMsg));
                 }
-                Err(RpcError::error(ErrKind::UnexpectedMsg))
+                Err(err) => return Err(err),
             }
-            Err(err) => Err(err),
         }
+
+        Err(RpcError::error(ErrKind::CapacityLimit))
     }
 
     /// Sends a one-way nullary call without response.
@@ -588,29 +739,27 @@ where
     /// This call is untracked, if the target operation returns response,
     /// the response will be discarded.
     async fn call_nullary_one_way(&self, op: u16) -> RpcResult<()> {
-        let id = MessageID::new_v4();
-        self.state.sender.lock().await.call_nullary(&id, op).await
+        self.state.sender.lock().await.call_nullary(&0, op).await
     }
 
     /// Sends a `ping`` message.
     async fn ping(&self, timeout: Duration) -> RpcResult<()> {
         // Safety: This value must not move.
-        let pinned_bus = UnicastDataBus::new();
+        let mut pinned_mem = FrameData::new();
 
-        let entries = &self.state.rs;
+        let entries = &self.state.entries;
 
-        let id = MessageID::new_v4();
+        if let Some(slot) = entries.acquire(FramePublisher::new(&mut pinned_mem)) {
+            self.state.sender.lock().await.ping(&slot.id).await?;
 
-        entries.store(id, UnicastPublisher::new(&pinned_bus));
+            tokio::time::timeout(timeout, WaitPublishing::new(&pinned_mem)).await?;
 
-        let on_drop = OnBusDrop::new(&id, entries);
+            slot.forget();
 
-        self.state.sender.lock().await.ping(&id).await?;
+            return Ok(());
+        }
 
-        tokio::time::timeout(timeout, WaitPublishing::new(&pinned_bus)).await?;
-
-        on_drop.do_nothing();
-        Ok(())
+        Err(RpcError::error(ErrKind::CapacityLimit))
     }
 
     /// Closes its sender and shutdowns the receiving task in graceful manner.
@@ -635,7 +784,83 @@ where
 }
 
 #[cfg(test)]
-mod tests {
+mod tests_matching_unit {
+    use super::*;
+
+    use std::thread;
+
+    fn debug_integrity<T>(mu: &MatchingUnit<T>) -> usize {
+        let mut seen = vec![false; mu.slots.len()];
+
+        let current_free = mu.free.load(Acquire);
+        let (mut index, _) = MatchingUnit::<T>::split(current_free);
+
+        let mut count = 0;
+
+        while index != MatchingUnit::<T>::INVALID_INDEX {
+            if seen[index as usize] {
+                panic!("Cycle detected");
+            }
+
+            seen[index as usize] = true;
+
+            let slot = &mu.slots[index as usize];
+            if slot.reserved.load(Acquire) {
+                panic!("Occupied slot detected");
+            }
+
+            count += 1;
+            index = slot.next.load(Relaxed);
+        }
+
+        count
+    }
+
+    #[test]
+    fn test_matching_unit_acquire_drop() {
+        let mu = MatchingUnit::<u8>::new(4);
+        assert_eq!(self::debug_integrity(&mu), 4);
+
+        let publisher = FramePublisher::null();
+
+        let slot_ref = mu.acquire(publisher).expect("Must get free slot");
+
+        assert_eq!(self::debug_integrity(&mu), 3);
+
+        drop(slot_ref);
+
+        assert_eq!(self::debug_integrity(&mu), 4);
+    }
+
+    #[test]
+    fn test_matching_unit_cycles_acquire_free() {
+        let mu = Arc::new(MatchingUnit::<u8>::new(1000));
+        let mut threads = Vec::with_capacity(8);
+
+        for _ in 0..8 {
+            let mu_clone = mu.clone();
+            threads.push(thread::spawn(move || {
+                for _ in 0..1000 {
+                    loop {
+                        let publisher = FramePublisher::null();
+                        if let Some(_) = mu_clone.acquire(publisher) {
+                            break;
+                        }
+                    }
+                }
+            }));
+        }
+
+        for t in threads {
+            t.join().unwrap();
+        }
+
+        assert_eq!(self::debug_integrity(&mu), 1000);
+    }
+}
+
+#[cfg(test)]
+mod tests_client {
     use super::*;
 
     use tokio::net::TcpStream;

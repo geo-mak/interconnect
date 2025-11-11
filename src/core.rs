@@ -7,8 +7,6 @@ use serde::{Deserialize, Serialize};
 
 use aead::Buffer;
 
-use uuid::Uuid;
-
 use crate::error::ErrKind;
 use crate::opt::branch_prediction::unlikely;
 use crate::specs::EncryptionState;
@@ -106,11 +104,11 @@ impl core::fmt::Display for Directive {
     }
 }
 
-pub type MessageID = Uuid;
+pub type MessageID = u64;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Header {
-    /// A 128-bit (16 byte) unique identifier for the message
+    /// A 64-bit (8 bytes) identifier of the message
     pub id: MessageID,
 
     /// The directive of the message.
@@ -118,19 +116,11 @@ pub struct Header {
 }
 
 impl Header {
-    pub const BYTES: usize = 17;
+    pub const BYTES: usize = 9;
 
     #[inline]
-    pub fn new(id: Uuid, directive: Directive) -> Self {
+    pub fn new(id: MessageID, directive: Directive) -> Self {
         Self { id, directive }
-    }
-
-    #[inline]
-    pub fn auto(directive: Directive) -> Self {
-        Self {
-            id: Uuid::new_v4(),
-            directive,
-        }
     }
 }
 
@@ -147,10 +137,10 @@ pub struct Message;
 
 impl Message {
     #[inline]
-    pub fn encode_header(id: &MessageID, directive: Directive) -> [u8; 17] {
-        let mut buf = [0u8; 17];
-        buf[..16].copy_from_slice(&id.to_bytes_le());
-        buf[16] = directive as u8;
+    pub fn encode_header(id: &MessageID, directive: Directive) -> [u8; 9] {
+        let mut buf = [0u8; 9];
+        buf[..8].copy_from_slice(&id.to_le_bytes());
+        buf[8] = directive as u8;
         buf
     }
 
@@ -160,24 +150,24 @@ impl Message {
         directive: Directive,
         output: &mut [u8],
     ) -> RpcResult<()> {
-        if unlikely(output.len() < 17) {
+        if unlikely(output.len() < 9) {
             return Err(RpcError::error(ErrKind::Encoding));
         }
-        output[..16].copy_from_slice(&id.to_bytes_le());
-        output[16] = directive as u8;
+        output[..8].copy_from_slice(&id.to_le_bytes());
+        output[8] = directive as u8;
         Ok(())
     }
 
     #[inline]
     pub fn decode_header(message: &[u8]) -> RpcResult<Header> {
-        if unlikely(message.len() < 17) {
+        if unlikely(message.len() < 9) {
             return Err(RpcError::error(ErrKind::Decoding));
         }
-        let mut id_bytes = [0u8; 16];
-        id_bytes.copy_from_slice(&message[..16]);
-        let id = Uuid::from_bytes_le(id_bytes);
+        let mut id_bytes = [0u8; 8];
+        id_bytes.copy_from_slice(&message[..8]);
+        let id = MessageID::from_le_bytes(id_bytes);
         let directive =
-            Directive::from_le_byte(message[16]).ok_or(RpcError::error(ErrKind::Decoding))?;
+            Directive::from_le_byte(message[8]).ok_or(RpcError::error(ErrKind::Decoding))?;
         Ok(Header { id, directive })
     }
 
@@ -201,8 +191,8 @@ impl Message {
 
     #[inline]
     pub fn decode_error(message: &[u8]) -> RpcResult<RpcError> {
-        let seg_err = &message[17..];
-        if unlikely(seg_err.len() < 5) {
+        let seg_err = &message[9..];
+        if unlikely(seg_err.len() != 5) {
             return Err(RpcError::error(ErrKind::Decoding));
         }
 
@@ -217,30 +207,30 @@ impl Message {
 
     pub fn decode_op(message: &[u8]) -> RpcResult<u16> {
         let mut op = [0u8; 2];
-        op.copy_from_slice(&message[17..19]);
+        op.copy_from_slice(&message[9..11]);
         Ok(u16::from_le_bytes(op))
     }
 
     pub fn param_data(message: &[u8]) -> &[u8] {
-        &message[19..]
+        &message[11..]
     }
 
     pub fn decode_params<R>(message: &[u8]) -> RpcResult<R>
     where
         R: for<'de> Deserialize<'de>,
     {
-        Self::decode_from_slice::<R>(&message[19..])
+        Self::decode_from_slice::<R>(&message[11..])
     }
 
     pub fn returned_data(message: &[u8]) -> &[u8] {
-        &message[17..]
+        &message[9..]
     }
 
     pub fn decode_returned<R>(message: &[u8]) -> RpcResult<R>
     where
         R: for<'de> Deserialize<'de>,
     {
-        Self::decode_from_slice::<R>(&message[17..])
+        Self::decode_from_slice::<R>(&message[9..])
     }
 
     /// Encodes a value to binary format.
@@ -801,10 +791,7 @@ mod tests {
         let mut msg_sender = MessageSender::new(io_writer);
         let mut msg_receiver = MessageReceiver::new(io_reader);
 
-        msg_sender
-            .call(&MessageID::new_v4(), 1, &"hi there")
-            .await
-            .unwrap();
+        msg_sender.call(&1, 1, &"hi there").await.unwrap();
 
         msg_receiver.receive().await.unwrap();
 
@@ -866,10 +853,7 @@ mod tests {
         let mut msg_sender = MessageSender::new(io_writer);
         let mut msg_receiver = MessageReceiver::new(io_reader);
 
-        msg_sender
-            .call(&MessageID::new_v4(), 1, &"hi there")
-            .await
-            .unwrap();
+        msg_sender.call(&1, 1, &"hi there").await.unwrap();
 
         msg_receiver.receive().await.unwrap();
 

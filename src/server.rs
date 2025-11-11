@@ -29,7 +29,7 @@ use crate::{Directive, Message};
 
 thread_local! {
     // Must be non-zero.
-    static RNG_STATE: Cell<u64> = const { Cell::new(0x12345678ABCDEF) };
+    static RNG_STATE: Cell<MessageID> = const { Cell::new(0x12345678ABCDEF) };
 }
 
 struct Tasks {
@@ -662,11 +662,9 @@ mod tests {
         let (mut msg_sender_2, mut msg_receiver_2) = make_tcp_rpc_channel(srv_addr).await;
         let (mut msg_sender_3, mut msg_receiver_3) = make_tcp_rpc_channel(srv_addr).await;
 
-        let id = MessageID::new_v4();
-
-        msg_sender_1.call(&id, 1, &"C1").await.unwrap();
-        msg_sender_2.call(&id, 1, &"C2").await.unwrap();
-        msg_sender_3.call(&id, 1, &"C3").await.unwrap();
+        msg_sender_1.call(&1, 1, &"C1").await.unwrap();
+        msg_sender_2.call(&1, 1, &"C2").await.unwrap();
+        msg_sender_3.call(&1, 1, &"C3").await.unwrap();
 
         let t1 = tokio::spawn(async move {
             msg_receiver_1.receive().await.unwrap();
@@ -753,9 +751,7 @@ mod tests {
 
         let (mut msg_sender, mut msg_receiver) = make_encrypted_tcp_rpc_channel(srv_addr).await;
 
-        let id = MessageID::new_v4();
-
-        msg_sender.call(&id, 1, &"C1").await.unwrap();
+        msg_sender.call(&1, 1, &"C1").await.unwrap();
 
         msg_receiver.receive().await.unwrap();
 
@@ -801,9 +797,7 @@ mod tests {
 
         tokio::time::sleep(Duration::from_millis(10)).await;
 
-        let id = MessageID::new_v4();
-
-        msg_sender.call(&id, 1, &"C1").await.unwrap();
+        msg_sender.call(&1, 1, &"C1").await.unwrap();
 
         msg_receiver.receive().await.unwrap();
 

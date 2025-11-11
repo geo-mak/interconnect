@@ -42,12 +42,12 @@ Within the context of this project, these terms are understood as defined:
   instead of entering a loop for continuously checking the availability of a resource.
 
 - Concurrency: An execution model, where multiple instructions' streams **may** take place at the same time.
-  Concurrency can be "truly" parallel by running multiple core/execution units, or partial by means of sharing
+  Concurrency can be "truly" parallel by running multiple cores/execution units, or partial by means of sharing
   the resource in time slices (context switching).
 
 - Parallelism: The ability of a particular system to operate multiple instances of its execution units at the same time.
 
-Concurrency is treated like parallelism within the context of this project, because the programming model
+Concurrency and parallelism are synonymous within the context of this project, because the programming model
 must assume parallelism to enure sound access to data stores and the proper data transformation.
 
 The challenges and complexities of these models are inherent to the dominant **"Von Neumann"** hardware architecture,

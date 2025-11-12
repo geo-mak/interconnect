@@ -5,9 +5,9 @@ use std::sync::Arc;
 use std::{mem, ptr};
 
 #[cfg(test)]
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering};
 
-use std::sync::atomic::Ordering::{AcqRel, Acquire, Relaxed, Release};
+use std::sync::atomic::Ordering::{AcqRel, Acquire, Relaxed};
 use std::sync::atomic::{AtomicU8, AtomicU32, AtomicU64};
 use std::task::{Context, Poll, Waker};
 use std::time::Duration;
@@ -257,7 +257,7 @@ impl<T> MatchingUnit<T> {
                 let acquired = Self::combine(current_index, cycle);
 
                 #[cfg(test)]
-                current_slot.reserved.store(true, Release);
+                current_slot.reserved.store(true, Ordering::Release);
 
                 return Some(SlotRef::new(acquired, self));
             }
@@ -283,7 +283,7 @@ impl<T> MatchingUnit<T> {
         if let Some(_lock) = slot.guard.try_lock() {
             // Safety: lock until release finishes.
 
-            let current_cycle = slot.cycle.load(Acquire);
+            let current_cycle = slot.cycle.load(Relaxed);
 
             if current_cycle == prev_cycle {
                 unsafe {
@@ -309,7 +309,7 @@ impl<T> MatchingUnit<T> {
         // Safety: block or get blocked until release finishes.
         let _release_lock = slot.guard.lock();
 
-        let current_cycle = slot.cycle.load(Acquire);
+        let current_cycle = slot.cycle.load(Relaxed);
 
         if current_cycle == prev_cycle {
             unsafe { self.unconditional_release(index, prev_cycle) };
@@ -324,14 +324,13 @@ impl<T> MatchingUnit<T> {
 
         let new_cycle = cycle.wrapping_add(1);
 
-        // Sync with publish/cancel.
-        slot.cycle.store(new_cycle, Release);
+        slot.cycle.store(new_cycle, Relaxed);
 
         // Guard against accidental matching.
         unsafe { ptr::write(slot.publisher.get(), FramePublisher::null()) }
 
         #[cfg(test)]
-        slot.reserved.store(false, Release);
+        slot.reserved.store(false, Ordering::Release);
 
         loop {
             let current = self.free.load(Acquire);
@@ -792,7 +791,7 @@ mod tests_matching_unit {
     fn debug_integrity<T>(mu: &MatchingUnit<T>) -> usize {
         let mut seen = vec![false; mu.slots.len()];
 
-        let current_free = mu.free.load(Acquire);
+        let current_free = mu.free.load(Relaxed);
         let (mut index, _) = MatchingUnit::<T>::split(current_free);
 
         let mut count = 0;
@@ -805,7 +804,7 @@ mod tests_matching_unit {
             seen[index as usize] = true;
 
             let slot = &mu.slots[index as usize];
-            if slot.reserved.load(Acquire) {
+            if slot.reserved.load(Relaxed) {
                 panic!("Occupied slot detected");
             }
 

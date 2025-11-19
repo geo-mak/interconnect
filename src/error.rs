@@ -1,3 +1,4 @@
+use std::collections::TryReserveError;
 use std::fmt;
 use std::io;
 
@@ -42,6 +43,8 @@ pub enum ErrKind {
 
     CapacityLimit,
 
+    MemoryAllocation,
+
     Timeout,
 
     LargeMessage,
@@ -57,7 +60,7 @@ pub enum ErrKind {
 
 impl ErrKind {
     #[inline]
-    pub fn from_le_byte(byte: u8) -> Option<Self> {
+    pub fn from_byte(byte: u8) -> Option<Self> {
         use ErrKind::*;
         Some(match byte {
             0 => Application,
@@ -74,12 +77,13 @@ impl ErrKind {
             11 => Decoding,
             12 => RoundLimit,
             13 => CapacityLimit,
-            14 => Timeout,
-            15 => LargeMessage,
-            16 => UnexpectedMsg,
-            17 => DroppedMessage,
-            18 => Unidentified,
-            19 => Unimplemented,
+            14 => MemoryAllocation,
+            15 => Timeout,
+            16 => LargeMessage,
+            17 => UnexpectedMsg,
+            18 => DroppedMessage,
+            19 => Unidentified,
+            20 => Unimplemented,
             _ => return None,
         })
     }
@@ -168,6 +172,16 @@ impl From<Elapsed> for RpcError {
     fn from(_: Elapsed) -> Self {
         RpcError {
             kind: ErrKind::Timeout,
+            refer: 0,
+        }
+    }
+}
+
+impl From<TryReserveError> for RpcError {
+    #[inline]
+    fn from(_: TryReserveError) -> Self {
+        RpcError {
+            kind: ErrKind::MemoryAllocation,
             refer: 0,
         }
     }

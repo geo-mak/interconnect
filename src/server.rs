@@ -530,10 +530,8 @@ where
                     let header = Message::decode_header(message)?;
                     match header.directive {
                         Directive::Call => {
-                            let call = Call {
-                                op: Message::decode_op(message)?,
-                                params: Message::param_data(message),
-                            };
+                            let (op, params) = Message::decode_op_return_params(message)?;
+                            let call = Call { op, params };
                             let mut context = ServerContext::new(&header.id, sender);
                             app.call(call, &mut context).await?
                         }
@@ -669,12 +667,14 @@ mod tests {
         let t1 = tokio::spawn(async move {
             msg_receiver_1.receive().await.unwrap();
 
-            let header = Message::decode_header(msg_receiver_1.message()).unwrap();
+            let message = msg_receiver_1.message();
+
+            let header = Message::decode_header(message).unwrap();
 
             match header.directive {
                 Directive::Return => {
-                    let response: String =
-                        Message::decode_returned(msg_receiver_1.message()).unwrap();
+                    let data = Message::returned_data(message).unwrap();
+                    let response: String = Message::decode_from_slice(data).unwrap();
                     assert!(&response == "Reply to C1");
                 }
                 _ => panic!("Expected reply"),
@@ -684,12 +684,14 @@ mod tests {
         let t2 = tokio::spawn(async move {
             msg_receiver_2.receive().await.unwrap();
 
-            let header = Message::decode_header(msg_receiver_2.message()).unwrap();
+            let message = msg_receiver_2.message();
+
+            let header = Message::decode_header(message).unwrap();
 
             match header.directive {
                 Directive::Return => {
-                    let response: String =
-                        Message::decode_returned(msg_receiver_2.message()).unwrap();
+                    let data = Message::returned_data(message).unwrap();
+                    let response: String = Message::decode_from_slice(data).unwrap();
                     assert!(&response == "Reply to C2");
                 }
                 _ => panic!("Expected reply"),
@@ -699,12 +701,14 @@ mod tests {
         let t3 = tokio::spawn(async move {
             msg_receiver_3.receive().await.unwrap();
 
-            let header = Message::decode_header(msg_receiver_3.message()).unwrap();
+            let message = msg_receiver_3.message();
+
+            let header = Message::decode_header(message).unwrap();
 
             match header.directive {
                 Directive::Return => {
-                    let response: String =
-                        Message::decode_returned(msg_receiver_3.message()).unwrap();
+                    let data = Message::returned_data(message).unwrap();
+                    let response: String = Message::decode_from_slice(data).unwrap();
                     assert!(&response == "Reply to C3");
                 }
                 _ => panic!("Expected reply"),
@@ -755,11 +759,14 @@ mod tests {
 
         msg_receiver.receive().await.unwrap();
 
-        let header = Message::decode_header(msg_receiver.message()).unwrap();
+        let message = msg_receiver.message();
+
+        let header = Message::decode_header(message).unwrap();
 
         match header.directive {
             Directive::Return => {
-                let response: String = Message::decode_returned(msg_receiver.message()).unwrap();
+                let data = Message::returned_data(message).unwrap();
+                let response: String = Message::decode_from_slice(data).unwrap();
                 assert!(&response == "Reply to C1");
             }
             _ => panic!("Expected reply"),
@@ -801,11 +808,14 @@ mod tests {
 
         msg_receiver.receive().await.unwrap();
 
-        let header = Message::decode_header(msg_receiver.message()).unwrap();
+        let message = msg_receiver.message();
+
+        let header = Message::decode_header(message).unwrap();
 
         match header.directive {
             Directive::Return => {
-                let response: String = Message::decode_returned(msg_receiver.message()).unwrap();
+                let data = Message::returned_data(message).unwrap();
+                let response: String = Message::decode_from_slice(data).unwrap();
                 assert!(&response == "Reply to C1");
             }
             _ => panic!("Expected reply"),

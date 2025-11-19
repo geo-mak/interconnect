@@ -1,14 +1,16 @@
-use std::ptr;
+use std::ptr::copy_nonoverlapping;
+use std::slice::{from_raw_parts, from_raw_parts_mut};
 
 use bincode::config::{Configuration, standard};
 use bincode::enc::write::Writer;
 use bincode::error::EncodeError;
+
 use serde::{Deserialize, Serialize};
 
 use aead::Buffer;
 
 use crate::error::ErrKind;
-use crate::opt::branch_prediction::unlikely;
+use crate::opt::branch_prediction::{likely, unlikely};
 use crate::specs::EncryptionState;
 use crate::{
     RpcError, RpcResult,
@@ -25,14 +27,12 @@ use crate::private::Private;
 
 const CONFIG: Configuration = standard();
 
-const STD_MESSAGE_LEN: usize = 4;
+const STD_MAX_MSG_SIZE: u32 = 4 * 1024 * 1024;
 
-const STD_MAX_MESSAGE_SIZE: u32 = 4 * 1024 * 1024;
-
-const STD_FRAMING_MIN_ALLOC: usize = STD_MESSAGE_LEN + Header::BYTES + RpcError::BYTES + 2;
+const STD_FRAME_MIN_ALLOC: usize = 4 + Header::BYTES + RpcError::BYTES;
 
 // Definitely not for bulk throughput or streams, but streams are a different story.
-const STD_FRAMING_ALLOC: usize = 1024;
+const STD_FRAME_ALLOC: usize = 1024;
 
 /// Message directives of the RPC protocol.
 #[derive(Debug, Copy, Clone, PartialEq)]
@@ -77,7 +77,7 @@ pub enum Directive {
 
 impl Directive {
     #[inline]
-    pub const fn from_le_byte(byte: u8) -> Option<Self> {
+    pub const fn from_byte(byte: u8) -> Option<Self> {
         use Directive::*;
         Some(match byte {
             0 => Call,
@@ -126,7 +126,7 @@ impl Header {
 
 /// A Type that can be a destination to encode messages.
 pub trait MessageWriter {
-    /// Write data to the underlying writer.
+    /// Writes data to the underlying writer in checked-mode.
     ///
     /// The entire data must be written, or an error shall be returned.
     fn write(&mut self, data: &[u8]) -> RpcResult<()>;
@@ -138,10 +138,15 @@ pub struct Message;
 impl Message {
     #[inline]
     pub fn encode_header(id: &MessageID, directive: Directive) -> [u8; 9] {
-        let mut buf = [0u8; 9];
-        buf[..8].copy_from_slice(&id.to_le_bytes());
-        buf[8] = directive as u8;
-        buf
+        let mut header_bytes = [0u8; 9];
+
+        let id_bytes = id.to_le_bytes();
+
+        header_bytes[..8].copy_from_slice(&id_bytes);
+
+        header_bytes[8] = directive as u8;
+
+        header_bytes
     }
 
     #[inline]
@@ -153,8 +158,11 @@ impl Message {
         if unlikely(output.len() < 9) {
             return Err(RpcError::error(ErrKind::Encoding));
         }
+
         output[..8].copy_from_slice(&id.to_le_bytes());
+
         output[8] = directive as u8;
+
         Ok(())
     }
 
@@ -163,20 +171,30 @@ impl Message {
         if unlikely(message.len() < 9) {
             return Err(RpcError::error(ErrKind::Decoding));
         }
+
         let mut id_bytes = [0u8; 8];
+
         id_bytes.copy_from_slice(&message[..8]);
+
         let id = MessageID::from_le_bytes(id_bytes);
+
         let directive =
-            Directive::from_le_byte(message[8]).ok_or(RpcError::error(ErrKind::Decoding))?;
+            Directive::from_byte(message[8]).ok_or(RpcError::error(ErrKind::Decoding))?;
+
         Ok(Header { id, directive })
     }
 
     #[inline]
     pub fn encode_error(err: RpcError) -> [u8; 5] {
-        let mut buf = [0u8; 5];
-        buf[0] = err.kind as u8;
-        buf[1..5].copy_from_slice(&err.refer.to_le_bytes());
-        buf
+        let mut error_bytes = [0u8; 5];
+
+        error_bytes[0] = err.kind as u8;
+
+        let refer_bytes = err.refer.to_le_bytes();
+
+        error_bytes[1..5].copy_from_slice(&refer_bytes);
+
+        error_bytes
     }
 
     #[inline]
@@ -184,61 +202,105 @@ impl Message {
         if unlikely(output.len() < 5) {
             return Err(RpcError::error(ErrKind::Encoding));
         }
+
         output[0] = err.kind as u8;
-        output[1..5].copy_from_slice(&err.refer.to_le_bytes());
+
+        let refer_bytes = err.refer.to_le_bytes();
+
+        output[1..5].copy_from_slice(&refer_bytes);
+
         Ok(())
     }
 
     #[inline]
     pub fn decode_error(message: &[u8]) -> RpcResult<RpcError> {
-        let seg_err = &message[9..];
-        if unlikely(seg_err.len() != 5) {
-            return Err(RpcError::error(ErrKind::Decoding));
+        // Header + error = 14.
+        if likely(message.len() == 14) {
+            let error_segment = &message[9..14];
+            let refer_segment = &error_segment[1..5];
+
+            let kind =
+                ErrKind::from_byte(error_segment[0]).ok_or(RpcError::error(ErrKind::Decoding))?;
+
+            let mut refer_bytes = [0u8; 4];
+
+            refer_bytes.copy_from_slice(refer_segment);
+
+            let refer = i32::from_le_bytes(refer_bytes);
+
+            return Ok(RpcError { kind, refer });
         }
 
-        let kind = ErrKind::from_le_byte(seg_err[0]).ok_or(RpcError::error(ErrKind::Decoding))?;
-
-        let mut bytes = [0u8; 4];
-        bytes.copy_from_slice(&seg_err[1..5]);
-        let refer = i32::from_le_bytes(bytes);
-
-        Ok(RpcError { kind, refer })
+        Err(RpcError::error(ErrKind::Decoding))
     }
 
+    #[inline]
     pub fn decode_op(message: &[u8]) -> RpcResult<u16> {
-        let mut op = [0u8; 2];
-        op.copy_from_slice(&message[9..11]);
-        Ok(u16::from_le_bytes(op))
+        if unlikely(message.len() < 11) {
+            return Err(RpcError::error(ErrKind::Encoding));
+        }
+
+        let op_segment = &message[9..11];
+
+        let mut op_bytes = [0u8; 2];
+
+        op_bytes.copy_from_slice(op_segment);
+
+        Ok(u16::from_le_bytes(op_bytes))
     }
 
-    pub fn param_data(message: &[u8]) -> &[u8] {
-        &message[11..]
+    #[inline]
+    pub fn params_data(message: &[u8]) -> RpcResult<&[u8]> {
+        if likely(message.len() > 11) {
+            return Ok(&message[11..]);
+        }
+
+        Err(RpcError::error(ErrKind::Decoding))
     }
 
-    pub fn decode_params<R>(message: &[u8]) -> RpcResult<R>
-    where
-        R: for<'de> Deserialize<'de>,
-    {
-        Self::decode_from_slice::<R>(&message[11..])
+    #[inline]
+    pub fn decode_op_return_params(message: &[u8]) -> RpcResult<(u16, &[u8])> {
+        if likely(message.len() > 11) {
+            let op_segment = &message[9..11];
+
+            let mut op_bytes = [0u8; 2];
+
+            op_bytes.copy_from_slice(op_segment);
+
+            let op = u16::from_le_bytes(op_bytes);
+
+            return Ok((op, &message[11..]));
+        }
+
+        Err(RpcError::error(ErrKind::Decoding))
     }
 
-    pub fn returned_data(message: &[u8]) -> &[u8] {
-        &message[9..]
-    }
+    #[inline]
+    pub fn returned_data(message: &[u8]) -> RpcResult<&[u8]> {
+        if likely(message.len() > 9) {
+            return Ok(&message[9..]);
+        }
 
-    pub fn decode_returned<R>(message: &[u8]) -> RpcResult<R>
-    where
-        R: for<'de> Deserialize<'de>,
-    {
-        Self::decode_from_slice::<R>(&message[9..])
+        Err(RpcError::error(ErrKind::Decoding))
     }
 
     /// Encodes a value to binary format.
+    #[inline]
     pub fn encode_to_vec<T: Serialize>(value: &T) -> RpcResult<Vec<u8>> {
         bincode::serde::encode_to_vec(value, CONFIG).map_err(Into::into)
     }
 
+    /// Encodes a value to binary format into the provided slice.
+    #[inline]
+    pub fn encode_into_slice<T, W>(value: &T, dst: &mut [u8]) -> RpcResult<usize>
+    where
+        T: Serialize,
+    {
+        bincode::serde::encode_into_slice(value, dst, CONFIG).map_err(Into::into)
+    }
+
     /// Encodes a value to binary format into writer.
+    #[inline]
     pub fn encode_into_writer<T, W>(value: &T, dst: &mut W) -> RpcResult<()>
     where
         T: Serialize,
@@ -248,6 +310,7 @@ impl Message {
     }
 
     /// Decodes data from slice of bytes into a value.
+    #[inline]
     pub fn decode_from_slice<T>(data: &[u8]) -> RpcResult<T>
     where
         T: for<'de> Deserialize<'de>,
@@ -260,43 +323,88 @@ impl Message {
 }
 
 #[derive(Debug, Clone)]
-pub struct MessageBuffer {
-    pub data: Vec<u8>,
+pub(crate) struct MessageStore {
+    pub(crate) data: Vec<u8>,
 }
 
-impl MessageBuffer {
+impl MessageStore {
+    #[allow(dead_code)]
     #[inline]
-    pub const fn new() -> Self {
+    pub(crate) const fn new() -> Self {
         Self { data: Vec::new() }
     }
 
     #[inline]
-    pub fn with_capacity(cap: usize) -> Self {
+    pub(crate) fn with_capacity(capacity: usize) -> Self {
         Self {
-            data: Vec::with_capacity(cap),
+            data: Vec::with_capacity(capacity),
         }
     }
 
+    #[inline]
+    pub(crate) fn data(&self) -> &[u8] {
+        &self.data
+    }
+
     /// # Safety
+    /// - `src` must consist of fully initialized bytes.
+    /// - `src` must be a non-overlapping (disjoint) memory-segment.
     /// - The buffer must have enough capacity to accommodate the the copying data.
     /// - The buffer memory is valid for writing/overwriting withing the range from
     ///   `0` to the length of copying data.
     #[inline]
-    pub unsafe fn copy_from(&mut self, src: &[u8]) {
-        let len = src.len();
-        debug_assert!(len <= self.data.capacity());
+    pub(crate) unsafe fn copy_from(&mut self, src: &[u8]) {
+        let count = src.len();
+        debug_assert!(count <= self.data.capacity());
         unsafe {
-            ptr::copy_nonoverlapping(src.as_ptr(), self.data.as_mut_ptr(), len);
-            self.data.set_len(len);
+            copy_nonoverlapping(src.as_ptr(), self.data.as_mut_ptr(), count);
+            self.data.set_len(count);
         }
+    }
+
+    /// # Safety
+    /// - `src` must consist of fully initialized bytes.
+    /// - `src` must be a non-overlapping (disjoint) memory-segment.
+    /// - The buffer must have enough capacity to accommodate the the copying data.
+    /// - The buffer memory is valid for writing/overwriting withing the range [`offset`: data.len() - 1].
+    #[inline]
+    pub(crate) const unsafe fn write_at(&mut self, offset: usize, src: &[u8]) {
+        let count = src.len();
+        debug_assert!(offset + count <= self.data.capacity());
+        unsafe { copy_nonoverlapping(src.as_ptr(), self.data.as_mut_ptr().add(offset), count) };
+    }
+
+    /// Tries to extend the current data from slice.
+    ///
+    /// On failure to reallocate memory, it returns "MemoryAllocation" error.
+    ///
+    /// # Safety:
+    /// - `src` must consist of fully initialized bytes.
+    /// - `src` must be a non-overlapping (disjoint) memory-segment.
+    #[inline]
+    pub(crate) fn extend_from_slice(&mut self, src: &[u8]) -> RpcResult<()> {
+        let current_len = self.data.len();
+        let count = src.len();
+
+        // Sufficiency of capacity is checked inside.
+        self.data.try_reserve(count)?;
+
+        unsafe {
+            let src_ptr = src.as_ptr();
+            let dst_ptr = self.data.as_mut_ptr().add(current_len);
+            copy_nonoverlapping(src_ptr, dst_ptr, count);
+            let new_len = current_len + count;
+            self.data.set_len(new_len);
+        }
+
+        Ok(())
     }
 }
 
-impl MessageWriter for MessageBuffer {
+impl MessageWriter for MessageStore {
     #[inline(always)]
     fn write(&mut self, bytes: &[u8]) -> RpcResult<()> {
-        self.data.extend_from_slice(bytes);
-        Ok(())
+        self.extend_from_slice(bytes)
     }
 }
 
@@ -304,7 +412,7 @@ struct ImplWriter<'a, W: MessageWriter>(&'a mut W);
 impl<'a, W: MessageWriter> Writer for ImplWriter<'a, W> {
     #[inline(always)]
     fn write(&mut self, bytes: &[u8]) -> Result<(), EncodeError> {
-        self.0.write(bytes).map_err(|_| EncodeError::Other(""))
+        self.0.write(bytes).map_err(|_| EncodeError::UnexpectedEnd)
     }
 }
 
@@ -346,41 +454,29 @@ impl<T> Private for EncMessageSender<T> {}
 impl<T> Private for EncMessageReceiver<T> {}
 
 pub struct MessageSender<T> {
-    writer: T,
-    buffer: MessageBuffer,
+    transport: T,
+    store: MessageStore,
 }
 
 impl<T> MessageSender<T> {
     #[inline]
-    pub fn new(writer: T) -> Self {
+    pub fn new(transport: T) -> Self {
         Self {
-            writer,
-            buffer: MessageBuffer {
-                data: Vec::with_capacity(STD_FRAMING_ALLOC),
+            transport,
+            store: MessageStore {
+                data: Vec::with_capacity(STD_FRAME_ALLOC),
             },
         }
     }
 
     #[inline]
-    pub fn with_capacity(writer: T, framing_cap: usize) -> Self {
+    pub fn with_capacity(transport: T, framing_cap: usize) -> Self {
         Self {
-            writer,
-            buffer: MessageBuffer {
-                data: Vec::with_capacity(framing_cap.max(STD_FRAMING_MIN_ALLOC)),
+            transport,
+            store: MessageStore {
+                data: Vec::with_capacity(framing_cap.max(STD_FRAME_MIN_ALLOC)),
             },
         }
-    }
-}
-
-impl<T: AsyncIOWrite + Send + Unpin> MessageSender<T> {
-    #[inline]
-    async fn write_all(&mut self) -> RpcResult<()> {
-        let len = (self.buffer.data.len() - STD_MESSAGE_LEN) as u32;
-
-        self.buffer.data[0..STD_MESSAGE_LEN].copy_from_slice(&len.to_le_bytes());
-
-        self.writer.write_all(&self.buffer.data).await?;
-        Ok(())
     }
 }
 
@@ -391,20 +487,39 @@ impl<T: AsyncIOWrite + Send + Unpin> AsyncSender for MessageSender<T> {
         op: u16,
         params: &P,
     ) -> RpcResult<()> {
-        unsafe { self.buffer.data.set_len(STD_MESSAGE_LEN) };
-        self.buffer
-            .write(&Message::encode_header(id, Directive::Call))?;
-        self.buffer.write(&op.to_le_bytes())?;
-        Message::encode_into_writer(params, &mut self.buffer)?;
-        self.write_all().await
+        let header_bytes = Message::encode_header(id, Directive::Call);
+        let op_bytes = op.to_le_bytes();
+
+        // Safety:
+        // - Capacity is ensured up to 18 bytes.
+        // - On early return, no data is produced.
+        unsafe {
+            self.store.write_at(4, &header_bytes);
+            self.store.write_at(13, &op_bytes);
+            self.store.data.set_len(15);
+            Message::encode_into_writer(params, &mut self.store)?;
+            let len = (self.store.data.len() - 4) as u32;
+            self.store.write_at(0, &len.to_le_bytes());
+        }
+
+        self.transport.write_all(&self.store.data).await?;
+        Ok(())
     }
 
     async fn call_nullary(&mut self, id: &MessageID, op: u16) -> RpcResult<()> {
-        unsafe { self.buffer.data.set_len(STD_MESSAGE_LEN) };
-        self.buffer
-            .write(&Message::encode_header(id, Directive::NullaryCall))?;
-        self.buffer.write(&op.to_le_bytes())?;
-        self.write_all().await
+        let header_bytes = Message::encode_header(id, Directive::NullaryCall);
+        let op_bytes = op.to_le_bytes();
+
+        // Safety: Capacity is ensured up to 18 bytes.
+        unsafe {
+            self.store.write_at(0, &11u32.to_le_bytes());
+            self.store.write_at(4, &header_bytes);
+            self.store.write_at(13, &op_bytes);
+            self.store.data.set_len(15);
+        }
+
+        self.transport.write_all(&self.store.data).await?;
+        Ok(())
     }
 
     async fn return_data<R: Serialize + Sync>(
@@ -412,38 +527,70 @@ impl<T: AsyncIOWrite + Send + Unpin> AsyncSender for MessageSender<T> {
         id: &MessageID,
         reply: &R,
     ) -> RpcResult<()> {
-        unsafe { self.buffer.data.set_len(STD_MESSAGE_LEN) };
-        self.buffer
-            .write(&Message::encode_header(id, Directive::Return))?;
-        Message::encode_into_writer(reply, &mut self.buffer)?;
-        self.write_all().await
+        let header_bytes = Message::encode_header(id, Directive::Return);
+
+        // Safety:
+        // - Capacity is ensured up to 18 bytes.
+        // - On early return, no data is produced.
+        unsafe {
+            self.store.write_at(4, &header_bytes);
+            self.store.data.set_len(13);
+            Message::encode_into_writer(reply, &mut self.store)?;
+            let len = (self.store.data.len() - 4) as u32;
+            self.store.write_at(0, &len.to_le_bytes());
+        }
+
+        self.transport.write_all(&self.store.data).await?;
+        Ok(())
     }
 
-    async fn return_error(&mut self, id: &MessageID, err: RpcError) -> RpcResult<()> {
-        unsafe { self.buffer.data.set_len(STD_MESSAGE_LEN) };
-        self.buffer
-            .write(&Message::encode_header(id, Directive::Error))?;
-        self.buffer.write(&Message::encode_error(err))?;
-        self.write_all().await
+    async fn return_error(&mut self, id: &MessageID, error: RpcError) -> RpcResult<()> {
+        let header_bytes = Message::encode_header(id, Directive::Error);
+        let error_bytes = Message::encode_error(error);
+
+        // Safety: Capacity is ensured up to 18 bytes.
+        unsafe {
+            self.store.write_at(0, &14u32.to_le_bytes());
+            self.store.write_at(4, &header_bytes);
+            self.store.write_at(13, &error_bytes);
+            self.store.data.set_len(18);
+        }
+
+        self.transport.write_all(&self.store.data).await?;
+        Ok(())
     }
 
     async fn ping(&mut self, id: &MessageID) -> RpcResult<()> {
-        unsafe { self.buffer.data.set_len(STD_MESSAGE_LEN) };
-        self.buffer
-            .write(&Message::encode_header(id, Directive::Ping))?;
-        self.write_all().await
+        let header_bytes = Message::encode_header(id, Directive::Ping);
+
+        // Safety: Capacity is ensured up to 18 bytes.
+        unsafe {
+            self.store.write_at(0, &9u32.to_le_bytes());
+            self.store.write_at(4, &header_bytes);
+            self.store.data.set_len(13);
+        }
+
+        self.transport.write_all(&self.store.data).await?;
+        Ok(())
     }
 
     async fn pong(&mut self, id: &MessageID) -> RpcResult<()> {
-        unsafe { self.buffer.data.set_len(STD_MESSAGE_LEN) };
-        self.buffer
-            .write(&Message::encode_header(id, Directive::Pong))?;
-        self.write_all().await
+        let header_bytes = Message::encode_header(id, Directive::Pong);
+
+        // Safety: Capacity is ensured up to 18 bytes.
+        unsafe {
+            self.store.write_at(0, &9u32.to_le_bytes());
+            self.store.write_at(4, &header_bytes);
+            self.store.data.set_len(13);
+        }
+
+        self.transport.write_all(&self.store.data).await?;
+        Ok(())
     }
 
     #[inline(always)]
     async fn terminate(&mut self) -> RpcResult<()> {
-        self.writer.terminate().await.map_err(Into::into)
+        self.transport.terminate().await.map_err(Into::into)
     }
 }
 
@@ -469,6 +616,7 @@ impl<'a> AsMut<[u8]> for ExtBufferView<'a> {
 impl<'a> Buffer for ExtBufferView<'a> {
     #[inline(always)]
     fn extend_from_slice(&mut self, other: &[u8]) -> aead::Result<()> {
+        // RT_DYN_ALLOC
         self.buf.extend_from_slice(other);
         Ok(())
     }
@@ -490,11 +638,11 @@ impl<'a> FixedBufferView<'a> {
     }
 
     const fn as_slice(&self) -> &[u8] {
-        unsafe { std::slice::from_raw_parts(self.buf.as_ptr(), self.len) }
+        unsafe { from_raw_parts(self.buf.as_ptr(), self.len) }
     }
 
     const fn as_slice_mut(&mut self) -> &mut [u8] {
-        unsafe { std::slice::from_raw_parts_mut(self.buf.as_mut_ptr(), self.len) }
+        unsafe { from_raw_parts_mut(self.buf.as_mut_ptr(), self.len) }
     }
 }
 
@@ -525,122 +673,165 @@ impl<'a> Buffer for FixedBufferView<'a> {
 }
 
 pub struct EncMessageSender<T> {
-    writer: T,
+    transport: T,
     state: EncryptionState,
-    buffer: MessageBuffer,
+    store: MessageStore,
 }
 
 impl<T> EncMessageSender<T> {
     #[inline]
-    pub fn new(writer: T, state: EncryptionState) -> Self {
+    pub fn new(transport: T, state: EncryptionState) -> Self {
         Self {
-            writer,
+            transport,
             state,
-            buffer: MessageBuffer::with_capacity(STD_FRAMING_ALLOC),
+            store: MessageStore {
+                data: Vec::with_capacity(STD_FRAME_ALLOC),
+            },
         }
     }
 
     #[inline]
-    pub fn with_capacity(writer: T, state: EncryptionState, framing_cap: usize) -> Self {
+    pub fn with_capacity(transport: T, state: EncryptionState, framing_cap: usize) -> Self {
         Self {
-            writer,
+            transport,
             state,
-            buffer: MessageBuffer::with_capacity(framing_cap.max(STD_FRAMING_MIN_ALLOC)),
+            store: MessageStore {
+                data: Vec::with_capacity(framing_cap.max(STD_FRAME_MIN_ALLOC)),
+            },
         }
     }
 }
 
 impl<T: AsyncIOWrite + Send + Unpin> EncMessageSender<T> {
-    async fn write_all(&mut self) -> RpcResult<()> {
-        let mut enc_buf = ExtBufferView {
-            buf: &mut self.buffer.data,
-            offset: STD_MESSAGE_LEN,
+    #[inline]
+    async fn update_len_write_all(&mut self) -> RpcResult<()> {
+        let mut encryption_buf = ExtBufferView {
+            buf: &mut self.store.data,
+            offset: 4,
         };
 
-        self.state.encrypt(&mut enc_buf, b"")?;
+        self.state.encrypt(&mut encryption_buf, b"")?;
 
-        let len = (self.buffer.data.len() - STD_MESSAGE_LEN) as u32;
+        unsafe {
+            let len = (self.store.data.len() - 4) as u32;
+            self.store.write_at(0, &len.to_le_bytes());
+        }
 
-        self.buffer.data[0..STD_MESSAGE_LEN].copy_from_slice(&len.to_le_bytes());
-
-        self.writer.write_all(&self.buffer.data).await?;
+        self.transport.write_all(&self.store.data).await?;
         Ok(())
     }
 }
 
 impl<T: AsyncIOWrite + Send + Unpin> AsyncSender for EncMessageSender<T> {
     async fn call<P: Serialize>(&mut self, id: &MessageID, op: u16, params: &P) -> RpcResult<()> {
-        unsafe { self.buffer.data.set_len(STD_MESSAGE_LEN) };
-        self.buffer
-            .write(&Message::encode_header(id, Directive::Call))?;
-        self.buffer.write(&op.to_le_bytes())?;
-        Message::encode_into_writer(params, &mut self.buffer)?;
-        self.write_all().await
+        let header_bytes = Message::encode_header(id, Directive::Call);
+        let op_bytes = op.to_le_bytes();
+
+        // Safety:
+        // - Capacity is ensured up to 18 bytes.
+        // - On early return, no data is produced.
+        unsafe {
+            self.store.write_at(4, &header_bytes);
+            self.store.write_at(13, &op_bytes);
+            self.store.data.set_len(15);
+            Message::encode_into_writer(params, &mut self.store)?;
+        }
+
+        self.update_len_write_all().await
     }
 
     async fn call_nullary(&mut self, id: &MessageID, op: u16) -> RpcResult<()> {
-        unsafe { self.buffer.data.set_len(STD_MESSAGE_LEN) };
-        self.buffer
-            .write(&Message::encode_header(id, Directive::NullaryCall))?;
-        self.buffer.write(&op.to_le_bytes())?;
-        self.write_all().await
+        let header_bytes = Message::encode_header(id, Directive::NullaryCall);
+        let op_bytes = op.to_le_bytes();
+
+        // Safety: Capacity is ensured up to 18 bytes.
+        unsafe {
+            self.store.write_at(4, &header_bytes);
+            self.store.write_at(13, &op_bytes);
+            self.store.data.set_len(15);
+        }
+
+        self.update_len_write_all().await
     }
 
     async fn return_data<R: Serialize>(&mut self, id: &MessageID, reply: &R) -> RpcResult<()> {
-        unsafe { self.buffer.data.set_len(STD_MESSAGE_LEN) };
-        self.buffer
-            .write(&Message::encode_header(id, Directive::Return))?;
-        Message::encode_into_writer(reply, &mut self.buffer)?;
-        self.write_all().await
+        let header_bytes = Message::encode_header(id, Directive::Return);
+
+        // Safety:
+        // - Capacity is ensured up to 18 bytes.
+        // - On early return, no data is produced.
+        unsafe {
+            self.store.write_at(4, &header_bytes);
+            self.store.data.set_len(13);
+            Message::encode_into_writer(reply, &mut self.store)?;
+        }
+
+        self.update_len_write_all().await
     }
 
-    async fn return_error(&mut self, id: &MessageID, err: RpcError) -> RpcResult<()> {
-        unsafe { self.buffer.data.set_len(STD_MESSAGE_LEN) };
-        self.buffer
-            .write(&Message::encode_header(id, Directive::Error))?;
-        self.buffer.write(&Message::encode_error(err))?;
-        self.write_all().await
+    async fn return_error(&mut self, id: &MessageID, error: RpcError) -> RpcResult<()> {
+        let header_bytes = Message::encode_header(id, Directive::Error);
+        let error_bytes = Message::encode_error(error);
+
+        // Safety: Capacity is ensured up to 18 bytes.
+        unsafe {
+            self.store.write_at(4, &header_bytes);
+            self.store.write_at(13, &error_bytes);
+            self.store.data.set_len(18);
+        }
+
+        self.update_len_write_all().await
     }
 
     async fn ping(&mut self, id: &MessageID) -> RpcResult<()> {
-        unsafe { self.buffer.data.set_len(STD_MESSAGE_LEN) };
-        self.buffer
-            .write(&Message::encode_header(id, Directive::Ping))?;
-        self.write_all().await
+        let header_bytes = Message::encode_header(id, Directive::Ping);
+
+        // Safety: Capacity is ensured up to 18 bytes.
+        unsafe {
+            self.store.write_at(4, &header_bytes);
+            self.store.data.set_len(13);
+        }
+
+        self.update_len_write_all().await
     }
 
     async fn pong(&mut self, id: &MessageID) -> RpcResult<()> {
-        unsafe { self.buffer.data.set_len(STD_MESSAGE_LEN) };
-        self.buffer
-            .write(&Message::encode_header(id, Directive::Pong))?;
-        self.write_all().await
+        let header_bytes = Message::encode_header(id, Directive::Pong);
+
+        // Safety: Capacity is ensured up to 18 bytes.
+        unsafe {
+            self.store.write_at(4, &header_bytes);
+            self.store.data.set_len(13);
+        }
+
+        self.update_len_write_all().await
     }
 
     #[inline(always)]
     async fn terminate(&mut self) -> RpcResult<()> {
-        self.writer.terminate().await.map_err(Into::into)
+        self.transport.terminate().await.map_err(Into::into)
     }
 }
 
 pub struct MessageReceiver<T> {
-    reader: T,
-    buffer: MessageBuffer,
+    transport: T,
+    buffer: MessageStore,
 }
 
 impl<T> MessageReceiver<T> {
     #[inline]
-    pub fn new(reader: T) -> Self {
+    pub fn new(transport: T) -> Self {
         Self {
-            reader,
-            buffer: MessageBuffer::with_capacity(STD_FRAMING_ALLOC),
+            transport,
+            buffer: MessageStore::with_capacity(STD_FRAME_ALLOC),
         }
     }
 
     #[inline]
-    pub fn with_capacity(reader: T, framing_cap: usize) -> Self {
+    pub fn with_capacity(transport: T, framing_cap: usize) -> Self {
         Self {
-            reader,
-            buffer: MessageBuffer::with_capacity(framing_cap),
+            transport,
+            buffer: MessageStore::with_capacity(framing_cap),
         }
     }
 }
@@ -648,26 +839,29 @@ impl<T> MessageReceiver<T> {
 impl<T: AsyncIORead + Send + Unpin> AsyncReceiver for MessageReceiver<T> {
     async fn receive(&mut self) -> RpcResult<()> {
         let mut len_bytes = [0u8; 4];
-        let read = self.reader.read_exact(&mut len_bytes).await?;
+        let read = self.transport.read_exact(&mut len_bytes).await?;
         debug_assert_eq!(read, 4);
 
         let len = u32::from_le_bytes(len_bytes);
 
-        if unlikely(len > STD_MAX_MESSAGE_SIZE) {
+        if unlikely(len > STD_MAX_MSG_SIZE) {
             return Err(RpcError::error(ErrKind::LargeMessage));
         }
 
         let len = len as usize;
 
-        // Safety: capacity must be ensured before segmentation.
+        // Safety:
+        // - Capacity must be ensured before segmentation.
+        // - Len remains `0` until reading full message as announced.
         unsafe { self.buffer.data.set_len(0) }
-        self.buffer.data.reserve_exact(len);
+        self.buffer.data.try_reserve(len)?;
         let segment = unsafe { std::slice::from_raw_parts_mut(self.buffer.data.as_mut_ptr(), len) };
 
         // Safety: This call must initialize the provided segment or it must fail and return.
-        let read = self.reader.read_exact(segment).await?;
+        let read = self.transport.read_exact(segment).await?;
         debug_assert_eq!(read, len);
 
+        // Safety: `len` bytes are assumed to have been initialized.
         unsafe { self.buffer.data.set_len(len) }
         Ok(())
     }
@@ -679,27 +873,27 @@ impl<T: AsyncIORead + Send + Unpin> AsyncReceiver for MessageReceiver<T> {
 }
 
 pub struct EncMessageReceiver<T> {
-    reader: T,
+    transport: T,
     state: EncryptionState,
-    buffer: MessageBuffer,
+    buffer: MessageStore,
 }
 
 impl<T> EncMessageReceiver<T> {
     #[inline]
-    pub fn new(reader: T, state: EncryptionState) -> Self {
+    pub fn new(transport: T, state: EncryptionState) -> Self {
         Self {
-            reader,
+            transport,
             state,
-            buffer: MessageBuffer::with_capacity(STD_FRAMING_ALLOC),
+            buffer: MessageStore::with_capacity(STD_FRAME_ALLOC),
         }
     }
 
     #[inline]
-    pub fn with_capacity(reader: T, state: EncryptionState, framing_cap: usize) -> Self {
+    pub fn with_capacity(transport: T, state: EncryptionState, framing_cap: usize) -> Self {
         Self {
-            reader,
+            transport,
             state,
-            buffer: MessageBuffer::with_capacity(framing_cap),
+            buffer: MessageStore::with_capacity(framing_cap),
         }
     }
 }
@@ -707,27 +901,31 @@ impl<T> EncMessageReceiver<T> {
 impl<T: AsyncIORead + Send + Unpin> AsyncReceiver for EncMessageReceiver<T> {
     async fn receive(&mut self) -> RpcResult<()> {
         let mut len_bytes = [0u8; 4];
-        let read = self.reader.read_exact(&mut len_bytes).await?;
+        let read = self.transport.read_exact(&mut len_bytes).await?;
         debug_assert_eq!(read, 4);
 
         let len = u32::from_le_bytes(len_bytes);
 
-        if unlikely(len > STD_MAX_MESSAGE_SIZE) {
+        if unlikely(len > STD_MAX_MSG_SIZE) {
             return Err(RpcError::error(ErrKind::LargeMessage));
         }
 
         let len = len as usize;
 
-        // Safety: capacity must be ensured before segmentation.
+        // Safety:
+        // - Capacity must be ensured before segmentation.
+        // - Len remains `0` until reading full message as announced.
         unsafe { self.buffer.data.set_len(0) }
-        self.buffer.data.reserve_exact(len);
+        self.buffer.data.try_reserve(len)?;
         let mut segment = FixedBufferView::new(&mut self.buffer.data, len);
 
         // Safety: This call must initialize the provided segment or it must fail and return.
-        let read = self.reader.read_exact(segment.as_slice_mut()).await?;
+        let read = self.transport.read_exact(segment.as_slice_mut()).await?;
         debug_assert_eq!(read, len);
 
-        // Safety: Reading is assumed to be done on initialized bytes at this stage.
+        // Safety:
+        // - Reading is assumed to be done on initialized bytes at this stage.
+        // - len is updated after decryption by calling FixedBufferView::truncate.
         self.state.decrypt(&mut segment, b"")
     }
 
@@ -761,13 +959,17 @@ mod tests {
             loop {
                 match msg_receiver.receive().await {
                     Ok(_) => {
-                        let header = Message::decode_header(msg_receiver.message()).unwrap();
+                        let message = msg_receiver.message();
+
+                        let header = Message::decode_header(message).unwrap();
                         assert!(header.directive == Directive::Call);
 
-                        let op = Message::decode_op(msg_receiver.message()).unwrap();
+                        let op = Message::decode_op(message).unwrap();
                         assert!(op == 1);
 
-                        let data: String = Message::decode_params(msg_receiver.message()).unwrap();
+                        let params_data = Message::params_data(message).unwrap();
+
+                        let data: String = Message::decode_from_slice(params_data).unwrap();
                         assert_eq!(&data, &"hi there");
 
                         if let Err(e) = msg_sender.return_data(&header.id, &"Reply: hi there").await
@@ -795,11 +997,15 @@ mod tests {
 
         msg_receiver.receive().await.unwrap();
 
-        let header = Message::decode_header(msg_receiver.message()).unwrap();
+        let message = msg_receiver.message();
+
+        let header = Message::decode_header(message).unwrap();
 
         assert!(header.directive == Directive::Return);
 
-        let reply: String = Message::decode_returned(msg_receiver.message()).unwrap();
+        let returned = Message::returned_data(message).unwrap();
+
+        let reply: String = Message::decode_from_slice(returned).unwrap();
         assert_eq!(reply, "Reply: hi there");
 
         msg_sender.terminate().await.unwrap();
@@ -823,14 +1029,18 @@ mod tests {
             loop {
                 match msg_receiver.receive().await {
                     Ok(_) => {
-                        let header = Message::decode_header(msg_receiver.message()).unwrap();
+                        let message = msg_receiver.message();
+
+                        let header = Message::decode_header(message).unwrap();
                         assert!(header.directive == Directive::Call);
 
-                        let op = Message::decode_op(msg_receiver.message()).unwrap();
+                        let op = Message::decode_op(message).unwrap();
                         assert!(op == 1);
 
-                        let data: String = Message::decode_params(msg_receiver.message()).unwrap();
-                        assert_eq!(data, "hi there");
+                        let params_data = Message::params_data(message).unwrap();
+
+                        let params: String = Message::decode_from_slice(params_data).unwrap();
+                        assert_eq!(params, "hi there");
 
                         if let Err(e) = msg_sender.return_data(&header.id, &"Reply: hi there").await
                         {
@@ -857,12 +1067,16 @@ mod tests {
 
         msg_receiver.receive().await.unwrap();
 
-        let header = Message::decode_header(msg_receiver.message()).unwrap();
+        let message = msg_receiver.message();
+
+        let header = Message::decode_header(message).unwrap();
 
         assert!(header.directive == Directive::Return);
 
+        let returned = Message::returned_data(message).unwrap();
+
         assert_eq!(
-            Message::decode_returned::<String>(msg_receiver.message()).unwrap(),
+            Message::decode_from_slice::<String>(returned).unwrap(),
             "Reply: hi there"
         );
 

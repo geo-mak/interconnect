@@ -845,7 +845,7 @@ impl<T: AsyncIORead + Send + Unpin> AsyncReceiver for MessageReceiver<T> {
         let len = u32::from_le_bytes(len_bytes);
 
         if unlikely(len > STD_MAX_MSG_SIZE) {
-            return Err(RpcError::error(ErrKind::LargeMessage));
+            return Err(RpcError::error(ErrKind::RecvSizeLimit));
         }
 
         let len = len as usize;
@@ -907,7 +907,7 @@ impl<T: AsyncIORead + Send + Unpin> AsyncReceiver for EncMessageReceiver<T> {
         let len = u32::from_le_bytes(len_bytes);
 
         if unlikely(len > STD_MAX_MSG_SIZE) {
-            return Err(RpcError::error(ErrKind::LargeMessage));
+            return Err(RpcError::error(ErrKind::RecvSizeLimit));
         }
 
         let len = len as usize;

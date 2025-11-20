@@ -70,9 +70,9 @@ pub trait AsyncRpcClient {
 
 struct FrameData<T> {
     state: AtomicU8,
-    waker: UnsafeCell<Waker>,
+    waker: Waker,
     // TODO: Maybeuninit?
-    value: UnsafeCell<Option<T>>,
+    value: Option<T>,
     _pin: PhantomPinned,
 }
 
@@ -85,26 +85,25 @@ impl<T> FrameData<T> {
     const fn new() -> Self {
         Self {
             state: AtomicU8::new(DATA_WAIT),
-            waker: UnsafeCell::new(NOOP_WAKER),
-            value: UnsafeCell::new(None),
+            waker: NOOP_WAKER,
+            value: None,
             _pin: PhantomPinned,
         }
     }
 
     #[inline(always)]
-    const fn take_value(&self) -> Option<T> {
-        let value_ptr = self.value.get();
-        unsafe { (*value_ptr).take() }
+    const fn take_value(&mut self) -> Option<T> {
+        self.value.take()
     }
 }
 
 struct WaitPublishing<'a, T> {
-    frame: &'a FrameData<T>,
+    frame: &'a mut FrameData<T>,
 }
 
 impl<'a, T> WaitPublishing<'a, T> {
     #[inline(always)]
-    const fn new(frame: &'a FrameData<T>) -> Self {
+    const fn new(frame: &'a mut FrameData<T>) -> Self {
         Self { frame }
     }
 }
@@ -113,13 +112,12 @@ impl<'a, T> Future for WaitPublishing<'a, T> {
     type Output = ();
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let frame = unsafe { self.get_unchecked_mut().frame };
+        let frame = unsafe { &mut self.get_unchecked_mut().frame };
         let state = &frame.state;
 
         match state.compare_exchange(DATA_WAIT, DATA_INIT, Acquire, Acquire) {
             Ok(_) => {
-                let waker_ptr = frame.waker.get();
-                unsafe { *waker_ptr = cx.waker().clone() };
+                frame.waker = cx.waker().clone();
 
                 match state.compare_exchange(DATA_INIT, DATA_WAIT, AcqRel, Acquire) {
                     Ok(_) => return Poll::Pending,
@@ -160,14 +158,12 @@ impl<T> FramePublisher<T> {
     fn publish(&mut self, value: T) {
         let frame_data = unsafe { &mut (*self.data_ptr) };
 
-        let value_ptr = frame_data.value.get();
+        debug_assert!(frame_data.value.is_none());
 
-        debug_assert!(unsafe { (*value_ptr).is_none() });
-
-        unsafe { value_ptr.write(Some(value)) };
+        frame_data.value = Some(value);
 
         if frame_data.state.fetch_or(DATA_READY, AcqRel) == DATA_WAIT {
-            unsafe { (*frame_data.waker.get()).wake_by_ref() };
+            frame_data.waker.wake_by_ref()
         }
     }
 }
@@ -652,7 +648,7 @@ where
                 .call(&slot.id, op, params)
                 .await?;
 
-            tokio::time::timeout(timeout, WaitPublishing::new(&pinned_mem)).await?;
+            tokio::time::timeout(timeout, WaitPublishing::new(&mut pinned_mem)).await?;
 
             slot.forget();
 
@@ -711,7 +707,7 @@ where
                 .call_nullary(&slot.id, op)
                 .await?;
 
-            tokio::time::timeout(timeout, WaitPublishing::new(&pinned_mem)).await?;
+            tokio::time::timeout(timeout, WaitPublishing::new(&mut pinned_mem)).await?;
 
             slot.forget();
 
@@ -750,7 +746,7 @@ where
         if let Some(slot) = entries.acquire(FramePublisher::new(&mut pinned_mem)) {
             self.state.sender.lock().await.ping(&slot.id).await?;
 
-            tokio::time::timeout(timeout, WaitPublishing::new(&pinned_mem)).await?;
+            tokio::time::timeout(timeout, WaitPublishing::new(&mut pinned_mem)).await?;
 
             slot.forget();
 

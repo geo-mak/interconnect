@@ -90,46 +90,6 @@ impl<T> FrameData<T> {
             _pin: PhantomPinned,
         }
     }
-
-    #[inline(always)]
-    const fn take_value(&mut self) -> Option<T> {
-        self.value.take()
-    }
-}
-
-struct WaitPublishing<'a, T> {
-    frame: &'a mut FrameData<T>,
-}
-
-impl<'a, T> WaitPublishing<'a, T> {
-    #[inline(always)]
-    const fn new(frame: &'a mut FrameData<T>) -> Self {
-        Self { frame }
-    }
-}
-
-impl<'a, T> Future for WaitPublishing<'a, T> {
-    type Output = ();
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let frame = unsafe { &mut self.get_unchecked_mut().frame };
-        let state = &frame.state;
-
-        match state.compare_exchange(DATA_WAIT, DATA_INIT, Acquire, Acquire) {
-            Ok(_) => {
-                frame.waker = cx.waker().clone();
-
-                match state.compare_exchange(DATA_INIT, DATA_WAIT, AcqRel, Acquire) {
-                    Ok(_) => return Poll::Pending,
-                    Err(current) => debug_assert!(current & DATA_READY != 0),
-                };
-            }
-            Err(current) => debug_assert!(current & DATA_READY != 0),
-        }
-
-        // Safety: DATA_READY indicates that writing has been completed.
-        Poll::Ready(())
-    }
 }
 
 struct FramePublisher<T> {
@@ -139,7 +99,6 @@ struct FramePublisher<T> {
 unsafe impl<T: Send> Send for FramePublisher<T> {}
 
 impl<T> FramePublisher<T> {
-    #[inline(always)]
     const fn new(bus: &mut FrameData<T>) -> Self {
         Self { data_ptr: bus }
     }
@@ -165,6 +124,41 @@ impl<T> FramePublisher<T> {
         if frame_data.state.fetch_or(DATA_READY, AcqRel) == DATA_WAIT {
             frame_data.waker.wake_by_ref()
         }
+    }
+}
+
+struct WaitPublishing<'a, T> {
+    frame: &'a mut FrameData<T>,
+}
+
+impl<'a, T> WaitPublishing<'a, T> {
+    const fn new(frame: &'a mut FrameData<T>) -> Self {
+        Self { frame }
+    }
+}
+
+impl<'a, T> Future for WaitPublishing<'a, T> {
+    type Output = ();
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        // Safety: only state and waker can be accessed here.
+        let frame = &mut self.get_mut().frame;
+        let state = &frame.state;
+
+        match state.compare_exchange(DATA_WAIT, DATA_INIT, Acquire, Acquire) {
+            Ok(_) => {
+                frame.waker = cx.waker().clone();
+
+                match state.compare_exchange(DATA_INIT, DATA_WAIT, AcqRel, Acquire) {
+                    Ok(_) => return Poll::Pending,
+                    Err(current) => debug_assert!(current & DATA_READY != 0),
+                };
+            }
+            Err(current) => debug_assert!(current & DATA_READY != 0),
+        }
+
+        // Safety: DATA_READY indicates that writing has been completed.
+        Poll::Ready(())
     }
 }
 
@@ -524,6 +518,7 @@ where
         match header.directive {
             Directive::Return => {
                 let data = message::returned_data(message)?;
+                // TODO: Borrowing with zero-copy-decoding, instead of new allocation.
                 let mut ret = MessageStore::with_capacity(data.len());
                 unsafe { ret.copy_from(data) };
                 state.entries.publish(header.id, Ok(Response::Data(ret)));
@@ -653,7 +648,7 @@ where
             slot.forget();
 
             // RT_ASSERT
-            let published = pinned_mem.take_value().unwrap();
+            let published = pinned_mem.value.take().unwrap();
 
             match published {
                 Ok(response) => {
@@ -712,7 +707,7 @@ where
             slot.forget();
 
             // RT_ASSERT
-            let published = pinned_mem.take_value().unwrap();
+            let published = pinned_mem.value.take().unwrap();
 
             match published {
                 Ok(response) => {

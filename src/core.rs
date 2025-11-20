@@ -133,9 +133,9 @@ pub trait MessageWriter {
 }
 
 /// The ribosome.
-pub struct Message;
+pub mod message {
+    use super::*;
 
-impl Message {
     #[inline]
     pub fn encode_header(id: &MessageID, directive: Directive) -> [u8; 9] {
         let mut header_bytes = [0u8; 9];
@@ -487,7 +487,7 @@ impl<T: AsyncIOWrite + Send + Unpin> AsyncSender for MessageSender<T> {
         op: u16,
         params: &P,
     ) -> RpcResult<()> {
-        let header_bytes = Message::encode_header(id, Directive::Call);
+        let header_bytes = message::encode_header(id, Directive::Call);
         let op_bytes = op.to_le_bytes();
 
         // Safety:
@@ -497,7 +497,7 @@ impl<T: AsyncIOWrite + Send + Unpin> AsyncSender for MessageSender<T> {
             self.store.write_at(4, &header_bytes);
             self.store.write_at(13, &op_bytes);
             self.store.data.set_len(15);
-            Message::encode_into_writer(params, &mut self.store)?;
+            message::encode_into_writer(params, &mut self.store)?;
             let len = (self.store.data.len() - 4) as u32;
             self.store.write_at(0, &len.to_le_bytes());
         }
@@ -507,7 +507,7 @@ impl<T: AsyncIOWrite + Send + Unpin> AsyncSender for MessageSender<T> {
     }
 
     async fn call_nullary(&mut self, id: &MessageID, op: u16) -> RpcResult<()> {
-        let header_bytes = Message::encode_header(id, Directive::NullaryCall);
+        let header_bytes = message::encode_header(id, Directive::NullaryCall);
         let op_bytes = op.to_le_bytes();
 
         // Safety: Capacity is ensured up to 18 bytes.
@@ -527,7 +527,7 @@ impl<T: AsyncIOWrite + Send + Unpin> AsyncSender for MessageSender<T> {
         id: &MessageID,
         reply: &R,
     ) -> RpcResult<()> {
-        let header_bytes = Message::encode_header(id, Directive::Return);
+        let header_bytes = message::encode_header(id, Directive::Return);
 
         // Safety:
         // - Capacity is ensured up to 18 bytes.
@@ -535,7 +535,7 @@ impl<T: AsyncIOWrite + Send + Unpin> AsyncSender for MessageSender<T> {
         unsafe {
             self.store.write_at(4, &header_bytes);
             self.store.data.set_len(13);
-            Message::encode_into_writer(reply, &mut self.store)?;
+            message::encode_into_writer(reply, &mut self.store)?;
             let len = (self.store.data.len() - 4) as u32;
             self.store.write_at(0, &len.to_le_bytes());
         }
@@ -545,8 +545,8 @@ impl<T: AsyncIOWrite + Send + Unpin> AsyncSender for MessageSender<T> {
     }
 
     async fn return_error(&mut self, id: &MessageID, error: RpcError) -> RpcResult<()> {
-        let header_bytes = Message::encode_header(id, Directive::Error);
-        let error_bytes = Message::encode_error(error);
+        let header_bytes = message::encode_header(id, Directive::Error);
+        let error_bytes = message::encode_error(error);
 
         // Safety: Capacity is ensured up to 18 bytes.
         unsafe {
@@ -561,7 +561,7 @@ impl<T: AsyncIOWrite + Send + Unpin> AsyncSender for MessageSender<T> {
     }
 
     async fn ping(&mut self, id: &MessageID) -> RpcResult<()> {
-        let header_bytes = Message::encode_header(id, Directive::Ping);
+        let header_bytes = message::encode_header(id, Directive::Ping);
 
         // Safety: Capacity is ensured up to 18 bytes.
         unsafe {
@@ -575,7 +575,7 @@ impl<T: AsyncIOWrite + Send + Unpin> AsyncSender for MessageSender<T> {
     }
 
     async fn pong(&mut self, id: &MessageID) -> RpcResult<()> {
-        let header_bytes = Message::encode_header(id, Directive::Pong);
+        let header_bytes = message::encode_header(id, Directive::Pong);
 
         // Safety: Capacity is ensured up to 18 bytes.
         unsafe {
@@ -724,7 +724,7 @@ impl<T: AsyncIOWrite + Send + Unpin> EncMessageSender<T> {
 
 impl<T: AsyncIOWrite + Send + Unpin> AsyncSender for EncMessageSender<T> {
     async fn call<P: Serialize>(&mut self, id: &MessageID, op: u16, params: &P) -> RpcResult<()> {
-        let header_bytes = Message::encode_header(id, Directive::Call);
+        let header_bytes = message::encode_header(id, Directive::Call);
         let op_bytes = op.to_le_bytes();
 
         // Safety:
@@ -734,14 +734,14 @@ impl<T: AsyncIOWrite + Send + Unpin> AsyncSender for EncMessageSender<T> {
             self.store.write_at(4, &header_bytes);
             self.store.write_at(13, &op_bytes);
             self.store.data.set_len(15);
-            Message::encode_into_writer(params, &mut self.store)?;
+            message::encode_into_writer(params, &mut self.store)?;
         }
 
         self.update_len_write_all().await
     }
 
     async fn call_nullary(&mut self, id: &MessageID, op: u16) -> RpcResult<()> {
-        let header_bytes = Message::encode_header(id, Directive::NullaryCall);
+        let header_bytes = message::encode_header(id, Directive::NullaryCall);
         let op_bytes = op.to_le_bytes();
 
         // Safety: Capacity is ensured up to 18 bytes.
@@ -755,7 +755,7 @@ impl<T: AsyncIOWrite + Send + Unpin> AsyncSender for EncMessageSender<T> {
     }
 
     async fn return_data<R: Serialize>(&mut self, id: &MessageID, reply: &R) -> RpcResult<()> {
-        let header_bytes = Message::encode_header(id, Directive::Return);
+        let header_bytes = message::encode_header(id, Directive::Return);
 
         // Safety:
         // - Capacity is ensured up to 18 bytes.
@@ -763,15 +763,15 @@ impl<T: AsyncIOWrite + Send + Unpin> AsyncSender for EncMessageSender<T> {
         unsafe {
             self.store.write_at(4, &header_bytes);
             self.store.data.set_len(13);
-            Message::encode_into_writer(reply, &mut self.store)?;
+            message::encode_into_writer(reply, &mut self.store)?;
         }
 
         self.update_len_write_all().await
     }
 
     async fn return_error(&mut self, id: &MessageID, error: RpcError) -> RpcResult<()> {
-        let header_bytes = Message::encode_header(id, Directive::Error);
-        let error_bytes = Message::encode_error(error);
+        let header_bytes = message::encode_header(id, Directive::Error);
+        let error_bytes = message::encode_error(error);
 
         // Safety: Capacity is ensured up to 18 bytes.
         unsafe {
@@ -784,7 +784,7 @@ impl<T: AsyncIOWrite + Send + Unpin> AsyncSender for EncMessageSender<T> {
     }
 
     async fn ping(&mut self, id: &MessageID) -> RpcResult<()> {
-        let header_bytes = Message::encode_header(id, Directive::Ping);
+        let header_bytes = message::encode_header(id, Directive::Ping);
 
         // Safety: Capacity is ensured up to 18 bytes.
         unsafe {
@@ -796,7 +796,7 @@ impl<T: AsyncIOWrite + Send + Unpin> AsyncSender for EncMessageSender<T> {
     }
 
     async fn pong(&mut self, id: &MessageID) -> RpcResult<()> {
-        let header_bytes = Message::encode_header(id, Directive::Pong);
+        let header_bytes = message::encode_header(id, Directive::Pong);
 
         // Safety: Capacity is ensured up to 18 bytes.
         unsafe {
@@ -961,15 +961,15 @@ mod tests {
                     Ok(_) => {
                         let message = msg_receiver.message();
 
-                        let header = Message::decode_header(message).unwrap();
+                        let header = message::decode_header(message).unwrap();
                         assert!(header.directive == Directive::Call);
 
-                        let op = Message::decode_op(message).unwrap();
+                        let op = message::decode_op(message).unwrap();
                         assert!(op == 1);
 
-                        let params_data = Message::params_data(message).unwrap();
+                        let params_data = message::params_data(message).unwrap();
 
-                        let data: String = Message::decode_from_slice(params_data).unwrap();
+                        let data: String = message::decode_from_slice(params_data).unwrap();
                         assert_eq!(&data, &"hi there");
 
                         if let Err(e) = msg_sender.return_data(&header.id, &"Reply: hi there").await
@@ -999,13 +999,13 @@ mod tests {
 
         let message = msg_receiver.message();
 
-        let header = Message::decode_header(message).unwrap();
+        let header = message::decode_header(message).unwrap();
 
         assert!(header.directive == Directive::Return);
 
-        let returned = Message::returned_data(message).unwrap();
+        let returned = message::returned_data(message).unwrap();
 
-        let reply: String = Message::decode_from_slice(returned).unwrap();
+        let reply: String = message::decode_from_slice(returned).unwrap();
         assert_eq!(reply, "Reply: hi there");
 
         msg_sender.terminate().await.unwrap();
@@ -1031,15 +1031,15 @@ mod tests {
                     Ok(_) => {
                         let message = msg_receiver.message();
 
-                        let header = Message::decode_header(message).unwrap();
+                        let header = message::decode_header(message).unwrap();
                         assert!(header.directive == Directive::Call);
 
-                        let op = Message::decode_op(message).unwrap();
+                        let op = message::decode_op(message).unwrap();
                         assert!(op == 1);
 
-                        let params_data = Message::params_data(message).unwrap();
+                        let params_data = message::params_data(message).unwrap();
 
-                        let params: String = Message::decode_from_slice(params_data).unwrap();
+                        let params: String = message::decode_from_slice(params_data).unwrap();
                         assert_eq!(params, "hi there");
 
                         if let Err(e) = msg_sender.return_data(&header.id, &"Reply: hi there").await
@@ -1069,14 +1069,14 @@ mod tests {
 
         let message = msg_receiver.message();
 
-        let header = Message::decode_header(message).unwrap();
+        let header = message::decode_header(message).unwrap();
 
         assert!(header.directive == Directive::Return);
 
-        let returned = Message::returned_data(message).unwrap();
+        let returned = message::returned_data(message).unwrap();
 
         assert_eq!(
-            Message::decode_from_slice::<String>(returned).unwrap(),
+            message::decode_from_slice::<String>(returned).unwrap(),
             "Reply: hi there"
         );
 

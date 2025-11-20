@@ -25,7 +25,7 @@ use crate::report::Reporter;
 use crate::specs::{EncryptionState, negotiation};
 use crate::sync::{DynamicLatch, IList, INode, NOOP_WAKER};
 use crate::transport::{TransportLayer, TransportListener};
-use crate::{Directive, Message};
+use crate::{Directive, message};
 
 thread_local! {
     // Must be non-zero.
@@ -527,16 +527,16 @@ where
             match task.wait_cancelable(receiver.receive()).await {
                 Ok(_) => {
                     let message = receiver.message();
-                    let header = Message::decode_header(message)?;
+                    let header = message::decode_header(message)?;
                     match header.directive {
                         Directive::Call => {
-                            let (op, params) = Message::decode_op_return_params(message)?;
+                            let (op, params) = message::decode_op_return_params(message)?;
                             let call = Call { op, params };
                             let mut context = ServerContext::new(&header.id, sender);
                             app.call(call, &mut context).await?
                         }
                         Directive::NullaryCall => {
-                            let op = Message::decode_op(message)?;
+                            let op = message::decode_op(message)?;
                             let mut context = ServerContext::new(&header.id, sender);
                             app.call_nullary(op, &mut context).await?
                         }
@@ -585,7 +585,6 @@ mod tests {
 
     use tokio::net::{TcpListener, TcpStream, UnixListener, UnixStream};
 
-    use crate::Message;
     use crate::application::Call;
     use crate::error::{ErrKind, RpcError};
     use crate::report::STDIOReporter;
@@ -669,12 +668,12 @@ mod tests {
 
             let message = msg_receiver_1.message();
 
-            let header = Message::decode_header(message).unwrap();
+            let header = message::decode_header(message).unwrap();
 
             match header.directive {
                 Directive::Return => {
-                    let data = Message::returned_data(message).unwrap();
-                    let response: String = Message::decode_from_slice(data).unwrap();
+                    let data = message::returned_data(message).unwrap();
+                    let response: String = message::decode_from_slice(data).unwrap();
                     assert!(&response == "Reply to C1");
                 }
                 _ => panic!("Expected reply"),
@@ -686,12 +685,12 @@ mod tests {
 
             let message = msg_receiver_2.message();
 
-            let header = Message::decode_header(message).unwrap();
+            let header = message::decode_header(message).unwrap();
 
             match header.directive {
                 Directive::Return => {
-                    let data = Message::returned_data(message).unwrap();
-                    let response: String = Message::decode_from_slice(data).unwrap();
+                    let data = message::returned_data(message).unwrap();
+                    let response: String = message::decode_from_slice(data).unwrap();
                     assert!(&response == "Reply to C2");
                 }
                 _ => panic!("Expected reply"),
@@ -703,12 +702,12 @@ mod tests {
 
             let message = msg_receiver_3.message();
 
-            let header = Message::decode_header(message).unwrap();
+            let header = message::decode_header(message).unwrap();
 
             match header.directive {
                 Directive::Return => {
-                    let data = Message::returned_data(message).unwrap();
-                    let response: String = Message::decode_from_slice(data).unwrap();
+                    let data = message::returned_data(message).unwrap();
+                    let response: String = message::decode_from_slice(data).unwrap();
                     assert!(&response == "Reply to C3");
                 }
                 _ => panic!("Expected reply"),
@@ -761,12 +760,12 @@ mod tests {
 
         let message = msg_receiver.message();
 
-        let header = Message::decode_header(message).unwrap();
+        let header = message::decode_header(message).unwrap();
 
         match header.directive {
             Directive::Return => {
-                let data = Message::returned_data(message).unwrap();
-                let response: String = Message::decode_from_slice(data).unwrap();
+                let data = message::returned_data(message).unwrap();
+                let response: String = message::decode_from_slice(data).unwrap();
                 assert!(&response == "Reply to C1");
             }
             _ => panic!("Expected reply"),
@@ -810,12 +809,12 @@ mod tests {
 
         let message = msg_receiver.message();
 
-        let header = Message::decode_header(message).unwrap();
+        let header = message::decode_header(message).unwrap();
 
         match header.directive {
             Directive::Return => {
-                let data = Message::returned_data(message).unwrap();
-                let response: String = Message::decode_from_slice(data).unwrap();
+                let data = message::returned_data(message).unwrap();
+                let response: String = message::decode_from_slice(data).unwrap();
                 assert!(&response == "Reply to C1");
             }
             _ => panic!("Expected reply"),

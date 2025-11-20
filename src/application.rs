@@ -3,8 +3,8 @@ use std::future::Future;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    Message,
     error::{ErrKind, RpcError, RpcResult},
+    message,
 };
 
 #[derive(Debug, PartialEq)]
@@ -17,7 +17,7 @@ impl<'a> Call<'a> {
     /// Tries to decode the parameters as `P`.
     #[inline(always)]
     pub fn decode_as<P: for<'de> Deserialize<'de>>(&self) -> RpcResult<P> {
-        Message::decode_from_slice(self.params)
+        message::decode_from_slice(self.params)
     }
 }
 

@@ -19,8 +19,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::application::{Call, CallContext, RpcApplication};
 use crate::core::{
-    AsyncReceiver, AsyncSender, Directive, EncMessageReceiver, EncMessageSender, Message,
-    MessageID, MessageReceiver, MessageSender, MessageStore,
+    AsyncReceiver, AsyncSender, Directive, EncMessageReceiver, EncMessageSender, MessageID,
+    MessageReceiver, MessageSender, MessageStore, message,
 };
 use crate::error::{ErrKind, RpcError, RpcResult};
 use crate::report::Reporter;
@@ -524,16 +524,16 @@ where
         R: AsyncReceiver,
     {
         let message = receiver.message();
-        let header = Message::decode_header(message)?;
+        let header = message::decode_header(message)?;
         match header.directive {
             Directive::Return => {
-                let data = Message::returned_data(message)?;
+                let data = message::returned_data(message)?;
                 let mut ret = MessageStore::with_capacity(data.len());
                 unsafe { ret.copy_from(data) };
                 state.entries.publish(header.id, Ok(Response::Data(ret)));
             }
             Directive::Error => {
-                let err = Message::decode_error(message)?;
+                let err = message::decode_error(message)?;
                 state.entries.publish(header.id, Err(err));
             }
             Directive::Pong => {
@@ -541,14 +541,14 @@ where
             }
             Directive::Call => {
                 if let Some(_lock) = state.abort_lock.acquire() {
-                    let (op, params) = Message::decode_op_return_params(message)?;
+                    let (op, params) = message::decode_op_return_params(message)?;
                     let mut context = ClientContext::new(&header.id, state);
                     return state.app.call(Call { op, params }, &mut context).await;
                 }
             }
             Directive::NullaryCall => {
                 if let Some(_lock) = state.abort_lock.acquire() {
-                    let op = Message::decode_op(message)?;
+                    let op = message::decode_op(message)?;
                     let mut context = ClientContext::new(&header.id, state);
                     return state.app.call_nullary(op, &mut context).await;
                 }
@@ -662,7 +662,7 @@ where
             match published {
                 Ok(response) => {
                     if let Response::Data(reply) = response {
-                        return Message::decode_from_slice(reply.data());
+                        return message::decode_from_slice(reply.data());
                     }
                     return Err(RpcError::error(ErrKind::UnexpectedMsg));
                 }
@@ -721,7 +721,7 @@ where
             match published {
                 Ok(response) => {
                     if let Response::Data(reply) = response {
-                        return Message::decode_from_slice(reply.data());
+                        return message::decode_from_slice(reply.data());
                     }
                     return Err(RpcError::error(ErrKind::UnexpectedMsg));
                 }
@@ -890,15 +890,15 @@ mod tests_client {
                 match msg_receiver.receive().await {
                     Ok(_) => {
                         let message = msg_receiver.message();
-                        let header = Message::decode_header(message).unwrap();
+                        let header = message::decode_header(message).unwrap();
                         match header.directive {
                             Directive::Call => {
-                                let op = Message::decode_op(message).unwrap();
+                                let op = message::decode_op(message).unwrap();
                                 match op {
                                     1 => {
-                                        let params_data = Message::params_data(message).unwrap();
+                                        let params_data = message::params_data(message).unwrap();
                                         let params: String =
-                                            Message::decode_from_slice(params_data).unwrap();
+                                            message::decode_from_slice(params_data).unwrap();
                                         assert_eq!(params, "call");
 
                                         msg_sender.return_data(&header.id, &"reply").await.unwrap();
@@ -916,7 +916,7 @@ mod tests_client {
                                 }
                             }
                             Directive::NullaryCall => {
-                                let op = Message::decode_op(msg_receiver.message()).unwrap();
+                                let op = message::decode_op(msg_receiver.message()).unwrap();
                                 assert_eq!(op, 1);
 
                                 msg_sender
@@ -987,15 +987,15 @@ mod tests_client {
             match msg_receiver.receive().await {
                 Ok(_) => {
                     let message = msg_receiver.message();
-                    let header = Message::decode_header(message).unwrap();
+                    let header = message::decode_header(message).unwrap();
                     match header.directive {
                         Directive::Call => {
-                            let op = Message::decode_op(message).unwrap();
+                            let op = message::decode_op(message).unwrap();
                             assert_eq!(op, 1);
 
-                            let params_data = Message::params_data(message).unwrap();
+                            let params_data = message::params_data(message).unwrap();
 
-                            let params: String = Message::decode_from_slice(params_data).unwrap();
+                            let params: String = message::decode_from_slice(params_data).unwrap();
                             assert_eq!(params, "call");
 
                             msg_sender.return_data(&header.id, &"reply").await.unwrap();

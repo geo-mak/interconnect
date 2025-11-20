@@ -14,7 +14,7 @@ pub mod sync;
 pub mod transport;
 
 pub use client::RpcAsyncClient;
-pub use core::{Directive, Message};
+pub use core::{Directive, message};
 pub use error::{RpcError, RpcResult};
 pub use server::RpcServer;
 pub use transport::{TransportLayer, TransportListener};

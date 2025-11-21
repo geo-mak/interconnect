@@ -1,7 +1,11 @@
-use std::cell::UnsafeCell;
+use std::cell::Cell;
 use std::io;
+use std::mem::ManuallyDrop;
+use std::ptr::copy_nonoverlapping;
 use std::sync::atomic::Ordering::{AcqRel, Acquire, Relaxed, Release};
 use std::sync::atomic::{AtomicU8, AtomicUsize};
+
+use crate::opt::branch_prediction::unlikely;
 
 pub trait AsyncIORead {
     /// Tries to write available data into the provided output-segment from the underlying I/O source.
@@ -49,68 +53,87 @@ pub trait AsyncIOWrite {
         Self: Unpin;
 }
 
-struct IORingSegment {
-    data: UnsafeCell<Vec<u8>>,
-    state: AtomicU8,
-}
-
-const SEG_NONE: u8 = 0;
-const SEG_PUBLISHED: u8 = 1;
-const SEG_DISCARDED: u8 = 2;
-
-impl IORingSegment {
-    #[inline]
-    fn with_capacity(cap: usize) -> Self {
-        IORingSegment {
-            data: UnsafeCell::new(Vec::with_capacity(cap)),
-            state: AtomicU8::new(SEG_NONE),
-        }
-    }
-
-    #[inline(always)]
-    const unsafe fn pub_ref(&self) -> IOSegment<'_> {
-        IOSegment { seg: self }
-    }
-
-    #[inline(always)]
-    const unsafe fn buffer(&self) -> &mut Vec<u8> {
-        unsafe { &mut *self.data.get() }
-    }
-
-    #[inline(always)]
-    unsafe fn set_published(&self) {
-        self.state.store(SEG_PUBLISHED, Release);
-    }
-
-    #[inline(always)]
-    unsafe fn set_discarded(&self) {
-        self.state.store(SEG_DISCARDED, Release);
-    }
-}
-
 /// An exclusive segment that implements `io::Write`.
 ///
 /// `publish` method must be called to save the data written to the segment.
 /// `flush` method does nothing.
 ///
 /// If dropped before calling `publish`, the written data will be discarded.
-pub(crate) struct IOSegment<'a> {
-    seg: &'a IORingSegment,
+pub(crate) struct IORingSegment<'a> {
+    data: &'a mut [u8],
+    metadata: &'a IOSegmentMetadata,
 }
 
-impl<'a> IOSegment<'a> {
+impl<'a> IORingSegment<'a> {
+    const fn new(data: &'a mut [u8], metadata: &'a IOSegmentMetadata) -> Self {
+        Self { data, metadata }
+    }
+
+    /// Returns the maximum capacity of the segment.
+    #[inline(always)]
+    pub(crate) const fn capacity(&self) -> usize {
+        self.data.len()
+    }
+
+    /// Returns the amount of bytes have been written to the segment.
+    #[inline(always)]
+    pub(crate) const fn len(&self) -> u32 {
+        self.metadata.written.get()
+    }
+
+    /// Returns a slice to the written data.
+    #[inline(always)]
+    pub(crate) fn data(&self) -> &[u8] {
+        let written_len = self.metadata.written.get() as usize;
+        &self.data[..written_len]
+    }
+
+    /// Returns a mutable slice to the written data.
+    #[inline(always)]
+    pub(crate) fn data_mut(&mut self) -> &mut [u8] {
+        let written_len = self.metadata.written.get() as usize;
+        &mut self.data[..written_len]
+    }
+
     #[inline(always)]
     pub(crate) fn publish(self) {
-        unsafe {
-            self.seg.set_published();
-        }
-        std::mem::forget(self);
+        self.metadata.state.store(SEG_PUBLISHED, Release);
+        let _ = ManuallyDrop::new(self);
+    }
+
+    #[inline(always)]
+    fn set_discarded(&self) {
+        self.metadata.written.set(0);
+        self.metadata.state.store(SEG_DISCARDED, Release);
     }
 }
 
-impl<'a> io::Write for IOSegment<'a> {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        unsafe { self.seg.buffer().write(buf) }
+impl<'a> io::Write for IORingSegment<'a> {
+    /// Tries to write the provided input data into the segment.
+    ///
+    /// Note:
+    /// This call doesn't do partial writes, either the entire input data is written,
+    /// or an `UnexpectedEof` error is returned as a result of lack of capacity.
+    fn write(&mut self, input: &[u8]) -> io::Result<usize> {
+        let current_len = self.metadata.written.get() as usize;
+        let free = self.data.len() - current_len;
+
+        if unlikely(free < input.len()) {
+            return Err(io::ErrorKind::UnexpectedEof.into());
+        }
+
+        let src_len = input.len();
+
+        unsafe {
+            copy_nonoverlapping(
+                input.as_ptr(),
+                self.data.as_mut_ptr().add(current_len),
+                src_len,
+            );
+        }
+
+        self.metadata.written.set((current_len + src_len) as u32);
+        Ok(src_len)
     }
 
     /// This call in no-op.
@@ -121,11 +144,11 @@ impl<'a> io::Write for IOSegment<'a> {
     }
 }
 
-impl<'a> Drop for IOSegment<'a> {
+impl<'a> Drop for IORingSegment<'a> {
     fn drop(&mut self) {
         // If publish is never called, it must be discarded
         // to prevent deadlocking the ring.
-        unsafe { self.seg.set_discarded() }
+        self.set_discarded()
     }
 }
 
@@ -141,40 +164,77 @@ impl<'a> Drop for IOSegment<'a> {
 /// will return the same segment.
 ///
 /// The segment will panic when `recycle` is called on the same segment more than once.
-pub(crate) struct PublishedSegment<'a> {
-    io_ring: &'a IORing,
-    seg: &'a IORingSegment,
+pub(crate) struct IORingPubSegment<'a> {
+    ring: &'a IORing,
+    data: &'a mut [u8],
+    metadata: &'a IOSegmentMetadata,
     read: usize,
 }
 
-impl<'a> PublishedSegment<'a> {
+impl<'a> IORingPubSegment<'a> {
     #[inline(always)]
-    const fn new(io_ring: &'a IORing, seg: &'a IORingSegment, read: usize) -> Self {
-        Self { io_ring, seg, read }
+    const fn new(
+        ring: &'a IORing,
+        data: &'a mut [u8],
+        metadata: &'a IOSegmentMetadata,
+        read: usize,
+    ) -> Self {
+        Self {
+            ring,
+            data,
+            metadata,
+            read,
+        }
     }
 
+    /// Returns the amount of bytes have been published via the segment.
     #[inline(always)]
-    pub(crate) const fn data(&self) -> &Vec<u8> {
-        unsafe { self.seg.buffer() }
+    pub(crate) const fn len(&self) -> u32 {
+        self.metadata.written.get()
     }
 
+    /// Returns a slice to the published data.
     #[inline(always)]
-    pub(crate) const fn data_mut(&mut self) -> &mut Vec<u8> {
-        unsafe { self.seg.buffer() }
+    fn data(&self) -> &[u8] {
+        let written_len = self.metadata.written.get() as usize;
+        &self.data[..written_len]
     }
 
-    /// Frees the segment to be used by producers.
+    /// Returns a mutable slice to the published data.
+    #[inline(always)]
+    fn data_mut(&mut self) -> &mut [u8] {
+        let written_len = self.metadata.written.get() as usize;
+        &mut self.data[..written_len]
+    }
+
+    /// Frees the segment to be reused.
     ///
     /// This method will panic if it is called on the same segment more than once.
     #[inline(always)]
     pub(crate) fn recycle(self) {
-        // Once all pathways get proper shape, it can be made in debug mode only.
+        // RT_ASSERT.
         assert!(
-            self.io_ring.read.load(Acquire) == self.read,
-            "Invalid recycling"
+            self.ring.read.load(Acquire) == self.read,
+            "Recycling the same segment more than once"
         );
-        self.seg.state.store(SEG_NONE, Relaxed);
-        self.io_ring.read.store(self.read.wrapping_add(1), Release);
+        self.metadata.written.set(0);
+        self.metadata.state.store(SEG_NONE, Relaxed);
+        self.ring.read.store(self.read.wrapping_add(1), Release);
+    }
+}
+
+struct IOSegmentMetadata {
+    state: AtomicU8,
+    /// Safety: Non-synchronized store. No concurrent access.
+    written: Cell<u32>,
+}
+
+impl IOSegmentMetadata {
+    const fn new() -> Self {
+        Self {
+            state: AtomicU8::new(SEG_NONE),
+            written: Cell::new(0),
+        }
     }
 }
 
@@ -184,66 +244,88 @@ impl<'a> PublishedSegment<'a> {
 ///
 /// The bounded implementation means that it will block writing when it reaches its full capacity.
 ///
-/// This structure is a core component, which doesn't included notification component
+/// This structure is a core component, which doesn't included queueing and notification components
 /// and doesn't observe panic events on both sides, with very basic protection mechanism
 /// aimed at ensuring data integrity.
 pub(crate) struct IORing {
-    segments: Box<[IORingSegment]>,
-    mask: usize,
+    data: Vec<u8>,
+    metadata: Vec<IOSegmentMetadata>,
+    seg_count: usize,
+    seg_size: u32,
+    offset_shift: u32,
+    index_mask: usize,
+    // TODO: The two pointers are monotonic with wrapping arithmetic.
     write: AtomicUsize,
     read: AtomicUsize,
 }
 
+const SEG_NONE: u8 = 0;
+const SEG_PUBLISHED: u8 = 1;
+const SEG_DISCARDED: u8 = 2;
+
 unsafe impl Sync for IORing {}
 
 impl IORing {
-    /// Creates new `IORing` with the specified count of dynamic segments.
+    /// Creates new `IORing` with the specified count of fixed-size segments.
     ///
     /// Parameters:
     /// - `count`: The count of concurrent segments. Count must be power of 2.
-    /// - `seg_size`: The size of each segment in bytes.
+    /// - `seg_size`: The size of each segment in bytes. Size must be power of 2 and <= u32::MAX;
     pub(crate) fn new(count: usize, seg_size: usize) -> Self {
         assert!(count.is_power_of_two(), "Count must be power of 2");
+        assert!(
+            seg_size.is_power_of_two() && seg_size <= u32::MAX as usize,
+            "Segment's size must be power of 2 and <= u32::MAX"
+        );
 
-        let segments = (0..count)
-            .map(|_| IORingSegment::with_capacity(seg_size))
-            .collect::<Vec<_>>()
-            .into_boxed_slice();
+        let capacity = count.checked_mul(seg_size).expect("Allocation overflow");
+
+        let data = Vec::with_capacity(capacity);
+        let metadata = (0..count).map(|_| IOSegmentMetadata::new()).collect();
 
         Self {
-            segments,
-            mask: count - 1,
+            data,
+            metadata,
+            seg_count: count,
+            seg_size: seg_size as u32,
+            offset_shift: seg_size.trailing_zeros(),
+            index_mask: count - 1,
             write: AtomicUsize::new(0),
             read: AtomicUsize::new(0),
+        }
+    }
+
+    pub(crate) const fn capacity(&self) -> usize {
+        self.seg_count
+    }
+
+    pub(crate) const fn segment_size(&self) -> u32 {
+        self.seg_size
+    }
+
+    const fn segment_data_of(&self, segment_index: usize) -> &mut [u8] {
+        let offset = segment_index << self.offset_shift;
+        unsafe {
+            std::slice::from_raw_parts_mut(
+                self.data.as_ptr().add(offset) as *mut u8,
+                self.seg_size as usize,
+            )
         }
     }
 
     /// Tries to acquire a segment for writing.
     ///
     /// Returns `None` if all segments are currently in use.
-    pub(crate) fn acquire(&self) -> Option<IOSegment<'_>> {
+    pub(crate) fn acquire(&self) -> Option<IORingSegment<'_>> {
         loop {
             let write = self.write.load(Relaxed);
             let read = self.read.load(Acquire);
 
-            // TODO: Cycles policy. Right now the two pointers are monotonic unbounded.
-            let used = write.wrapping_sub(read);
-            if used >= self.segments.len() {
-                // Doing cleanups here will make things complicated and slow,
-                // because this path is entered on full capacity regardless of the reason.
-                //
-                // For faster dynamics, consumer must be invoked to make segments free,
-                // because it detects both, published and discarded segments, and doesn't have to
-                // do synchronized state-store with this thread, and this thread doesn't
-                // have to update the read cursor also.
-                //
-                // So this setup is leaner and cleaner and faster, just poke the consumer to drive the "noria",
-                // and the wheel will spin again.
+            if write.wrapping_sub(read) >= self.seg_count {
                 return None;
             }
 
-            let seg_idx = write & self.mask;
-            let segment = &self.segments[seg_idx];
+            let segment_index = write & self.index_mask;
 
             // Acquire exclusive segment.
             if self
@@ -251,11 +333,15 @@ impl IORing {
                 .compare_exchange_weak(write, write.wrapping_add(1), AcqRel, Relaxed)
                 .is_ok()
             {
-                let seg_ref = unsafe {
-                    segment.buffer().clear();
-                    segment.pub_ref()
-                };
-                return Some(seg_ref);
+                let metadata = &self.metadata[segment_index];
+                let segment_data = self.segment_data_of(segment_index);
+
+                debug_assert!(metadata.written.get() == 0);
+
+                return Some(IORingSegment {
+                    data: segment_data,
+                    metadata,
+                });
             }
         }
     }
@@ -273,19 +359,21 @@ impl IORing {
     /// Returns:
     ///
     /// Returns a reference to the current published segment if any, or `None` otherwise.
-    pub(crate) fn receive(&self) -> Option<PublishedSegment<'_>> {
+    pub(crate) fn receive(&self) -> Option<IORingPubSegment<'_>> {
         loop {
             let read = self.read.load(Relaxed);
-            let seg_idx = read & self.mask;
-            let segment = &self.segments[seg_idx];
+            let segment_index = read & self.index_mask;
 
-            match segment.state.load(Acquire) {
+            let metadata = &self.metadata[segment_index];
+
+            match metadata.state.load(Acquire) {
                 SEG_PUBLISHED => {
-                    return Some(PublishedSegment::new(self, segment, read));
+                    let segment_data = self.segment_data_of(segment_index);
+                    return Some(IORingPubSegment::new(self, segment_data, metadata, read));
                 }
                 SEG_NONE => return None,
                 SEG_DISCARDED => {
-                    segment.state.store(SEG_NONE, Relaxed);
+                    metadata.state.store(SEG_NONE, Relaxed);
                     self.read.store(read.wrapping_add(1), Release);
                 }
                 _ => unreachable!(),
@@ -303,12 +391,25 @@ mod tests_io_ring {
 
     #[test]
     fn test_io_ring_acquire_publish_receive() {
-        let ring = IORing::new(1, 43);
+        let ring = IORing::new(1, 64);
 
         let mut segment = ring.acquire().expect("must get a segment");
+        assert!(segment.capacity() == 64);
+        assert!(segment.len() == 0);
+        assert_eq!(segment.data(), b"");
 
-        let _ = segment.write(b"The quick brown fox ");
-        let _ = segment.write(b"jumps over the lazy dog");
+        let written = segment.write(b"The quick brown fox ").unwrap();
+        assert!(written == 20);
+        assert!(segment.len() == 20);
+        assert_eq!(segment.data(), b"The quick brown fox ");
+
+        let written = segment.write(b"jumps over the lazy dog").unwrap();
+        assert!(written == 23);
+        assert!(segment.len() == 43);
+        assert_eq!(
+            segment.data(),
+            b"The quick brown fox jumps over the lazy dog"
+        );
 
         let res = ring.receive();
         assert!(res.is_none());
@@ -316,8 +417,9 @@ mod tests_io_ring {
         segment.publish();
 
         let published = ring.receive().expect("Must get published segment");
+        assert!(published.len() == 43);
         assert_eq!(
-            published.data().as_slice(),
+            published.data(),
             b"The quick brown fox jumps over the lazy dog"
         );
 
@@ -331,9 +433,9 @@ mod tests_io_ring {
     }
 
     #[test]
-    #[should_panic = "Invalid recycling"]
+    #[should_panic = "Recycling the same segment more than once"]
     fn test_io_ring_recycling_twice() {
-        let ring = IORing::new(1, 0);
+        let ring = IORing::new(1, 1);
 
         let segment = ring.acquire().expect("must get a segment");
         segment.publish();
@@ -350,21 +452,21 @@ mod tests_io_ring {
 
     #[test]
     fn test_io_ring_read_empty() {
-        let ring = IORing::new(1, 0);
+        let ring = IORing::new(1, 1);
         let published = ring.receive();
         assert!(published.is_none());
     }
 
     #[test]
     fn test_io_ring_no_space() {
-        let ring = IORing::new(1, 0);
+        let ring = IORing::new(1, 1);
         let _ = ring.acquire().expect("expected a free segment");
         assert!(ring.acquire().is_none());
     }
 
     #[test]
     fn test_io_ring_publishing_order() {
-        let ring = IORing::new(4, 5);
+        let ring = IORing::new(4, 8);
         let msgs = [b"Alpha", b"Betaa", b"Gamma"];
 
         for m in msgs {
@@ -409,66 +511,35 @@ mod tests_io_ring {
 
     #[test]
     fn test_io_ring_data_race() {
-        let ring = Arc::new(IORing::new(128, 7));
+        let ring = Arc::new(IORing::new(128, 8));
         let barrier = Arc::new(Barrier::new(4));
+        let mut threads = Vec::with_capacity(4);
 
-        let ring_1 = ring.clone();
-        let barrier_1 = barrier.clone();
-        let t1 = thread::spawn(move || {
-            barrier_1.wait();
-            for _ in 0..30 {
-                let mut segment = ring_1.acquire().unwrap();
-                segment.write("thread1".as_bytes()).unwrap();
-                segment.publish();
-            }
-        });
+        for i in 0..4 {
+            let ring_clone = ring.clone();
+            let barrier_clone = barrier.clone();
+            threads.push(thread::spawn(move || {
+                barrier_clone.wait();
+                for _ in 0..30 {
+                    let mut segment = ring_clone.acquire().unwrap();
+                    segment.write(format!("thread{}", i).as_bytes()).unwrap();
+                    segment.publish();
+                }
+            }));
+        }
 
-        let ring_2 = ring.clone();
-        let barrier_2 = barrier.clone();
-        let t2 = thread::spawn(move || {
-            barrier_2.wait();
-            for _ in 0..30 {
-                let mut segment = ring_2.acquire().unwrap();
-                segment.write("thread2".as_bytes()).unwrap();
-                segment.publish();
-            }
-        });
-
-        let ring_3 = ring.clone();
-        let barrier_3 = barrier.clone();
-        let t3 = thread::spawn(move || {
-            barrier_3.wait();
-            for _ in 0..30 {
-                let mut segment = ring_3.acquire().unwrap();
-                segment.write("thread3".as_bytes()).unwrap();
-                segment.publish();
-            }
-        });
-
-        let ring_4 = ring.clone();
-        let barrier_4 = barrier.clone();
-        let t4 = thread::spawn(move || {
-            barrier_4.wait();
-            for _ in 0..30 {
-                let mut segment = ring_4.acquire().unwrap();
-                segment.write("thread4".as_bytes()).unwrap();
-                segment.publish();
-            }
-        });
-
-        t1.join().unwrap();
-        t2.join().unwrap();
-        t3.join().unwrap();
-        t4.join().unwrap();
+        for thread in threads {
+            thread.join().unwrap();
+        }
 
         let mut counts = [0usize; 4];
 
         while let Some(published) = ring.receive() {
             match std::str::from_utf8(published.data()).expect("Unreadable data in the ring") {
-                "thread1" => counts[0] += 1,
-                "thread2" => counts[1] += 1,
-                "thread3" => counts[2] += 1,
-                "thread4" => counts[3] += 1,
+                "thread0" => counts[0] += 1,
+                "thread1" => counts[1] += 1,
+                "thread2" => counts[2] += 1,
+                "thread3" => counts[3] += 1,
                 other => panic!("Unexpected data: {other}"),
             }
             published.recycle();
@@ -479,7 +550,7 @@ mod tests_io_ring {
 
     #[test]
     fn test_io_ring_discarded_segment() {
-        let ring = IORing::new(2, 0);
+        let ring = IORing::new(2, 1);
         // Total: 2
 
         // Unpublished. Left 1.

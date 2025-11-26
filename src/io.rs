@@ -2,11 +2,10 @@ use std::cell::Cell;
 use std::io;
 use std::mem::ManuallyDrop;
 use std::ptr::copy_nonoverlapping;
+use std::slice::{from_raw_parts, from_raw_parts_mut};
 use std::sync::Arc;
 use std::sync::atomic::Ordering::{AcqRel, Acquire, Relaxed, Release};
 use std::sync::atomic::{AtomicU8, AtomicUsize};
-
-use crate::opt::branch_prediction::unlikely;
 
 pub trait AsyncIORead {
     /// Tries to write available data into the provided output-segment from the underlying I/O source.
@@ -54,6 +53,51 @@ pub trait AsyncIOWrite {
         Self: Unpin;
 }
 
+/// A unified interface for types that perform untyped reads from and writes to a memory-region directly.
+pub unsafe trait IOSegment {
+    /// Returns the number of the **initialized** bytes in the segment.
+    fn len(&self) -> usize;
+
+    /// Returns an immutable view to the **initialized** data.
+    fn as_slice(&self) -> &[u8];
+
+    /// Returns a mutable view to the **initialized** data.
+    fn as_slice_mut(&mut self) -> &mut [u8];
+
+    /// Sets the current length to `0`.
+    fn clear(&mut self);
+
+    /// Sets the length of the segment.
+    ///
+    /// Safety:
+    /// - The new length must be within the bound of segment's capacity.
+    /// - No data shall be produced before fully initializing the updated length.
+    unsafe fn set_len(&mut self, new_len: usize);
+
+    /// Tries to writes the provided data to the segment in checked-mode.
+    ///
+    /// If the implementation enables dynamic allocation, this call may allocate more capacity if needed.
+    ///
+    /// Returns `true` on success or `false` in case of not enough capacity or failure to allocate more.
+    ///
+    /// Length is advanced after successful writing.
+    ///
+    /// Safety:
+    /// - The source slice must consist of fully initialized bytes.
+    /// - The source slice must be a non-overlapping (disjoint) memory-segment.
+    fn write(&mut self, src: &[u8]) -> bool;
+
+    /// Writes data to the segment in unchecked-mode.
+    ///
+    /// Safety:
+    /// - The source slice must consist of fully initialized bytes.
+    /// - The source slice must be a non-overlapping (disjoint) memory-segment.
+    /// - The segment must have enough capacity to accommodate the the source data.
+    /// - The segment is valid for writing/overwriting withing the range [`offset`: source length - 1].
+    /// - Length is **not** advanced after writing.
+    unsafe fn write_at(&mut self, offset: usize, src: &[u8]);
+}
+
 pub(crate) struct IOPoolSegment {
     pool: Arc<IOSegmentsPool>,
     segment_ptr: *mut u8,
@@ -64,44 +108,17 @@ unsafe impl Send for IOPoolSegment {}
 unsafe impl Sync for IOPoolSegment {}
 
 impl IOPoolSegment {
-    #[inline]
-    pub(crate) const fn len(&self) -> usize {
-        self.len
-    }
-
+    /// Returns the maximum capacity of the segment.
     #[inline]
     pub(crate) fn capacity(&self) -> usize {
         self.pool.seg_size
-    }
-
-    #[inline(always)]
-    pub(crate) const fn data(&self) -> &[u8] {
-        unsafe { std::slice::from_raw_parts_mut(self.segment_ptr, self.len) }
-    }
-
-    #[inline(always)]
-    pub(crate) const fn data_mut(&mut self) -> &mut [u8] {
-        unsafe { std::slice::from_raw_parts_mut(self.segment_ptr, self.len) }
-    }
-
-    #[inline]
-    pub(crate) fn clear(&mut self) {
-        self.len = 0;
-    }
-
-    #[inline]
-    pub(crate) unsafe fn set_len(&mut self, len: usize) {
-        debug_assert!(len <= self.pool.seg_size);
-        self.len = len;
     }
 
     #[inline]
     fn recycle(&mut self) {
         let offset = self.segment_ptr as usize - self.pool.data.as_ptr() as usize;
         let index = offset >> self.pool.offset_shift;
-
-        let mut free_list = self.pool.free_list.lock();
-        free_list.recycle(index);
+        self.pool.free_list.lock().recycle(index);
     }
 }
 
@@ -111,36 +128,59 @@ impl Drop for IOPoolSegment {
     }
 }
 
-impl<'a> io::Write for IOPoolSegment {
-    /// Tries to write the provided input data into the segment.
-    ///
-    /// Note:
-    /// This call doesn't do partial writes, either the entire input data is written,
-    /// or an `UnexpectedEof` error is returned as a result of lack of capacity.
-    fn write(&mut self, input: &[u8]) -> io::Result<usize> {
+unsafe impl IOSegment for IOPoolSegment {
+    #[inline]
+    fn len(&self) -> usize {
+        self.len
+    }
+
+    #[inline]
+    fn as_slice(&self) -> &[u8] {
+        unsafe { from_raw_parts(self.segment_ptr, self.len) }
+    }
+
+    #[inline]
+    fn as_slice_mut(&mut self) -> &mut [u8] {
+        unsafe { from_raw_parts_mut(self.segment_ptr, self.len) }
+    }
+
+    #[inline]
+    fn clear(&mut self) {
+        self.len = 0;
+    }
+
+    #[inline]
+    unsafe fn set_len(&mut self, new_len: usize) {
+        debug_assert!(new_len <= self.pool.seg_size);
+        self.len = new_len;
+    }
+
+    #[inline]
+    fn write(&mut self, src: &[u8]) -> bool {
         let capacity = self.pool.seg_size;
         let current_len = self.len;
 
         let free = capacity - current_len;
-        let src_len = input.len();
+        let src_len = src.len();
 
-        if unlikely(free < src_len) {
-            return Err(io::ErrorKind::UnexpectedEof.into());
+        if free < src_len {
+            return false;
         }
 
         unsafe {
-            copy_nonoverlapping(input.as_ptr(), self.segment_ptr.add(current_len), src_len);
+            copy_nonoverlapping(src.as_ptr(), self.segment_ptr.add(current_len), src_len);
         }
 
         self.len += src_len;
-        Ok(src_len)
+
+        true
     }
 
-    /// This call in no-op.
-    ///
-    /// Call `publish` to save written data.
-    fn flush(&mut self) -> io::Result<()> {
-        Ok(())
+    #[inline]
+    unsafe fn write_at(&mut self, offset: usize, src: &[u8]) {
+        let count = src.len();
+        debug_assert!(offset + count <= self.pool.seg_size);
+        unsafe { copy_nonoverlapping(src.as_ptr(), self.segment_ptr.add(offset), count) };
     }
 }
 
@@ -250,26 +290,6 @@ impl<'a> IORingSegment<'a> {
         self.data.len()
     }
 
-    /// Returns the amount of bytes have been written to the segment.
-    #[inline(always)]
-    pub(crate) const fn len(&self) -> u32 {
-        self.metadata.written.get()
-    }
-
-    /// Returns a slice to the written data.
-    #[inline(always)]
-    pub(crate) fn data(&self) -> &[u8] {
-        let written_len = self.metadata.written.get() as usize;
-        &self.data[..written_len]
-    }
-
-    /// Returns a mutable slice to the written data.
-    #[inline(always)]
-    pub(crate) fn data_mut(&mut self) -> &mut [u8] {
-        let written_len = self.metadata.written.get() as usize;
-        &mut self.data[..written_len]
-    }
-
     #[inline(always)]
     pub(crate) fn publish(self) {
         self.metadata.state.store(SEG_PUBLISHED, Release);
@@ -283,38 +303,62 @@ impl<'a> IORingSegment<'a> {
     }
 }
 
-impl<'a> io::Write for IORingSegment<'a> {
-    /// Tries to write the provided input data into the segment.
-    ///
-    /// Note:
-    /// This call doesn't do partial writes, either the entire input data is written,
-    /// or an `UnexpectedEof` error is returned as a result of lack of capacity.
-    fn write(&mut self, input: &[u8]) -> io::Result<usize> {
+unsafe impl<'a> IOSegment for IORingSegment<'a> {
+    #[inline]
+    fn len(&self) -> usize {
+        self.metadata.written.get() as usize
+    }
+
+    #[inline]
+    fn as_slice(&self) -> &[u8] {
+        let written_len = self.metadata.written.get() as usize;
+        &self.data[..written_len]
+    }
+
+    #[inline]
+    fn as_slice_mut(&mut self) -> &mut [u8] {
+        let written_len = self.metadata.written.get() as usize;
+        &mut self.data[..written_len]
+    }
+
+    #[inline]
+    fn clear(&mut self) {
+        self.metadata.written.set(0);
+    }
+
+    #[inline]
+    unsafe fn set_len(&mut self, new_len: usize) {
+        debug_assert!(new_len <= self.data.len());
+        self.metadata.written.set(new_len as u32)
+    }
+
+    #[inline]
+    fn write(&mut self, src: &[u8]) -> bool {
         let current_len = self.metadata.written.get() as usize;
         let free = self.data.len() - current_len;
-        let src_len = input.len();
+        let src_len = src.len();
 
-        if unlikely(free < src_len) {
-            return Err(io::ErrorKind::UnexpectedEof.into());
+        if free < src_len {
+            return false;
         }
 
         unsafe {
             copy_nonoverlapping(
-                input.as_ptr(),
+                src.as_ptr(),
                 self.data.as_mut_ptr().add(current_len),
                 src_len,
             );
         }
 
         self.metadata.written.set((current_len + src_len) as u32);
-        Ok(src_len)
+        true
     }
 
-    /// This call in no-op.
-    ///
-    /// Call `publish` to save written data.
-    fn flush(&mut self) -> io::Result<()> {
-        Ok(())
+    #[inline]
+    unsafe fn write_at(&mut self, offset: usize, src: &[u8]) {
+        let count = src.len();
+        debug_assert!(offset + count <= self.capacity());
+        unsafe { copy_nonoverlapping(src.as_ptr(), self.data.as_mut_ptr().add(offset), count) };
     }
 }
 
@@ -558,7 +602,6 @@ impl IORing {
 #[cfg(test)]
 mod tests_io_pool {
     use super::*;
-    use std::io::Write;
 
     #[test]
     fn test_io_pool_acquire_write_recycle() {
@@ -567,18 +610,16 @@ mod tests_io_pool {
         let mut segment = pool.acquire().expect("must get a segment");
         assert!(segment.capacity() == 64);
         assert!(segment.len() == 0);
-        assert_eq!(segment.data(), b"");
+        assert_eq!(segment.as_slice(), b"");
 
-        let written = segment.write(b"The quick brown fox ").unwrap();
-        assert!(written == 20);
+        assert!(segment.write(b"The quick brown fox "));
         assert!(segment.len() == 20);
-        assert_eq!(segment.data(), b"The quick brown fox ");
+        assert_eq!(segment.as_slice(), b"The quick brown fox ");
 
-        let written = segment.write(b"jumps over the lazy dog").unwrap();
-        assert!(written == 23);
+        assert!(segment.write(b"jumps over the lazy dog"));
         assert!(segment.len() == 43);
         assert_eq!(
-            segment.data(),
+            segment.as_slice(),
             b"The quick brown fox jumps over the lazy dog"
         );
 
@@ -595,29 +636,28 @@ mod tests_io_pool {
 #[cfg(test)]
 mod tests_io_ring {
     use super::*;
-    use std::io::Write;
     use std::sync::{Arc, Barrier};
     use std::thread;
 
     #[test]
     fn test_io_ring_acquire_publish_receive() {
         let ring = IORing::new(1, 64);
+        assert!(ring.capacity() == 1);
+        assert!(ring.segment_size() == 64);
 
         let mut segment = ring.acquire().expect("must get a segment");
         assert!(segment.capacity() == 64);
         assert!(segment.len() == 0);
-        assert_eq!(segment.data(), b"");
+        assert_eq!(segment.as_slice(), b"");
 
-        let written = segment.write(b"The quick brown fox ").unwrap();
-        assert!(written == 20);
+        assert!(segment.write(b"The quick brown fox "));
         assert!(segment.len() == 20);
-        assert_eq!(segment.data(), b"The quick brown fox ");
+        assert_eq!(segment.as_slice(), b"The quick brown fox ");
 
-        let written = segment.write(b"jumps over the lazy dog").unwrap();
-        assert!(written == 23);
+        assert!(segment.write(b"jumps over the lazy dog"));
         assert!(segment.len() == 43);
         assert_eq!(
-            segment.data(),
+            segment.as_slice(),
             b"The quick brown fox jumps over the lazy dog"
         );
 
@@ -699,7 +739,7 @@ mod tests_io_ring {
         for i in 0u16..4096 {
             let mut seg = ring.acquire().expect("acquire failed");
 
-            seg.write(&(i + 1).to_le_bytes()).unwrap();
+            assert!(seg.write(&(i + 1).to_le_bytes()));
 
             seg.publish();
 
@@ -726,7 +766,7 @@ mod tests_io_ring {
                 barrier_clone.wait();
                 for _ in 0..30 {
                     let mut segment = ring_clone.acquire().unwrap();
-                    segment.write(format!("thread{}", i).as_bytes()).unwrap();
+                    assert!(segment.write(format!("thread{}", i).as_bytes()));
                     segment.publish();
                 }
             }));

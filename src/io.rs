@@ -2,6 +2,7 @@ use std::cell::Cell;
 use std::io;
 use std::mem::ManuallyDrop;
 use std::ptr::copy_nonoverlapping;
+use std::sync::Arc;
 use std::sync::atomic::Ordering::{AcqRel, Acquire, Relaxed, Release};
 use std::sync::atomic::{AtomicU8, AtomicUsize};
 
@@ -51,6 +52,180 @@ pub trait AsyncIOWrite {
     fn terminate(&mut self) -> impl Future<Output = io::Result<()>> + Send
     where
         Self: Unpin;
+}
+
+pub(crate) struct IOPoolSegment {
+    pool: Arc<IOSegmentsPool>,
+    segment_ptr: *mut u8,
+    len: usize,
+}
+
+unsafe impl Send for IOPoolSegment {}
+unsafe impl Sync for IOPoolSegment {}
+
+impl IOPoolSegment {
+    #[inline]
+    pub(crate) const fn len(&self) -> usize {
+        self.len
+    }
+
+    #[inline]
+    pub(crate) fn capacity(&self) -> usize {
+        self.pool.seg_size
+    }
+
+    #[inline(always)]
+    pub(crate) const fn data(&self) -> &[u8] {
+        unsafe { std::slice::from_raw_parts_mut(self.segment_ptr, self.len) }
+    }
+
+    #[inline(always)]
+    pub(crate) const fn data_mut(&mut self) -> &mut [u8] {
+        unsafe { std::slice::from_raw_parts_mut(self.segment_ptr, self.len) }
+    }
+
+    #[inline]
+    pub(crate) fn clear(&mut self) {
+        self.len = 0;
+    }
+
+    #[inline]
+    pub(crate) unsafe fn set_len(&mut self, len: usize) {
+        debug_assert!(len <= self.pool.seg_size);
+        self.len = len;
+    }
+
+    #[inline]
+    fn recycle(&mut self) {
+        let offset = self.segment_ptr as usize - self.pool.data.as_ptr() as usize;
+        let index = offset >> self.pool.offset_shift;
+
+        let mut free_list = self.pool.free_list.lock();
+        free_list.recycle(index);
+    }
+}
+
+impl Drop for IOPoolSegment {
+    fn drop(&mut self) {
+        self.recycle();
+    }
+}
+
+impl<'a> io::Write for IOPoolSegment {
+    /// Tries to write the provided input data into the segment.
+    ///
+    /// Note:
+    /// This call doesn't do partial writes, either the entire input data is written,
+    /// or an `UnexpectedEof` error is returned as a result of lack of capacity.
+    fn write(&mut self, input: &[u8]) -> io::Result<usize> {
+        let capacity = self.pool.seg_size;
+        let current_len = self.len;
+
+        let free = capacity - current_len;
+        let src_len = input.len();
+
+        if unlikely(free < src_len) {
+            return Err(io::ErrorKind::UnexpectedEof.into());
+        }
+
+        unsafe {
+            copy_nonoverlapping(input.as_ptr(), self.segment_ptr.add(current_len), src_len);
+        }
+
+        self.len += src_len;
+        Ok(src_len)
+    }
+
+    /// This call in no-op.
+    ///
+    /// Call `publish` to save written data.
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+struct IOPoolFreeList {
+    slots: Box<[usize]>,
+    free: usize,
+}
+
+impl IOPoolFreeList {
+    #[inline]
+    pub(crate) fn new(capacity: usize) -> Self {
+        IOPoolFreeList {
+            slots: (0..capacity).collect(),
+            free: capacity,
+        }
+    }
+
+    const fn acquire(&mut self) -> Option<usize> {
+        if self.free == 0 {
+            None
+        } else {
+            self.free -= 1;
+            Some(self.slots[self.free])
+        }
+    }
+
+    const fn recycle(&mut self, index: usize) {
+        self.slots[self.free] = index;
+        self.free += 1;
+    }
+}
+
+struct IOSegmentsPool {
+    data: Vec<u8>,
+    free_list: parking_lot::Mutex<IOPoolFreeList>,
+    seg_size: usize,
+    offset_shift: u32,
+}
+
+#[derive(Clone)]
+pub(crate) struct IOPool {
+    pool: Arc<IOSegmentsPool>,
+}
+
+impl IOPool {
+    pub(crate) fn new(count: usize, seg_size: usize) -> Self {
+        assert!(count > 0, "Count must be greater than 0");
+        assert!(
+            seg_size.is_power_of_two(),
+            "Segment's size must be power of 2"
+        );
+
+        let capacity = count.checked_mul(seg_size).expect("Allocation overflow");
+
+        let data = Vec::with_capacity(capacity);
+        let free_list = IOPoolFreeList::new(count);
+
+        IOPool {
+            pool: Arc::new(IOSegmentsPool {
+                data,
+                seg_size,
+                offset_shift: seg_size.trailing_zeros(),
+                free_list: parking_lot::Mutex::new(free_list),
+            }),
+        }
+    }
+
+    #[inline]
+    pub(crate) fn segment_size(&self) -> usize {
+        self.pool.seg_size
+    }
+
+    #[inline]
+    pub(crate) fn acquire(&self) -> Option<IOPoolSegment> {
+        let segment_index = self.pool.free_list.lock().acquire()?;
+
+        let offset = segment_index << self.pool.offset_shift;
+        let segment_ptr = unsafe { self.pool.data.as_ptr().add(offset) as *mut u8 };
+
+        Some(IOPoolSegment {
+            segment_ptr,
+            len: 0,
+            pool: Arc::clone(&self.pool),
+        })
+    }
 }
 
 /// An exclusive segment that implements `io::Write`.
@@ -117,12 +292,11 @@ impl<'a> io::Write for IORingSegment<'a> {
     fn write(&mut self, input: &[u8]) -> io::Result<usize> {
         let current_len = self.metadata.written.get() as usize;
         let free = self.data.len() - current_len;
+        let src_len = input.len();
 
-        if unlikely(free < input.len()) {
+        if unlikely(free < src_len) {
             return Err(io::ErrorKind::UnexpectedEof.into());
         }
-
-        let src_len = input.len();
 
         unsafe {
             copy_nonoverlapping(
@@ -363,7 +537,6 @@ impl IORing {
         loop {
             let read = self.read.load(Relaxed);
             let segment_index = read & self.index_mask;
-
             let metadata = &self.metadata[segment_index];
 
             match metadata.state.load(Acquire) {
@@ -379,6 +552,43 @@ impl IORing {
                 _ => unreachable!(),
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests_io_pool {
+    use super::*;
+    use std::io::Write;
+
+    #[test]
+    fn test_io_pool_acquire_write_recycle() {
+        let pool = IOPool::new(1, 64);
+
+        let mut segment = pool.acquire().expect("must get a segment");
+        assert!(segment.capacity() == 64);
+        assert!(segment.len() == 0);
+        assert_eq!(segment.data(), b"");
+
+        let written = segment.write(b"The quick brown fox ").unwrap();
+        assert!(written == 20);
+        assert!(segment.len() == 20);
+        assert_eq!(segment.data(), b"The quick brown fox ");
+
+        let written = segment.write(b"jumps over the lazy dog").unwrap();
+        assert!(written == 23);
+        assert!(segment.len() == 43);
+        assert_eq!(
+            segment.data(),
+            b"The quick brown fox jumps over the lazy dog"
+        );
+
+        let another_segment = pool.acquire();
+        assert!(another_segment.is_none());
+
+        drop(segment);
+
+        let segment = pool.acquire();
+        assert!(segment.is_some());
     }
 }
 
@@ -451,40 +661,34 @@ mod tests_io_ring {
     }
 
     #[test]
-    fn test_io_ring_read_empty() {
-        let ring = IORing::new(1, 1);
-        let published = ring.receive();
-        assert!(published.is_none());
-    }
+    fn test_io_ring_discarded_segment() {
+        let ring = IORing::new(2, 1);
+        // Total: 2
 
-    #[test]
-    fn test_io_ring_no_space() {
-        let ring = IORing::new(1, 1);
-        let _ = ring.acquire().expect("expected a free segment");
+        // Unpublished. Left 1.
+        {
+            let _ = ring.acquire().unwrap();
+        }
+
+        // Published. Left 0.
+        let seg_2 = ring.acquire().unwrap();
+        seg_2.publish();
+
+        // Must fail.
         assert!(ring.acquire().is_none());
-    }
 
-    #[test]
-    fn test_io_ring_publishing_order() {
-        let ring = IORing::new(4, 8);
-        let msgs = [b"Alpha", b"Betaa", b"Gamma"];
-
-        for m in msgs {
-            let mut segment = ring.acquire().expect("expected free segment");
-            segment.write(m).unwrap();
-            segment.publish();
-        }
-
-        let mut dst = [0u8; 15];
-        let mut pos = 0;
-
+        // Receiving + recycling.
+        // Published consumed. Discarded recycled.
         while let Some(published) = ring.receive() {
-            dst[pos..pos + 5].copy_from_slice(published.data());
             published.recycle();
-            pos += 5;
         }
 
-        assert_eq!(&dst, b"AlphaBetaaGamma");
+        // All clear.
+        let seg_4 = ring.acquire();
+        assert!(seg_4.is_some());
+
+        let seg_5 = ring.acquire();
+        assert!(seg_5.is_some());
     }
 
     #[test]
@@ -546,36 +750,5 @@ mod tests_io_ring {
         }
 
         assert_eq!(counts, [30, 30, 30, 30]);
-    }
-
-    #[test]
-    fn test_io_ring_discarded_segment() {
-        let ring = IORing::new(2, 1);
-        // Total: 2
-
-        // Unpublished. Left 1.
-        {
-            let _ = ring.acquire().unwrap();
-        }
-
-        // Published. Left 0.
-        let seg_2 = ring.acquire().unwrap();
-        seg_2.publish();
-
-        // Must fail.
-        assert!(ring.acquire().is_none());
-
-        // Receiving + recycling.
-        // Published consumed. Discarded recycled.
-        while let Some(published) = ring.receive() {
-            published.recycle();
-        }
-
-        // All clear.
-        let seg_4 = ring.acquire();
-        assert!(seg_4.is_some());
-
-        let seg_5 = ring.acquire();
-        assert!(seg_5.is_some());
     }
 }

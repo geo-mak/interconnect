@@ -1,6 +1,6 @@
 use std::future::Future;
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 use crate::{
     error::{ErrKind, RpcError, RpcResult},
@@ -14,10 +14,23 @@ pub struct Call<'a> {
 }
 
 impl<'a> Call<'a> {
+    /// Tries to decode the parameters as `P` by borrowing data
+    /// from the underlying store for type construction.
+    #[inline(always)]
+    pub fn decode_as<'de, P>(&'de self) -> RpcResult<P>
+    where
+        P: Deserialize<'de>,
+    {
+        message::decode_borrowed_from_slice(self.params)
+    }
+
     /// Tries to decode the parameters as `P`.
     #[inline(always)]
-    pub fn decode_as<P: for<'de> Deserialize<'de>>(&self) -> RpcResult<P> {
-        message::decode_from_slice(self.params)
+    pub fn decode_owned_as<P>(&self) -> RpcResult<P>
+    where
+        P: DeserializeOwned,
+    {
+        message::decode_owned_from_slice(self.params)
     }
 }
 

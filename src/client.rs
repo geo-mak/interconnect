@@ -12,10 +12,11 @@ use std::sync::atomic::{AtomicU8, AtomicU32, AtomicU64};
 use std::task::{Context, Poll, Waker};
 use std::time::Duration;
 
+use serde::de::DeserializeOwned;
+use serde::ser::Serialize;
+
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
-
-use serde::{Deserialize, Serialize};
 
 use crate::application::{Call, CallContext, RpcApplication};
 use crate::core::{
@@ -34,7 +35,7 @@ pub trait AsyncRpcClient {
     fn call<P, R>(&self, op: u16, params: &P) -> impl Future<Output = RpcResult<R>>
     where
         P: Serialize + Sync,
-        R: for<'de> Deserialize<'de>;
+        R: DeserializeOwned;
 
     fn call_timeout<P, R>(
         &self,
@@ -44,7 +45,7 @@ pub trait AsyncRpcClient {
     ) -> impl Future<Output = RpcResult<R>>
     where
         P: Serialize + Sync,
-        R: for<'de> Deserialize<'de>;
+        R: DeserializeOwned;
 
     fn call_one_way<P>(&self, op: u16, params: &P) -> impl Future<Output = RpcResult<()>>
     where
@@ -52,7 +53,7 @@ pub trait AsyncRpcClient {
 
     fn call_nullary<R>(&self, op: u16) -> impl Future<Output = RpcResult<R>>
     where
-        R: for<'de> Deserialize<'de>;
+        R: DeserializeOwned;
 
     fn call_nullary_timeout<R>(
         &self,
@@ -60,7 +61,7 @@ pub trait AsyncRpcClient {
         timeout: Duration,
     ) -> impl Future<Output = RpcResult<R>>
     where
-        R: for<'de> Deserialize<'de>;
+        R: DeserializeOwned;
 
     fn call_nullary_one_way(&self, op: u16) -> impl Future<Output = RpcResult<()>>;
 
@@ -620,7 +621,7 @@ where
     async fn call<P, R>(&self, op: u16, params: &P) -> RpcResult<R>
     where
         P: Serialize + Sync,
-        R: for<'de> Deserialize<'de>,
+        R: DeserializeOwned,
     {
         self.call_timeout(op, params, Duration::from_secs(30)).await
     }
@@ -629,7 +630,7 @@ where
     async fn call_timeout<P, R>(&self, op: u16, params: &P, timeout: Duration) -> RpcResult<R>
     where
         P: Serialize + Sync,
-        R: for<'de> Deserialize<'de>,
+        R: DeserializeOwned,
     {
         // Safety: This value must not move.
         let mut pinned_mem = FrameData::new();
@@ -654,7 +655,7 @@ where
             match published {
                 Ok(response) => {
                     if let Response::Data(reply) = response {
-                        return message::decode_from_slice(reply.as_slice());
+                        return message::decode_owned_from_slice(reply.as_slice());
                     }
                     return Err(RpcError::error(ErrKind::UnexpectedMsg));
                 }
@@ -680,7 +681,7 @@ where
     /// Default timeout is `30` seconds.
     async fn call_nullary<R>(&self, op: u16) -> RpcResult<R>
     where
-        R: for<'de> Deserialize<'de>,
+        R: DeserializeOwned,
     {
         self.call_nullary_timeout(op, Duration::from_secs(30)).await
     }
@@ -688,7 +689,7 @@ where
     /// Makes a remote procedure call with custom timeout.
     async fn call_nullary_timeout<R>(&self, op: u16, timeout: Duration) -> RpcResult<R>
     where
-        R: for<'de> Deserialize<'de>,
+        R: DeserializeOwned,
     {
         // Safety: This value must not move.
         let mut pinned_mem = FrameData::new();
@@ -713,7 +714,7 @@ where
             match published {
                 Ok(response) => {
                     if let Response::Data(reply) = response {
-                        return message::decode_from_slice(reply.as_slice());
+                        return message::decode_owned_from_slice(reply.as_slice());
                     }
                     return Err(RpcError::error(ErrKind::UnexpectedMsg));
                 }
@@ -889,8 +890,9 @@ mod tests_client {
                                 match op {
                                     1 => {
                                         let params_data = message::params_data(message).unwrap();
-                                        let params: String =
-                                            message::decode_from_slice(params_data).unwrap();
+                                        let params: &str =
+                                            message::decode_borrowed_from_slice(params_data)
+                                                .unwrap();
                                         assert_eq!(params, "call");
 
                                         msg_sender.return_data(&header.id, &"reply").await.unwrap();
@@ -987,7 +989,8 @@ mod tests_client {
 
                             let params_data = message::params_data(message).unwrap();
 
-                            let params: String = message::decode_from_slice(params_data).unwrap();
+                            let params: &str =
+                                message::decode_borrowed_from_slice(params_data).unwrap();
                             assert_eq!(params, "call");
 
                             msg_sender.return_data(&header.id, &"reply").await.unwrap();

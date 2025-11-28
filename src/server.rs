@@ -600,7 +600,7 @@ mod tests {
         {
             match call.op {
                 1 => {
-                    let src: String = call.decode_as().unwrap();
+                    let src: &str = call.decode_as().unwrap();
                     context.return_data(&format!("Reply to {src}")).await
                 }
                 _ => Err(RpcError::error(ErrKind::Unimplemented)),
@@ -673,8 +673,8 @@ mod tests {
             match header.directive {
                 Directive::Return => {
                     let data = message::returned_data(message).unwrap();
-                    let response: String = message::decode_from_slice(data).unwrap();
-                    assert!(&response == "Reply to C1");
+                    let response: &str = message::decode_borrowed_from_slice(data).unwrap();
+                    assert!(response == "Reply to C1");
                 }
                 _ => panic!("Expected reply"),
             }
@@ -690,8 +690,8 @@ mod tests {
             match header.directive {
                 Directive::Return => {
                     let data = message::returned_data(message).unwrap();
-                    let response: String = message::decode_from_slice(data).unwrap();
-                    assert!(&response == "Reply to C2");
+                    let response: &str = message::decode_borrowed_from_slice(data).unwrap();
+                    assert!(response == "Reply to C2");
                 }
                 _ => panic!("Expected reply"),
             }
@@ -707,8 +707,8 @@ mod tests {
             match header.directive {
                 Directive::Return => {
                     let data = message::returned_data(message).unwrap();
-                    let response: String = message::decode_from_slice(data).unwrap();
-                    assert!(&response == "Reply to C3");
+                    let response: &str = message::decode_borrowed_from_slice(data).unwrap();
+                    assert!(response == "Reply to C3");
                 }
                 _ => panic!("Expected reply"),
             }
@@ -765,8 +765,8 @@ mod tests {
         match header.directive {
             Directive::Return => {
                 let data = message::returned_data(message).unwrap();
-                let response: String = message::decode_from_slice(data).unwrap();
-                assert!(&response == "Reply to C1");
+                let response: &str = message::decode_borrowed_from_slice(data).unwrap();
+                assert!(response == "Reply to C1");
             }
             _ => panic!("Expected reply"),
         }
@@ -814,8 +814,8 @@ mod tests {
         match header.directive {
             Directive::Return => {
                 let data = message::returned_data(message).unwrap();
-                let response: String = message::decode_from_slice(data).unwrap();
-                assert!(&response == "Reply to C1");
+                let response: &str = message::decode_borrowed_from_slice(data).unwrap();
+                assert!(response == "Reply to C1");
             }
             _ => panic!("Expected reply"),
         }

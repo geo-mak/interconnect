@@ -131,6 +131,8 @@ pub trait MessageWriter {
 
 /// The ribosome.
 pub mod message {
+    use serde::de::DeserializeOwned;
+
     use super::*;
 
     #[inline]
@@ -306,13 +308,24 @@ pub mod message {
         bincode::serde::encode_into_writer(value, ImplWriter(dst), CONFIG).map_err(Into::into)
     }
 
-    /// Decodes data from slice of bytes into a value.
-    #[inline]
-    pub fn decode_from_slice<T>(data: &[u8]) -> RpcResult<T>
+    /// Decodes data from slice of bytes into a value by borrowing the data from the provided store.
+    pub fn decode_borrowed_from_slice<'de, T>(data: &'de [u8]) -> RpcResult<T>
     where
-        T: for<'de> Deserialize<'de>,
+        T: Deserialize<'de>,
     {
         match bincode::serde::borrow_decode_from_slice(data, CONFIG) {
+            Ok((value, _)) => Ok(value),
+            Err(err) => Err(RpcError::from(err)),
+        }
+    }
+
+    /// Decodes data from slice of bytes into a value.
+    #[inline]
+    pub fn decode_owned_from_slice<T>(data: &[u8]) -> RpcResult<T>
+    where
+        T: DeserializeOwned,
+    {
+        match bincode::serde::decode_from_slice(data, CONFIG) {
             Ok((value, _)) => Ok(value),
             Err(err) => Err(RpcError::from(err)),
         }
@@ -972,7 +985,7 @@ mod tests {
 
                         let params_data = message::params_data(message).unwrap();
 
-                        let data: String = message::decode_from_slice(params_data).unwrap();
+                        let data: &str = message::decode_borrowed_from_slice(params_data).unwrap();
                         assert_eq!(&data, &"hi there");
 
                         if let Err(e) = msg_sender.return_data(&header.id, &"Reply: hi there").await
@@ -1008,7 +1021,7 @@ mod tests {
 
         let returned = message::returned_data(message).unwrap();
 
-        let reply: String = message::decode_from_slice(returned).unwrap();
+        let reply: &str = message::decode_borrowed_from_slice(returned).unwrap();
         assert_eq!(reply, "Reply: hi there");
 
         msg_sender.terminate().await.unwrap();
@@ -1042,7 +1055,8 @@ mod tests {
 
                         let params_data = message::params_data(message).unwrap();
 
-                        let params: String = message::decode_from_slice(params_data).unwrap();
+                        let params: &str =
+                            message::decode_borrowed_from_slice(params_data).unwrap();
                         assert_eq!(params, "hi there");
 
                         if let Err(e) = msg_sender.return_data(&header.id, &"Reply: hi there").await
@@ -1079,7 +1093,7 @@ mod tests {
         let returned = message::returned_data(message).unwrap();
 
         assert_eq!(
-            message::decode_from_slice::<String>(returned).unwrap(),
+            message::decode_borrowed_from_slice::<&str>(returned).unwrap(),
             "Reply: hi there"
         );
 

@@ -23,6 +23,7 @@ use crate::core::{
     MessageReceiver, MessageSender, MessageStore, message,
 };
 use crate::error::{ErrKind, RpcError, RpcResult};
+use crate::io::IOSegment;
 use crate::report::Reporter;
 use crate::specs::{RpcSpecification, negotiation};
 use crate::sync::{DynamicLatch, NOOP_WAKER};
@@ -653,7 +654,7 @@ where
             match published {
                 Ok(response) => {
                     if let Response::Data(reply) = response {
-                        return message::decode_from_slice(reply.data());
+                        return message::decode_from_slice(reply.as_slice());
                     }
                     return Err(RpcError::error(ErrKind::UnexpectedMsg));
                 }
@@ -712,7 +713,7 @@ where
             match published {
                 Ok(response) => {
                     if let Response::Data(reply) = response {
-                        return message::decode_from_slice(reply.data());
+                        return message::decode_from_slice(reply.as_slice());
                     }
                     return Err(RpcError::error(ErrKind::UnexpectedMsg));
                 }

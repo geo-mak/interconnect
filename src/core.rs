@@ -9,13 +9,10 @@ use serde::{Deserialize, Serialize};
 
 use aead::Buffer;
 
-use crate::error::ErrKind;
-use crate::opt::branch_prediction::{likely, unlikely};
+use crate::error::{ErrKind, RpcError, RpcResult};
+use crate::io::{AsyncIORead, AsyncIOWrite, IOSegment};
+use crate::opt::branch_hints::{likely, unlikely};
 use crate::specs::EncryptionState;
-use crate::{
-    RpcError, RpcResult,
-    io::{AsyncIORead, AsyncIOWrite},
-};
 
 use crate::private::Private;
 
@@ -299,12 +296,12 @@ pub mod message {
         bincode::serde::encode_into_slice(value, dst, CONFIG).map_err(Into::into)
     }
 
-    /// Encodes a value to binary format into writer.
+    /// Encodes a value to binary format into I/O segment.
     #[inline]
-    pub fn encode_into_writer<T, W>(value: &T, dst: &mut W) -> RpcResult<()>
+    pub fn encode_into_segment<T, S>(value: &T, dst: &mut S) -> RpcResult<()>
     where
         T: Serialize,
-        W: MessageWriter,
+        S: IOSegment,
     {
         bincode::serde::encode_into_writer(value, ImplWriter(dst), CONFIG).map_err(Into::into)
     }
@@ -341,11 +338,6 @@ impl MessageStore {
         }
     }
 
-    #[inline]
-    pub(crate) fn data(&self) -> &[u8] {
-        &self.data
-    }
-
     /// # Safety
     /// - `src` must consist of fully initialized bytes.
     /// - `src` must be a non-overlapping (disjoint) memory-segment.
@@ -361,58 +353,69 @@ impl MessageStore {
             self.data.set_len(count);
         }
     }
+}
 
-    /// # Safety
-    /// - `src` must consist of fully initialized bytes.
-    /// - `src` must be a non-overlapping (disjoint) memory-segment.
-    /// - The buffer must have enough capacity to accommodate the the copying data.
-    /// - The buffer memory is valid for writing/overwriting withing the range [`offset`: data.len() - 1].
+unsafe impl IOSegment for MessageStore {
     #[inline]
-    pub(crate) const unsafe fn write_at(&mut self, offset: usize, src: &[u8]) {
+    fn len(&self) -> usize {
+        self.data.len()
+    }
+
+    #[inline]
+    fn as_slice(&self) -> &[u8] {
+        &self.data
+    }
+
+    #[inline]
+    fn as_slice_mut(&mut self) -> &mut [u8] {
+        &mut self.data
+    }
+
+    #[inline]
+    fn clear(&mut self) {
+        self.data.clear();
+    }
+
+    #[inline]
+    unsafe fn set_len(&mut self, new_len: usize) {
+        unsafe { self.data.set_len(new_len) }
+    }
+
+    #[inline]
+    fn write(&mut self, src: &[u8]) -> bool {
+        let src_len = src.len();
+        let current_len = self.data.len();
+
+        // Sufficiency of capacity is checked inside.
+        if let Ok(()) = self.data.try_reserve(src_len) {
+            unsafe {
+                let dst_ptr = self.data.as_mut_ptr().add(current_len);
+                copy_nonoverlapping(src.as_ptr(), dst_ptr, src_len);
+                self.data.set_len(current_len + src_len);
+            };
+
+            return true;
+        }
+
+        false
+    }
+
+    #[inline]
+    unsafe fn write_at(&mut self, offset: usize, src: &[u8]) {
         let count = src.len();
         debug_assert!(offset + count <= self.data.capacity());
         unsafe { copy_nonoverlapping(src.as_ptr(), self.data.as_mut_ptr().add(offset), count) };
     }
-
-    /// Tries to extend the current data from slice.
-    ///
-    /// On failure to reallocate memory, it returns "MemoryAllocation" error.
-    ///
-    /// # Safety:
-    /// - `src` must consist of fully initialized bytes.
-    /// - `src` must be a non-overlapping (disjoint) memory-segment.
-    #[inline]
-    pub(crate) fn extend_from_slice(&mut self, src: &[u8]) -> RpcResult<()> {
-        let current_len = self.data.len();
-        let count = src.len();
-
-        // Sufficiency of capacity is checked inside.
-        self.data.try_reserve(count)?;
-
-        unsafe {
-            let src_ptr = src.as_ptr();
-            let dst_ptr = self.data.as_mut_ptr().add(current_len);
-            copy_nonoverlapping(src_ptr, dst_ptr, count);
-            let new_len = current_len + count;
-            self.data.set_len(new_len);
-        }
-
-        Ok(())
-    }
 }
 
-impl MessageWriter for MessageStore {
-    #[inline(always)]
-    fn write(&mut self, bytes: &[u8]) -> RpcResult<()> {
-        self.extend_from_slice(bytes)
-    }
-}
-
-struct ImplWriter<'a, W: MessageWriter>(&'a mut W);
-impl<'a, W: MessageWriter> Writer for ImplWriter<'a, W> {
+struct ImplWriter<'a, S: IOSegment>(&'a mut S);
+impl<'a, S: IOSegment> Writer for ImplWriter<'a, S> {
     #[inline(always)]
     fn write(&mut self, bytes: &[u8]) -> Result<(), EncodeError> {
-        self.0.write(bytes).map_err(|_| EncodeError::UnexpectedEnd)
+        if !self.0.write(bytes) {
+            return Err(EncodeError::UnexpectedEnd);
+        };
+        Ok(())
     }
 }
 
@@ -497,7 +500,7 @@ impl<T: AsyncIOWrite + Send + Unpin> AsyncSender for MessageSender<T> {
             self.store.write_at(4, &header_bytes);
             self.store.write_at(13, &op_bytes);
             self.store.data.set_len(15);
-            message::encode_into_writer(params, &mut self.store)?;
+            message::encode_into_segment(params, &mut self.store)?;
             let len = (self.store.data.len() - 4) as u32;
             self.store.write_at(0, &len.to_le_bytes());
         }
@@ -535,7 +538,7 @@ impl<T: AsyncIOWrite + Send + Unpin> AsyncSender for MessageSender<T> {
         unsafe {
             self.store.write_at(4, &header_bytes);
             self.store.data.set_len(13);
-            message::encode_into_writer(reply, &mut self.store)?;
+            message::encode_into_segment(reply, &mut self.store)?;
             let len = (self.store.data.len() - 4) as u32;
             self.store.write_at(0, &len.to_le_bytes());
         }
@@ -734,7 +737,7 @@ impl<T: AsyncIOWrite + Send + Unpin> AsyncSender for EncMessageSender<T> {
             self.store.write_at(4, &header_bytes);
             self.store.write_at(13, &op_bytes);
             self.store.data.set_len(15);
-            message::encode_into_writer(params, &mut self.store)?;
+            message::encode_into_segment(params, &mut self.store)?;
         }
 
         self.update_len_write_all().await
@@ -763,7 +766,7 @@ impl<T: AsyncIOWrite + Send + Unpin> AsyncSender for EncMessageSender<T> {
         unsafe {
             self.store.write_at(4, &header_bytes);
             self.store.data.set_len(13);
-            message::encode_into_writer(reply, &mut self.store)?;
+            message::encode_into_segment(reply, &mut self.store)?;
         }
 
         self.update_len_write_all().await

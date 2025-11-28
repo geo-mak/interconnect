@@ -268,10 +268,9 @@ impl IOPool {
     }
 }
 
-/// An exclusive segment that implements `io::Write`.
+/// An exclusive segment that implements `IOSegment`.
 ///
 /// `publish` method must be called to save the data written to the segment.
-/// `flush` method does nothing.
 ///
 /// If dropped before calling `publish`, the written data will be discarded.
 pub(crate) struct IORingSegment<'a> {
@@ -300,6 +299,14 @@ impl<'a> IORingSegment<'a> {
     fn set_discarded(&self) {
         self.metadata.written.set(0);
         self.metadata.state.store(SEG_DISCARDED, Release);
+    }
+}
+
+impl<'a> Drop for IORingSegment<'a> {
+    fn drop(&mut self) {
+        // If publish is never called, it must be discarded
+        // to prevent deadlocking the ring.
+        self.set_discarded()
     }
 }
 
@@ -359,14 +366,6 @@ unsafe impl<'a> IOSegment for IORingSegment<'a> {
         let count = src.len();
         debug_assert!(offset + count <= self.capacity());
         unsafe { copy_nonoverlapping(src.as_ptr(), self.data.as_mut_ptr().add(offset), count) };
-    }
-}
-
-impl<'a> Drop for IORingSegment<'a> {
-    fn drop(&mut self) {
-        // If publish is never called, it must be discarded
-        // to prevent deadlocking the ring.
-        self.set_discarded()
     }
 }
 

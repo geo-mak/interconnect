@@ -6,7 +6,7 @@ use hkdf::Hkdf;
 use sha2::Sha256;
 
 use crate::error::{ErrKind, RpcError, RpcResult};
-use crate::opt::branch_prediction::unlikely;
+use crate::opt::branch_hints::unlikely;
 
 // ----------------------------------------------
 // |         RPC SPECIFICATION PROTOCOL         |

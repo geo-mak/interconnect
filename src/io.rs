@@ -84,14 +84,14 @@ pub unsafe trait IOSegment {
     ///
     /// Safety:
     /// - The source slice must consist of fully initialized bytes.
-    /// - The source slice must be a non-overlapping (disjoint) memory-segment.
+    /// - The source slice must be a non-overlapping (disjoint) memory-region.
     fn write(&mut self, src: &[u8]) -> bool;
 
     /// Writes data to the segment in unchecked-mode.
     ///
     /// Safety:
     /// - The source slice must consist of fully initialized bytes.
-    /// - The source slice must be a non-overlapping (disjoint) memory-segment.
+    /// - The source slice must be a non-overlapping (disjoint) memory-region.
     /// - The segment must have enough capacity to accommodate the the source data.
     /// - The segment is valid for writing/overwriting withing the range [`offset`: source length - 1].
     /// - Length is **not** advanced after writing.

@@ -149,23 +149,6 @@ pub mod message {
     }
 
     #[inline]
-    pub fn encode_header_into(
-        id: &MessageID,
-        directive: Directive,
-        output: &mut [u8],
-    ) -> RpcResult<()> {
-        if unlikely(output.len() < 9) {
-            return Err(RpcError::error(ErrKind::Encoding));
-        }
-
-        output[..8].copy_from_slice(&id.to_le_bytes());
-
-        output[8] = directive as u8;
-
-        Ok(())
-    }
-
-    #[inline]
     pub fn decode_header(message: &[u8]) -> RpcResult<Header> {
         if unlikely(message.len() < 9) {
             return Err(RpcError::error(ErrKind::Decoding));
@@ -194,21 +177,6 @@ pub mod message {
         error_bytes[1..5].copy_from_slice(&refer_bytes);
 
         error_bytes
-    }
-
-    #[inline]
-    pub fn encode_error_into(err: RpcError, output: &mut [u8]) -> RpcResult<()> {
-        if unlikely(output.len() < 5) {
-            return Err(RpcError::error(ErrKind::Encoding));
-        }
-
-        output[0] = err.kind as u8;
-
-        let refer_bytes = err.refer.to_le_bytes();
-
-        output[1..5].copy_from_slice(&refer_bytes);
-
-        Ok(())
     }
 
     #[inline]
@@ -309,6 +277,7 @@ pub mod message {
     }
 
     /// Decodes data from slice of bytes into a value by borrowing the data from the provided store.
+    #[inline]
     pub fn decode_borrowed_from_slice<'de, T>(data: &'de [u8]) -> RpcResult<T>
     where
         T: Deserialize<'de>,
@@ -496,7 +465,10 @@ impl<T> MessageSender<T> {
     }
 }
 
-impl<T: AsyncIOWrite + Send + Unpin> AsyncSender for MessageSender<T> {
+impl<T> AsyncSender for MessageSender<T>
+where
+    T: AsyncIOWrite + Send + Unpin,
+{
     async fn call<P: Serialize + Sync>(
         &mut self,
         id: &MessageID,
@@ -523,18 +495,14 @@ impl<T: AsyncIOWrite + Send + Unpin> AsyncSender for MessageSender<T> {
     }
 
     async fn call_nullary(&mut self, id: &MessageID, op: u16) -> RpcResult<()> {
-        let header_bytes = message::encode_header(id, Directive::NullaryCall);
-        let op_bytes = op.to_le_bytes();
+        let mut nullary_msg = [0u8; 15];
 
-        // Safety: Capacity is ensured up to 18 bytes.
-        unsafe {
-            self.store.write_at(0, &11u32.to_le_bytes());
-            self.store.write_at(4, &header_bytes);
-            self.store.write_at(13, &op_bytes);
-            self.store.data.set_len(15);
-        }
+        nullary_msg[0..4].copy_from_slice(&11u32.to_le_bytes());
+        nullary_msg[4..12].copy_from_slice(&id.to_le_bytes());
+        nullary_msg[12] = Directive::NullaryCall as u8;
+        nullary_msg[13..15].copy_from_slice(&op.to_le_bytes());
 
-        self.transport.write_all(&self.store.data).await?;
+        self.transport.write_all(&nullary_msg).await?;
         Ok(())
     }
 
@@ -564,43 +532,35 @@ impl<T: AsyncIOWrite + Send + Unpin> AsyncSender for MessageSender<T> {
         let header_bytes = message::encode_header(id, Directive::Error);
         let error_bytes = message::encode_error(error);
 
-        // Safety: Capacity is ensured up to 18 bytes.
-        unsafe {
-            self.store.write_at(0, &14u32.to_le_bytes());
-            self.store.write_at(4, &header_bytes);
-            self.store.write_at(13, &error_bytes);
-            self.store.data.set_len(18);
-        }
+        let mut error_msg = [0u8; 18];
 
-        self.transport.write_all(&self.store.data).await?;
+        error_msg[0..4].copy_from_slice(&14u32.to_le_bytes());
+        error_msg[4..13].copy_from_slice(&header_bytes);
+        error_msg[13..18].copy_from_slice(&error_bytes);
+
+        self.transport.write_all(&error_msg).await?;
         Ok(())
     }
 
     async fn ping(&mut self, id: &MessageID) -> RpcResult<()> {
-        let header_bytes = message::encode_header(id, Directive::Ping);
+        let mut ping_msg = [0u8; 13];
 
-        // Safety: Capacity is ensured up to 18 bytes.
-        unsafe {
-            self.store.write_at(0, &9u32.to_le_bytes());
-            self.store.write_at(4, &header_bytes);
-            self.store.data.set_len(13);
-        }
+        ping_msg[0..4].copy_from_slice(&9u32.to_le_bytes());
+        ping_msg[4..12].copy_from_slice(&id.to_le_bytes());
+        ping_msg[12] = Directive::Ping as u8;
 
-        self.transport.write_all(&self.store.data).await?;
+        self.transport.write_all(&ping_msg).await?;
         Ok(())
     }
 
     async fn pong(&mut self, id: &MessageID) -> RpcResult<()> {
-        let header_bytes = message::encode_header(id, Directive::Pong);
+        let mut pong_msg = [0u8; 13];
 
-        // Safety: Capacity is ensured up to 18 bytes.
-        unsafe {
-            self.store.write_at(0, &9u32.to_le_bytes());
-            self.store.write_at(4, &header_bytes);
-            self.store.data.set_len(13);
-        }
+        pong_msg[0..4].copy_from_slice(&9u32.to_le_bytes());
+        pong_msg[4..12].copy_from_slice(&id.to_le_bytes());
+        pong_msg[12] = Directive::Pong as u8;
 
-        self.transport.write_all(&self.store.data).await?;
+        self.transport.write_all(&pong_msg).await?;
         Ok(())
     }
 
@@ -718,9 +678,12 @@ impl<T> EncMessageSender<T> {
     }
 }
 
-impl<T: AsyncIOWrite + Send + Unpin> EncMessageSender<T> {
+impl<T> EncMessageSender<T>
+where
+    T: AsyncIOWrite + Send + Unpin,
+{
     #[inline]
-    async fn update_len_write_all(&mut self) -> RpcResult<()> {
+    async fn encrypt_write_all(&mut self) -> RpcResult<()> {
         let mut encryption_buf = ExtBufferView {
             buf: &mut self.store.data,
             offset: 4,
@@ -738,7 +701,10 @@ impl<T: AsyncIOWrite + Send + Unpin> EncMessageSender<T> {
     }
 }
 
-impl<T: AsyncIOWrite + Send + Unpin> AsyncSender for EncMessageSender<T> {
+impl<T> AsyncSender for EncMessageSender<T>
+where
+    T: AsyncIOWrite + Send + Unpin,
+{
     async fn call<P: Serialize>(&mut self, id: &MessageID, op: u16, params: &P) -> RpcResult<()> {
         let header_bytes = message::encode_header(id, Directive::Call);
         let op_bytes = op.to_le_bytes();
@@ -753,7 +719,7 @@ impl<T: AsyncIOWrite + Send + Unpin> AsyncSender for EncMessageSender<T> {
             message::encode_into_segment(params, &mut self.store)?;
         }
 
-        self.update_len_write_all().await
+        self.encrypt_write_all().await
     }
 
     async fn call_nullary(&mut self, id: &MessageID, op: u16) -> RpcResult<()> {
@@ -767,7 +733,7 @@ impl<T: AsyncIOWrite + Send + Unpin> AsyncSender for EncMessageSender<T> {
             self.store.data.set_len(15);
         }
 
-        self.update_len_write_all().await
+        self.encrypt_write_all().await
     }
 
     async fn return_data<R: Serialize>(&mut self, id: &MessageID, reply: &R) -> RpcResult<()> {
@@ -782,7 +748,7 @@ impl<T: AsyncIOWrite + Send + Unpin> AsyncSender for EncMessageSender<T> {
             message::encode_into_segment(reply, &mut self.store)?;
         }
 
-        self.update_len_write_all().await
+        self.encrypt_write_all().await
     }
 
     async fn return_error(&mut self, id: &MessageID, error: RpcError) -> RpcResult<()> {
@@ -796,7 +762,7 @@ impl<T: AsyncIOWrite + Send + Unpin> AsyncSender for EncMessageSender<T> {
             self.store.data.set_len(18);
         }
 
-        self.update_len_write_all().await
+        self.encrypt_write_all().await
     }
 
     async fn ping(&mut self, id: &MessageID) -> RpcResult<()> {
@@ -808,7 +774,7 @@ impl<T: AsyncIOWrite + Send + Unpin> AsyncSender for EncMessageSender<T> {
             self.store.data.set_len(13);
         }
 
-        self.update_len_write_all().await
+        self.encrypt_write_all().await
     }
 
     async fn pong(&mut self, id: &MessageID) -> RpcResult<()> {
@@ -820,7 +786,7 @@ impl<T: AsyncIOWrite + Send + Unpin> AsyncSender for EncMessageSender<T> {
             self.store.data.set_len(13);
         }
 
-        self.update_len_write_all().await
+        self.encrypt_write_all().await
     }
 
     #[inline(always)]
@@ -852,7 +818,10 @@ impl<T> MessageReceiver<T> {
     }
 }
 
-impl<T: AsyncIORead + Send + Unpin> AsyncReceiver for MessageReceiver<T> {
+impl<T> AsyncReceiver for MessageReceiver<T>
+where
+    T: AsyncIORead + Send + Unpin,
+{
     async fn receive(&mut self) -> RpcResult<()> {
         let mut len_bytes = [0u8; 4];
         let read = self.transport.read_exact(&mut len_bytes).await?;
@@ -914,7 +883,10 @@ impl<T> EncMessageReceiver<T> {
     }
 }
 
-impl<T: AsyncIORead + Send + Unpin> AsyncReceiver for EncMessageReceiver<T> {
+impl<T> AsyncReceiver for EncMessageReceiver<T>
+where
+    T: AsyncIORead + Send + Unpin,
+{
     async fn receive(&mut self) -> RpcResult<()> {
         let mut len_bytes = [0u8; 4];
         let read = self.transport.read_exact(&mut len_bytes).await?;
@@ -955,151 +927,179 @@ impl<T: AsyncIORead + Send + Unpin> AsyncReceiver for EncMessageReceiver<T> {
 mod tests {
     use super::*;
 
-    use std::time::Duration;
+    use std::cell::UnsafeCell;
 
-    use tokio::net::{TcpStream, UnixListener, UnixStream};
-
-    #[tokio::test]
-    async fn test_read_write_tcp_rpc() {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let addr = listener.local_addr().unwrap();
-
-        let handle = tokio::spawn(async move {
-            let (transport, _) = listener.accept().await.unwrap();
-
-            let (t_reader, t_writer) = transport.into_split();
-
-            let mut msg_sender = MessageSender::new(t_writer);
-            let mut msg_receiver = MessageReceiver::new(t_reader);
-
-            loop {
-                match msg_receiver.receive().await {
-                    Ok(_) => {
-                        let message = msg_receiver.message();
-
-                        let header = message::decode_header(message).unwrap();
-                        assert!(header.directive == Directive::Call);
-
-                        let op = message::decode_op(message).unwrap();
-                        assert!(op == 1);
-
-                        let params_data = message::params_data(message).unwrap();
-
-                        let data: &str = message::decode_borrowed_from_slice(params_data).unwrap();
-                        assert_eq!(&data, &"hi there");
-
-                        if let Err(e) = msg_sender.return_data(&header.id, &"Reply: hi there").await
-                        {
-                            println!("Server error: {:?}", e);
-                        }
-                    }
-                    Err(e) => {
-                        println!("Server error: {:?}", e);
-                        break;
-                    }
-                }
-            }
-        });
-
-        tokio::time::sleep(Duration::from_millis(10)).await;
-
-        let transport = TcpStream::connect(addr).await.unwrap();
-        let (io_reader, io_writer) = transport.into_split();
-
-        let mut msg_sender = MessageSender::new(io_writer);
-        let mut msg_receiver = MessageReceiver::new(io_reader);
-
-        msg_sender.call(&1, 1, &"hi there").await.unwrap();
-
-        msg_receiver.receive().await.unwrap();
-
-        let message = msg_receiver.message();
-
-        let header = message::decode_header(message).unwrap();
-
-        assert!(header.directive == Directive::Return);
-
-        let returned = message::returned_data(message).unwrap();
-
-        let reply: &str = message::decode_borrowed_from_slice(returned).unwrap();
-        assert_eq!(reply, "Reply: hi there");
-
-        msg_sender.terminate().await.unwrap();
-        handle.await.unwrap()
+    struct EchoStore<const CAP: usize> {
+        data: [u8; CAP],
+        written: usize,
+        read: usize,
     }
 
-    #[tokio::test]
-    async fn test_read_write_unix_rpc() {
-        let path = "unix_transport_test_core.sock";
-
-        let listener = UnixListener::bind(&path).unwrap();
-
-        let handle = tokio::spawn(async move {
-            let (transport, _) = listener.accept().await.unwrap();
-
-            let (t_reader, t_writer) = transport.into_split();
-
-            let mut msg_sender = MessageSender::new(t_writer);
-            let mut msg_receiver = MessageReceiver::new(t_reader);
-
-            loop {
-                match msg_receiver.receive().await {
-                    Ok(_) => {
-                        let message = msg_receiver.message();
-
-                        let header = message::decode_header(message).unwrap();
-                        assert!(header.directive == Directive::Call);
-
-                        let op = message::decode_op(message).unwrap();
-                        assert!(op == 1);
-
-                        let params_data = message::params_data(message).unwrap();
-
-                        let params: &str =
-                            message::decode_borrowed_from_slice(params_data).unwrap();
-                        assert_eq!(params, "hi there");
-
-                        if let Err(e) = msg_sender.return_data(&header.id, &"Reply: hi there").await
-                        {
-                            println!("Server error: {:?}", e);
-                        }
-                    }
-                    Err(e) => {
-                        println!("Server error: {:?}", e);
-                        break;
-                    }
-                }
+    impl<const CAP: usize> EchoStore<CAP> {
+        const fn new() -> Self {
+            EchoStore {
+                data: [0u8; CAP],
+                written: 0,
+                read: 0,
             }
-        });
+        }
+    }
 
-        tokio::time::sleep(Duration::from_millis(10)).await;
+    // This mock is neither `Send` nor `Sync` in practical manner.
+    // Each write-call overwrites data, resets read-pointer and sets write-pointer.
+    // Each read-call advances the read-pointer.
+    struct EchoTransport<'a, const CAP: usize> {
+        store: &'a UnsafeCell<EchoStore<CAP>>,
+    }
 
-        let transport = UnixStream::connect(path).await.unwrap();
-        let (io_reader, io_writer) = transport.into_split();
+    // Sender's/Receiver's interface requires `Send`.
+    unsafe impl<'a, const CAP: usize> Send for EchoTransport<'a, CAP> {}
+
+    impl<'a, const CAP: usize> EchoTransport<'a, CAP> {
+        fn new(store: &'a UnsafeCell<EchoStore<CAP>>) -> Self {
+            Self { store }
+        }
+    }
+
+    impl<'a, const CAP: usize> AsyncIOWrite for EchoTransport<'a, CAP> {
+        async fn write(&mut self, _input: &[u8]) -> std::io::Result<usize>
+        where
+            Self: Unpin,
+        {
+            unimplemented!()
+        }
+
+        async fn write_all(&mut self, input: &[u8]) -> std::io::Result<()>
+        where
+            Self: Unpin,
+        {
+            let src_len = input.len();
+
+            let shared_store = unsafe { &mut (*self.store.get()) };
+
+            shared_store.data[..src_len].copy_from_slice(input);
+
+            shared_store.written = src_len;
+            shared_store.read = 0;
+
+            Ok(())
+        }
+
+        async fn terminate(&mut self) -> std::io::Result<()>
+        where
+            Self: Unpin,
+        {
+            unimplemented!()
+        }
+    }
+
+    impl<'a, const CAP: usize> AsyncIORead for EchoTransport<'a, CAP> {
+        async fn read(&mut self, _output: &mut [u8]) -> std::io::Result<usize>
+        where
+            Self: Unpin,
+        {
+            unimplemented!()
+        }
+
+        async fn read_exact(&mut self, output: &mut [u8]) -> std::io::Result<usize>
+        where
+            Self: Unpin,
+        {
+            let requested_len = output.len();
+
+            let shared_store = unsafe { &mut (*self.store.get()) };
+
+            let written = shared_store.written;
+            let read = shared_store.read;
+
+            let read_slice = &shared_store.data[read..written];
+
+            output.copy_from_slice(&read_slice[..requested_len]);
+
+            shared_store.read += requested_len;
+
+            Ok(requested_len)
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_sender_receiver() {
+        const CAP: usize = 30;
+        // This mock is neither `Send` nor `Sync` in practical manner.
+        // Each write-call overwrites data, resets read-pointer and sets write-pointer.
+        // Each read-call advances the read-pointer.
+        let shared = UnsafeCell::new(EchoStore::<CAP>::new());
+        let io_writer = EchoTransport::new(&shared);
+        let io_reader = EchoTransport::new(&shared);
 
         let mut msg_sender = MessageSender::new(io_writer);
         let mut msg_receiver = MessageReceiver::new(io_reader);
 
-        msg_sender.call(&1, 1, &"hi there").await.unwrap();
-
+        // Call.
+        msg_sender.call(&1, 1, &"Call").await.unwrap();
         msg_receiver.receive().await.unwrap();
+        let received = msg_receiver.message();
+        let header = message::decode_header(received).unwrap();
+        let (op, params_data) = message::decode_op_return_params(received).unwrap();
+        let decoded_param: &str = message::decode_borrowed_from_slice(params_data).unwrap();
 
-        let message = msg_receiver.message();
+        assert!(header.id == 1);
+        assert!(header.directive == Directive::Call);
+        assert!(op == 1);
+        assert!(decoded_param == "Call");
 
-        let header = message::decode_header(message).unwrap();
+        // NullaryCall.
+        msg_sender.call_nullary(&1, 1).await.unwrap();
+        msg_receiver.receive().await.unwrap();
+        let received = msg_receiver.message();
+        let header = message::decode_header(received).unwrap();
 
+        assert!(header.id == 1);
+        assert!(header.directive == Directive::NullaryCall);
+        assert!(op == 1);
+
+        // Return.
+        msg_sender.return_data(&1, &"Returned data").await.unwrap();
+        msg_receiver.receive().await.unwrap();
+        let received = msg_receiver.message();
+        let header = message::decode_header(received).unwrap();
+        let returned_data = message::returned_data(received).unwrap();
+        let decoded_returned: &str = message::decode_borrowed_from_slice(returned_data).unwrap();
+
+        assert!(header.id == 1);
         assert!(header.directive == Directive::Return);
+        assert!(decoded_returned == "Returned data");
 
-        let returned = message::returned_data(message).unwrap();
+        // Error.
+        msg_sender
+            .return_error(&1, RpcError::error(ErrKind::Application))
+            .await
+            .unwrap();
+        msg_receiver.receive().await.unwrap();
+        let received = msg_receiver.message();
+        let header = message::decode_header(received).unwrap();
+        let error = message::decode_error(received).unwrap();
 
-        assert_eq!(
-            message::decode_borrowed_from_slice::<&str>(returned).unwrap(),
-            "Reply: hi there"
-        );
+        assert!(header.id == 1);
+        assert!(header.directive == Directive::Error);
+        assert!(error == RpcError::error(ErrKind::Application));
 
-        msg_sender.terminate().await.unwrap();
-        handle.await.unwrap();
+        // Ping.
+        msg_sender.ping(&1).await.unwrap();
+        msg_receiver.receive().await.unwrap();
+        let received = msg_receiver.message();
+        let header = message::decode_header(received).unwrap();
 
-        std::fs::remove_file(&path).unwrap();
+        assert!(header.id == 1);
+        assert!(header.directive == Directive::Ping);
+
+        // Pong.
+        msg_sender.pong(&1).await.unwrap();
+        msg_receiver.receive().await.unwrap();
+        let received = msg_receiver.message();
+        let header = message::decode_header(received).unwrap();
+
+        assert!(header.id == 1);
+        assert!(header.directive == Directive::Pong);
     }
 }

@@ -85,3 +85,19 @@ it is unnecessary burden to make it a sort of a "miserable fight".
 As a final note, whether you like what I do or not, I hope I could have made a case for "creativity" as the right ethos to promote,
 where this "creativity" can rely on a well-designed programming system, with compile-time analysis for "sanity-checks".
 
+## Error handling and panic policy
+
+From design perspective (many implementations are still more or less "prototypes"):
+
+- Everything that can fail at runtime has to return an error.
+
+- Everything that is not expected to fail at runtime should crash the process when it does.
+
+The panic-policy is to abort. The reasons for adopting abort instead on unwind are: 
+- "unwinding" has a very high overhead.
+- Maintaining the conceptual clarity of the control-flow.
+- Designing for "unexpected" failure is an oxymoron.
+
+In simple terms, guarding execution against unexpected "things" is either wrapping possibly "misbehaving" code **external** 
+to the system with "isolated effect" (e.g OS with processes), or a messed-up implementation of the system itself that lacks 
+proper design and **system analysis**.

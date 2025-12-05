@@ -93,7 +93,7 @@ From design perspective (many implementations are still more or less "prototypes
 
 - Everything that is not expected to fail at runtime should crash the process when it does.
 
-The panic-policy is to abort. The reasons for adopting abort instead on unwind are: 
+The panic-policy is to abort. The reasons for adopting abort instead of unwind are: 
 - "unwinding" has a very high overhead.
 - Maintaining the conceptual clarity of the control-flow.
 - Designing for "unexpected" failure is an oxymoron.

@@ -10,11 +10,13 @@ use tokio::net::{TcpListener, TcpStream, UnixListener, UnixStream};
 
 use crate::io::{AsyncIORead, AsyncIOWrite};
 
-pub trait TransportListener<A>: Sized + Send {
+pub trait TransportListener<A> {
     type Address;
-    type Transport: TransportLayer + Send;
+    type Transport: TransportLayer;
 
-    fn bind(addr: A) -> impl Future<Output = io::Result<Self>>;
+    fn bind(addr: A) -> impl Future<Output = io::Result<Self>>
+    where
+        Self: Sized;
 
     fn accept(&self) -> impl Future<Output = io::Result<(Self::Transport, Self::Address)>> + Send;
 

@@ -76,13 +76,13 @@ impl<T> ReportMaterial for T where T: Display {}
 ///
 /// Types that generate reports shall disclose details about the reports generated,
 /// and when and where they are generated.
-/// 
-/// Reporting is granting access to a resource that may be limited, therefore, reporting 
+///
+/// Reporting is granting access to a resource that may be limited, therefore, reporting
 /// shall be deployed as explicit "capability", issued via explicit and clear interface.
-/// 
-/// Undeclared reporting compromises proper system analysis, and uncontrolled excessive 
+///
+/// Undeclared reporting compromises proper system analysis, and uncontrolled excessive
 /// reporting compromises system's stability and performance.
-/// 
+///
 /// # Parameters
 /// - Instance reference (&self): The reference is immutable,
 ///   because in most cases, the implementation must be `Sync`.

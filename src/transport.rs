@@ -65,15 +65,17 @@ impl<A: AsRef<Path>> TransportListener<A> for UnixListener {
 
 /// Trait represents types that can act as transport layers.
 ///
+/// Transport layer is untyped byte-stream oriented API.
+///
 /// Types that implement this trait should comply with the following requirements:
 ///
 /// - They provide two modes of operation: single-mode and split-mode.
 ///
-/// - In split-mode, the two halves must be owned handles, that allow **parallel** access.
+/// - In split-mode, the reader and writer shall enable unconstrained full-duplex communication style.
 pub trait TransportLayer: AsyncIORead + AsyncIOWrite + Send + Unpin {
-    type OwnedReadHalf: AsyncIORead + Send + Sync + Unpin;
-    type OwnedWriteHalf: AsyncIOWrite + Send + Sync + Unpin;
-    fn into_split(self) -> (Self::OwnedReadHalf, Self::OwnedWriteHalf);
+    type Reader: AsyncIORead + Send + Sync + Unpin;
+    type Writer: AsyncIOWrite + Send + Sync + Unpin;
+    fn into_split(self) -> (Self::Reader, Self::Writer);
 }
 
 impl AsyncIORead for TcpStream {
@@ -253,21 +255,21 @@ impl AsyncIOWrite for unix::OwnedWriteHalf {
 }
 
 impl TransportLayer for TcpStream {
-    type OwnedReadHalf = tcp::OwnedReadHalf;
-    type OwnedWriteHalf = tcp::OwnedWriteHalf;
+    type Reader = tcp::OwnedReadHalf;
+    type Writer = tcp::OwnedWriteHalf;
 
     #[inline(always)]
-    fn into_split(self) -> (Self::OwnedReadHalf, Self::OwnedWriteHalf) {
+    fn into_split(self) -> (Self::Reader, Self::Writer) {
         TcpStream::into_split(self)
     }
 }
 
 impl TransportLayer for UnixStream {
-    type OwnedReadHalf = unix::OwnedReadHalf;
-    type OwnedWriteHalf = unix::OwnedWriteHalf;
+    type Reader = unix::OwnedReadHalf;
+    type Writer = unix::OwnedWriteHalf;
 
     #[inline(always)]
-    fn into_split(self) -> (Self::OwnedReadHalf, Self::OwnedWriteHalf) {
+    fn into_split(self) -> (Self::Reader, Self::Writer) {
         UnixStream::into_split(self)
     }
 }

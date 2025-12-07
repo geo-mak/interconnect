@@ -135,32 +135,28 @@ impl fmt::Debug for AtomicWaker {
     }
 }
 
-/// A manually triggered "latch" with dynamic count of locks.
+/// A control structure for conditionally enabling activities based on successfully
+/// acquiring a token, which semantically makes the activity valid until its release.
 ///
-/// This synchronization primitive works according to the concept of `passive consensus`,
-/// and has four operations:
+/// The dynamic aspect of it means that it is not bound to a fixed number of tokens,
+/// instead, tokens can be acquired and released continuously until "open()" is called,
+/// after that the caller shall wait until all active tokens are released.
 ///
-/// - Attest (`A` operation): Checks if `O` operation has been started, signaling void protection if it `true`.
+/// Each call to `acquire` checks the "open" flag. If the latch is still "closed",
+/// the count of active tokens will be incremented and a token will be returned.
 ///
-/// - Increment (`I` operation): increments the count of active locks.
+/// An acquired token is released by being dropped.
 ///
-/// - Decrement (`D` operation): decrements the count of active locks.
+/// Attempts to acquire tokens after `open()` has been called will fail.
 ///
-/// - Open (`O` operation): Sets the open flag.
-///   This operation is irreversible per instance.
+/// Setting the `open` flag is irreversible per instance.
 ///
-/// Each call to `acquire` performs `A` operation. On success, `I` operation is performed,
-/// and a lock is returned.
-///
-/// Once a lock is dropped, a `D` operation is performed automatically.
-///
-/// All attempts to create locks after `open` has been set will fail,
-/// and the scheduled `wait` future will resolve automatically,
-/// when the count of active locks has reached `0`.
+/// A call to `wait()` returns a future that resolves when the count of active tokens
+/// has reached `0`.
 pub struct DynamicLatch {
     /// Bits array:
     /// Lower bit: 1 is open, 0 is closed.
-    /// Higher bits: locks' count as usize value.
+    /// Higher bits: tokens' count as `usize` value.
     state: AtomicUsize,
     waiter: AtomicWaker,
 }
@@ -173,33 +169,35 @@ impl DynamicLatch {
         }
     }
 
-    /// Tries to acquire a lock for the current scope.
+    /// Tries to acquire a token with bounded lifetime.
     ///
-    /// Returns `None` if `open` has been started, signaling void protection.
+    /// Returns `None` if `open()` has been called, signaling void protection.
     #[inline]
-    pub fn acquire(&self) -> Option<LatchLock<'_>> {
+    pub fn acquire(&self) -> Option<LatchToken<'_>> {
         // Open is only done once, so we optimize for the likely case.
         // This will make the failure case more expensive.
         let current = self.state.fetch_add(2, Acquire);
+
         if (current & 1) != 0 {
             self.release();
             return None;
         }
-        // All set.
-        Some(LatchLock { latch: self })
+
+        Some(LatchToken { latch: self })
     }
 
-    /// Tries to acquire an owned lock.
+    /// Tries to acquire an token with unbounded lifetime.
     ///
-    /// Returns `None` if `open` has been started.
-    pub fn acquire_owned(self: &Arc<Self>) -> Option<OwnedLatchLock> {
+    /// Returns `None` if `open()` has been called.
+    pub fn acquire_unbounded(self: &Arc<Self>) -> Option<UnboundedLatchToken> {
         let current = self.state.fetch_add(2, Acquire);
+
         if (current & 1) != 0 {
             self.release();
             return None;
         }
 
-        Some(OwnedLatchLock {
+        Some(UnboundedLatchToken {
             latch: self.clone(),
         })
     }
@@ -207,42 +205,52 @@ impl DynamicLatch {
     #[inline]
     pub(crate) fn acquire_manual(&self) -> bool {
         let current = self.state.fetch_add(2, Acquire);
+
         if (current & 1) != 0 {
             self.release();
             return false;
         }
+
         true
     }
 
     #[inline(always)]
     pub(crate) fn release(&self) {
-        // If last state was open and has exactly one last lock.
         if self.state.fetch_sub(2, Release) == 3 {
             self.waiter.wake();
         }
     }
 
-    /// Sets the open flag, preventing new locks from being created.
+    /// Sets the open flag, preventing new tokens from being created.
     #[inline(always)]
     pub fn open(&self) {
         self.state.fetch_or(1, AcqRel);
     }
 
-    /// Returns a future that resolves when all locks are released.
+    /// Returns a future that resolves when all tokens are released.
     ///
-    /// **Note**:
-    /// This method is safe for concurrent access in terms of memory safety,
-    /// but it is not what it is designed for.
+    /// **Notes**:
+    /// - This call shall be done after calling `open()`, to prevent new tokens
+    ///   from being issued.
+    ///   
+    ///   Not calling `open()` before leads to silent invalidation of the
+    ///   newly issued tokens after this call, with unexpected interruption
+    ///   of the activities that rely on the guarantee associated with them.
     ///
-    /// If opening is not yet feasible, a new call will reset the internal waker to the waker
-    /// of the last **observed** caller, and the previous returned futures will not resolve.
+    /// - This call is safe for concurrent access in terms of memory safety,
+    ///   but it is not what it is designed for.
     ///
-    /// In case of race condition, only one thread will be successful in registering its waker,
-    /// calls from other threads will not be registered at all.
+    ///   If there are active tokens, a new call will reset the internal waker
+    ///   to the waker of the last **observed** caller, and the previous returned
+    ///   futures will not resolve.
     ///
-    /// The `XOR` mutability rule is not enforced to give more flexibility,
-    /// and avoid synchronization overhead of internal APIs, but exposing it
-    /// in public APIs requires enforcing `XOR` mutability rule.
+    ///   In case of race condition, only one thread will be successful in registering
+    ///   its waker, calls from other threads will not be registered at all.
+    ///
+    ///   The exclusive mutability `(&mut self)` is not enforced to give more
+    ///   flexibility, and to avoid synchronization overhead of internal APIs,
+    ///   but exposing it in public APIs requires enforcing exclusive access or
+    ///   full disclosure of the invariants.
     #[inline(always)]
     pub fn wait(&self) -> WaitFuture<'_> {
         WaitFuture { latch: self }
@@ -254,7 +262,7 @@ impl DynamicLatch {
         (self.state.load(Acquire) & 1) != 0
     }
 
-    /// Returns the current count of held locks.
+    /// Returns the current count of active tokens.
     #[inline(always)]
     pub fn count(&self) -> usize {
         self.state.load(Acquire) >> 1
@@ -283,27 +291,27 @@ impl<'a> Future for WaitFuture<'a> {
     }
 }
 
-/// A lock for a protected scope.
+/// A token for a protected scope.
 ///
-/// The lock is released on drop (RAII effect).
-pub struct LatchLock<'a> {
+/// The token is released on drop.
+pub struct LatchToken<'a> {
     latch: &'a DynamicLatch,
 }
 
-impl Drop for LatchLock<'_> {
+impl Drop for LatchToken<'_> {
     fn drop(&mut self) {
         self.latch.release();
     }
 }
 
-/// An owned lock for a protected scope, not tied to a lifetime.
+/// A latch token unbounded to lifetime.
 ///
-/// This can be moved freely between threads and tasks.
-pub struct OwnedLatchLock {
+/// This token can be moved freely between threads/tasks and it is released on drop.
+pub struct UnboundedLatchToken {
     latch: Arc<DynamicLatch>,
 }
 
-impl Drop for OwnedLatchLock {
+impl Drop for UnboundedLatchToken {
     fn drop(&mut self) {
         self.latch.release();
     }

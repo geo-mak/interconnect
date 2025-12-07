@@ -11,7 +11,7 @@ The RPC aspect is currently the main focus, and the main area of development.
 │                Session Layer                │
 │         (Client, Server, Policies)          │
 ├─────────────────────────────────────────────┤
-│                 Stream Layer                │
+│                Message Layer                │
 │     (Framing, Encryption, Encoding etc.)    │
 ├─────────────────────────────────────────────┤
 │               Connection Layer              │

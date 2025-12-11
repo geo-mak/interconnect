@@ -101,3 +101,17 @@ The panic-policy is to abort. The reasons for adopting abort instead of unwind a
 In simple terms, guarding execution against unexpected "things" is either wrapping possibly "misbehaving" code **external** 
 to the system with "isolated effect" (e.g OS with processes), or a messed-up implementation of the system itself that lacks 
 proper design and **system analysis**.
+
+## Data exchange
+Interconnect's unit of exchange is "message".
+
+Messages are exchanged in binary format with **untagged** data representation.
+
+Interconnect utilizes ABI (Application Binary Interface) for data representation, where interoperability is achieved by adhering 
+to the ABI.
+
+Interoperability and compatibility strategy at the ABI-level is still **undetermined**. 
+
+The current implementation enables version-detection and multi-version support for both the specification protocol and the ABI.
+Each connection starts by announcing the version of its specification protocol and its ABI, which will be used for the entire session 
+(no per-message versioning), but it is still experimental.

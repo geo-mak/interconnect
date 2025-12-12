@@ -115,3 +115,18 @@ Interoperability and compatibility strategy at the ABI-level is still **undeterm
 The current implementation enables version-detection and multi-version support for both the specification protocol and the ABI.
 Each connection starts by announcing the version of its specification protocol and its ABI, which will be used for the entire session 
 (no per-message versioning), but it is still experimental.
+
+Since the ABI is the a shared "language" between systems, interoperability and stability are of a strategic importance.
+
+The current prototype I am working on has the following design aspects:
+- Type system for API-definition (numbers, enums, structs, traits..etc).
+- Compiler and libraries for generating language-specific ABI-compatible implementations.
+- Support for generating "async" APIs.
+- Reuseable linear memory with virtual offsets for encoding and decoding.
+- Useful defaults with customizations options.
+
+These design aspects aim at abstracting the details of the ABI using higher-level representation of the API, for 
+automated management of interoperability and compatibility.
+
+The type system and the compiler (and its CLI) are already implemented and working, but the implementation is very fragile and 
+not yet ready to show up.

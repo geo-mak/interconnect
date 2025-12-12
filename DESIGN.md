@@ -116,7 +116,7 @@ The current implementation enables version-detection and multi-version support f
 Each connection starts by announcing the version of its specification protocol and its ABI, which will be used for the entire session 
 (no per-message versioning), but it is still experimental.
 
-Since the ABI is the a shared "language" between systems, interoperability and stability are of a strategic importance.
+Since the ABI is a shared "language" between systems, interoperability and stability are of a strategic importance.
 
 The current prototype I am working on has the following design aspects:
 - Type system for API-definition (numbers, enums, structs, traits..etc).

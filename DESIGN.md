@@ -94,7 +94,7 @@ From design perspective (many implementations are still more or less "prototypes
 - Everything that is not expected to fail at runtime should crash the process when it does.
 
 The panic-policy is to abort. The reasons for adopting abort instead of unwind are: 
-- "unwinding" has a very high overhead.
+- "unwinding" has a very high overhead (if not carefully/manually optimized).
 - Maintaining the conceptual clarity of the control-flow.
 - Designing for "unexpected" failure is an oxymoron.
 
@@ -119,14 +119,14 @@ Each connection starts by announcing the version of its specification protocol a
 Since the ABI is a shared "language" between systems, interoperability and stability are of a strategic importance.
 
 The current prototype I am working on has the following design aspects:
-- Type system for API-definition (numbers, enums, structs, traits..etc).
-- Compiler and libraries for generating language-specific ABI-compatible implementations.
-- Support for generating "async" APIs.
+- Interface definition language with type system (numbers, enums, structs, traits..etc).
+- Compiler and libraries for generating language-specific ABI-compatible implementations from API-definition files.
+- Support generating "async" APIs.
 - Reuseable linear memory with virtual offsets for encoding and decoding.
 - Useful defaults with customizations options.
 
 These design aspects aim at abstracting the details of the ABI using higher-level representation of the API, for 
 automated management of interoperability and compatibility.
 
-The type system and the compiler (and its CLI) are already implemented and working, but the implementation is very fragile and 
-not yet ready to show up.
+There is already a (kind of) working implementation of the definition language and its type system in terms of 
+compiler and native-support types (for Rust), but their implementation is fragile and not yet ready to show up.

@@ -1,6 +1,6 @@
 # Interconnect
 
-High performance remote procedure call protocol.
+High performance inter-process communication protocol.
 
 > **⚠️ This project is in early development stage.**
 

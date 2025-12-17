@@ -3,7 +3,7 @@ name = "interconnect"
 version = "0.1.0"
 edition = "2024"
 license = "MIT"
-description = "High performance remote procedure call protocol"
+description = "High performance inter-process communication protocol"
 repository = "https://github.com/geo-mak/interconnect"
 
 rust-version = "1.92.0"

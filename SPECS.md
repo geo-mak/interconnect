@@ -22,7 +22,7 @@ The following details have implementation version, but its current purpose is to
 | `f32`      | 32-bit IEEE 754 floating point  |
 | `f64`      | 64-bit IEEE 754 floating point  |
 
-Primitives types have **little-endian** representation regardless of the architecture.
+Primitive types have **little-endian** representation regardless of the architecture.
 
 ## 2. Collections
 
@@ -39,6 +39,22 @@ Collections serve grouping multiple elements of the **same** type.
 - **Definition**: A fixed-size group of elements.
 - **Representation**: Sequence of values with size and alignment of `T`.
 - **Syntax**: `[T; N]`, where `T` is the storage type and `N` is the length. 
+
+### UTF-8 Vector
+
+- **Definition**: Variable-length sequence of UTF-8-encoded bytes.
+- **Representation**: `u32` length-prefix followed by a sequence of UTF-8-encoded bytes.
+- **Syntax**: `[utf8]`. 
+
+`utf8` is representation constraint on `u8`.
+
+### UTF-8 Array
+
+- **Definition**: Fixed-length sequence of UTF-8-encoded bytes.
+- **Representation**: Sequence of UTF-8-encoded bytes.
+- **Syntax**: `[utf8; N]` where `N` is the length. 
+
+`utf8` is representation constraint on `u8`.
 
 ## 3. Composite Types
 

@@ -1,0 +1,193 @@
+# Interconnect IPC Definition Language Specification (Draft)
+
+This document defines the specification of interconnect's data model and how it is expressed in its language.
+
+The following details have implementation version, but its current purpose is to aid design.
+
+**All information in this document are subject to change without prior notice.**
+
+## 1. Primitives
+
+| Type       | Description                     |
+|------------|---------------------------------|
+| `bool`     | Boolean value (`true`, `false`) |
+| `u8`       | Unsigned 8-bit integer          |
+| `i8`       | Signed 8-bit integer            |
+| `u16`      | Unsigned 16-bit integer         |
+| `i16`      | Signed 16-bit integer           |
+| `u32`      | Unsigned 32-bit integer         |
+| `i32`      | Signed 32-bit integer           |
+| `u64`      | Unsigned 64-bit integer         |
+| `i64`      | Signed 64-bit integer           |
+| `f32`      | 32-bit IEEE 754 floating point  |
+| `f64`      | 64-bit IEEE 754 floating point  |
+
+Primitives types have **little-endian** representation regardless of the architecture.
+
+## 2. Collections
+
+Collections serve grouping multiple elements of the **same** type.
+
+### Vector
+
+- **Definition**: A dynamically sized group of elements.
+- **Representation**: `u32` length-prefix followed by sequence of values with size and alignment of `T`.
+- **Syntax**: `[T]`, where `T` is the storage type. 
+
+### Array
+
+- **Definition**: A fixed-size group of elements.
+- **Representation**: Sequence of values with size and alignment of `T`.
+- **Syntax**: `[T; N]`, where `T` is the storage type and `N` is the length. 
+
+## 3. Composite Types
+
+Composite types aggregate multiple fields or variants.
+
+### Struct
+
+- **Definition**: A fixed-layout collection of named fields.
+- **Representation**: Array of bytes with layout aligned to the largest field.
+- **Syntax**: 
+  IIDL syntax:
+  ```rust
+    struct { 
+      ident: type, 
+      ..
+    }
+  ```
+
+### Enums
+
+- **Definition**: A tagged union representing one of several values.
+- **Representation**:
+  - Tag-prefixed bytes aligned to the largest variant.
+  - Tags represented as unsigned integer. Representation depends on the number of variants.
+- **Syntax**:
+  IIDL syntax:
+  ```rust 
+    // Enum with payload.
+    // Represented as tagged union.
+    // Tag is represented as unsigned integer-value determined by the compiler.
+    enum { 
+      ident: type, 
+      ..
+    }
+
+    // Enum without payload.
+    // Represented as unsigned integer-value determined by the compiler.
+    enum { 
+      ident1,
+      ident2,
+      ..
+    }
+  ```
+
+Runtime semantics are guaranteed by the compiler and its generated code.
+
+### Message
+
+- **Definition**: A struct serves as a unit of data exchange.
+- **Representation**:
+  - Fixed message: Fixed messages are represented as `struct`.
+  - Dynamic message: Dynamic messages are represented using two consecutive blocks, the virtual layout and a structure of fields' data.
+    The virtual layout has metadata region encodes the total size and the size of the field.
+    Additionally, it encodes the `virtual offsets`, which are used to access the fields.
+    Fields are only accessed using `virtual offsets`, which may be valid or invalid.
+    Accessing invalid offset is safe and indicates the absence of the field in the actual sent data.
+    This model enables safe service-level ABI-versioning, where fields can be deprecated in newer versions, 
+    while allowing older systems to access the old layout without issues.
+- **Syntax**:
+  - Fixed messages: 
+    IIDL syntax:
+    ```rust
+      message { 
+        ident: type, 
+        ..
+      }
+    ```
+
+  - Dynamic messages:
+    IIDL syntax:
+    ```rust
+      dynamic message { 
+        ident: type, 
+        ..
+      }
+    ```
+
+- **Example**:
+  IIDL syntax:
+  ```rust
+        // Fixed message compiled as plain struct.
+        message AddParams {
+            lhs: i32,
+            rhs: i32,
+        }
+
+        // Dynamic message compiled as `VStruct`.
+        dynamic message DynAddParams {
+            lhs: i32,
+            rhs: i32,
+            #[deprecated]
+            legacy_field: bool,  // May be absent in newer messages, but safe to access in older systems.
+            new_field: [u8],  // New field will be observed only by newer systems.
+        }
+  ```
+- **Constraints**:
+  - Messages are the only types that know how to encode and decode full exchange layouts.
+  - Messages are the only types that can cross the API-boundary, all other types are fragments of their data.
+  - Messages can't have other messages as fields.
+  - Fixed messages are ABI-stable only if their layout remains **unchanged**.
+  - Refactoring dynamic messages requires adding new fields at the **end**, and annotating old fields as `#[deprecated]`.
+
+Dynamic messages shall be the preferred choice for maintaining ABI-stability at the service-level.
+
+Messages are sent with runtime-metadata that is not expressible in the syntax (runtime-implementation details).
+
+The runtime-metadata include the header, in addition to transport-specific metadata.
+
+## 4. Interface
+
+- **Definition**: A collection of IPC functions.
+- **Syntax**:
+  IIDL syntax:
+  ```rust
+      interface IPCInterface {
+          // Niladic one-way call.
+          #[attr, ..]
+          ident() 
+
+          // Niladic two-way call.
+          // `: MessageDef` is equivalent to `-> MessageDef`.
+          #[attr, ..]
+          ident(): MessageDef
+          
+          // Monadic one-way call.
+          #[attr, ..]
+          ident(param: MessageDef);
+
+          // Monadic two-way call.
+          #[attr, ..]
+          ident(param: MessageDef): MessageDef;
+      }
+  ```
+- **Constraints**:
+  - Interfaces defines functions that can take `message` types as arguments and returns `message` types **only**.
+  - The actual generated interface depends on the `linked types` used by the code generator.
+  - Other options are expressed using attributes.
+
+## 5. Attributes
+
+- **Definition**: Array of compiler directives that add extra context to the defined element.
+- **Syntax**: `#[attr, ..]`.
+- **Example**: `#[optional, deprecated]`
+- **Constraints**: Each definition accepts specific set of attributes only.
+
+## 6. Name Spaces
+
+- **Definition**: A grouping namespace for the generated code.
+- **Syntax**: `namespace name`.
+- **Representation**: Target-specific. `mod` in Rust.
+
+All of the generated code from the `iidl` file will be accessible under the defined namespace.

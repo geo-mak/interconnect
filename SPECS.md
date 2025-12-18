@@ -71,31 +71,35 @@ Composite types aggregate multiple fields or variants.
 
 ### Enums
 
-- **Definition**: A tagged union representing one of several values.
-- **Representation**:
-  - Tag-prefixed bytes aligned to the largest variant.
-  - Tags represented as unsigned integer. Representation depends on the number of variants.
+- **Definition**: A group of named constants.
+- **Representation**: Unsigned integer with representation depends on the number of variants.
 - **Syntax**:
   IIDL syntax:
   ```rust 
-    // Enum with payload.
-    // Represented as tagged union.
-    // Tag is represented as unsigned integer-value determined by the compiler.
-    enum { 
-      ident: type, 
-      ..
-    }
-
-    // Enum without payload.
     // Represented as unsigned integer-value determined by the compiler.
     enum { 
-      ident1,
-      ident2,
+      Ident1,
+      Ident2,
       ..
     }
   ```
+- **Constraints**: Enums can't be empty.
 
-Runtime semantics are guaranteed by the compiler and its generated code.
+### Union
+
+- **Definition**: A tagged union with multiple members.
+- **Representation**: Sequence of tag-prefixed values aligned to the largest member.
+- **Syntax**:
+  IIDL syntax:
+  ```rust 
+    // Tag is represented as unsigned integer-value determined by the compiler.
+    union TaggedUnion {
+      1: IdentA: type,
+      2: IdentB: type,
+      ...
+    }
+  ```
+- **Constraints**: Unions can't be empty.
 
 ### Message
 
@@ -149,7 +153,7 @@ Runtime semantics are guaranteed by the compiler and its generated code.
 - **Constraints**:
   - Messages are the only types that know how to encode and decode full exchange layouts.
   - Messages are the only types that can cross the API-boundary, all other types are fragments of their data.
-  - Messages can't have other messages as fields.
+  - Messages can't be fields of anything, including other messages.
   - Fixed messages are ABI-stable only if their layout remains **unchanged**.
   - Refactoring dynamic messages requires adding new fields at the **end**, and annotating old fields as `@deprecated`.
 

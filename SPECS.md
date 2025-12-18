@@ -168,12 +168,12 @@ The runtime-metadata include the header, in addition to transport-specific metad
       interface IPCInterface {
           // Niladic one-way call.
           @attr
-          ident() 
+          ident();
 
           // Niladic two-way call.
           // `: MessageDef` is equivalent to `-> MessageDef`.
           @attr
-          ident(): MessageDef
+          ident(): MessageDef;
           
           // Monadic one-way call.
           @attr

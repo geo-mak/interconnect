@@ -44,17 +44,13 @@ Collections serve grouping multiple elements of the **same** type.
 
 - **Definition**: Variable-length sequence of UTF-8-encoded bytes.
 - **Representation**: `u32` length-prefix followed by a sequence of UTF-8-encoded bytes.
-- **Syntax**: `[utf8]`. 
-
-`utf8` is representation constraint on `u8`.
+- **Syntax**: `string`. 
 
 ### UTF-8 Array
 
 - **Definition**: Fixed-length sequence of UTF-8-encoded bytes.
 - **Representation**: Sequence of UTF-8-encoded bytes.
-- **Syntax**: `[utf8; N]` where `N` is the length. 
-
-`utf8` is representation constraint on `u8`.
+- **Syntax**: `string[N]` where `N` is the length. 
 
 ## 3. Composite Types
 
@@ -145,7 +141,7 @@ Runtime semantics are guaranteed by the compiler and its generated code.
         dynamic message DynAddParams {
             lhs: i32,
             rhs: i32,
-            #[deprecated]
+            @deprecated
             legacy_field: bool,  // May be absent in newer messages, but safe to access in older systems.
             new_field: [u8],  // New field will be observed only by newer systems.
         }
@@ -155,7 +151,7 @@ Runtime semantics are guaranteed by the compiler and its generated code.
   - Messages are the only types that can cross the API-boundary, all other types are fragments of their data.
   - Messages can't have other messages as fields.
   - Fixed messages are ABI-stable only if their layout remains **unchanged**.
-  - Refactoring dynamic messages requires adding new fields at the **end**, and annotating old fields as `#[deprecated]`.
+  - Refactoring dynamic messages requires adding new fields at the **end**, and annotating old fields as `@deprecated`.
 
 Dynamic messages shall be the preferred choice for maintaining ABI-stability at the service-level.
 
@@ -171,20 +167,20 @@ The runtime-metadata include the header, in addition to transport-specific metad
   ```rust
       interface IPCInterface {
           // Niladic one-way call.
-          #[attr, ..]
+          @attr
           ident() 
 
           // Niladic two-way call.
           // `: MessageDef` is equivalent to `-> MessageDef`.
-          #[attr, ..]
+          @attr
           ident(): MessageDef
           
           // Monadic one-way call.
-          #[attr, ..]
+          @attr
           ident(param: MessageDef);
 
           // Monadic two-way call.
-          #[attr, ..]
+          @attr
           ident(param: MessageDef): MessageDef;
       }
   ```
@@ -195,9 +191,8 @@ The runtime-metadata include the header, in addition to transport-specific metad
 
 ## 5. Attributes
 
-- **Definition**: Array of compiler directives that add extra context to the defined element.
-- **Syntax**: `#[attr, ..]`.
-- **Example**: `#[optional, deprecated]`
+- **Definition**: Compiler directives that add extra context to the defined element.
+- **Syntax**: `@attr`, `@attr(value)`.
 - **Constraints**: Each definition accepts specific set of attributes only.
 
 ## 6. Name Spaces

@@ -88,7 +88,7 @@ Composite types aggregate multiple fields or variants.
 ### Union
 
 - **Definition**: A tagged union with multiple members.
-- **Representation**: Sequence of tag-prefixed values aligned to the largest member.
+- **Representation**: Sequence of tag-prefixed bytes aligned to the largest member.
 - **Syntax**:
   IIDL syntax:
   ```rust 
@@ -99,7 +99,9 @@ Composite types aggregate multiple fields or variants.
       ...
     }
   ```
-- **Constraints**: Unions can't be empty.
+- **Constraints**: 
+  - Unions can't be empty.
+  - Tags can't be negative.
 
 ### Message
 

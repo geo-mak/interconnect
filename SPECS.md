@@ -88,7 +88,7 @@ Composite types aggregate multiple fields or variants.
 ### Union
 
 - **Definition**: A tagged union with multiple members.
-- **Representation**: Sequence of tag-prefixed bytes aligned to the largest member.
+- **Representation**: Tag-prefixed value with the alignment of the largest member (being reconsidered).
 - **Syntax**:
   IIDL syntax:
   ```rust 
@@ -165,6 +165,9 @@ Messages are sent with runtime-metadata that is not expressible in the syntax (r
 
 The runtime-metadata include the header, in addition to transport-specific metadata.
 
+Messages are the only encoding/decoding intermediaries between two sides of the IPC-boundary, where reading from and writing to 
+the transport model require a message instance, which exposes APIs for writing and reading their fields by the rest of the application.
+
 ## 4. Interface
 
 - **Definition**: A collection of IPC functions.
@@ -190,10 +193,16 @@ The runtime-metadata include the header, in addition to transport-specific metad
           ident(param: MessageDef): MessageDef;
       }
   ```
-- **Constraints**:
-  - Interfaces defines functions that can take `message` types as arguments and returns `message` types **only**.
-  - The actual generated interface depends on the `linked types` used by the code generator.
-  - Other options are expressed using attributes.
+- **Constraints**: Interfaces defines functions that can take `message` types as arguments and returns `message` types **only**.
+
+Interfaces guarantee the semantics of the IPC in terms of sent and received messages, but their concrete implementation
+can vary. The exact implementation depends on the `linked` runtime-libraries used by the code generator.
+For example, a generated function may return a union of the defined message and an error-type specific to the runtime.
+
+Moreover, there is no dedicated syntax for annotating `async`, because it is considered an implementation detail and it is 
+not part of the "exchange" semantics between the two sides of an IPC-boundary.
+
+This specification is concerned with the memory-model and its correct expression in terms of correct exchange layouts.
 
 ## 5. Attributes
 

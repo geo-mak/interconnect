@@ -1,24 +1,38 @@
-Interconnect is a collection of components and interfaces for constructing inter-process communication pathways.
+Interconnect is a collection of components for constructing inter-process communication pathways.
 
-## Main layers overview.
+## Runtime model overview.
 ```
 ┌─────────────────────────────────────────────┐
 │              Application Layer              │
 │   (Operations' Handlers, Extensions, etc.)  │
 ├─────────────────────────────────────────────┤
 │                Session Layer                │
-│         (Client, Server, Policies)          │
+│     (Client, Server, Routing, Policies)     │
 ├─────────────────────────────────────────────┤
 │                Message Layer                │
-│     (Framing, Encryption, Encoding etc.)    │
+│            (Encoding/Decoding etc.)         │
 ├─────────────────────────────────────────────┤
 │               Connection Layer              │
 │    (Specs Negotiation, Establishing etc.)   │
 ├─────────────────────────────────────────────┤
-│                Transport Layer              │
-│           (TCP, Unix Sockets etc.)          │
+│                Transport Layer              |
+│    (Framing, Encryption, Flow Control etc.) │
 └─────────────────────────────────────────────┘
 ```
+
+Note:
+The connection-Layer will get merged with transport-layer, where establishing a connection is the 
+responsibility of the selected transport-model, according to its semantics.
+
+That's to say that the current specification protocol will be deprecated as transport-agnostic mechanism 
+of establishing connections, in favour of transport-defined mechanisms.
+
+This will give the transport-model fine-grained optimized control over establishing connections according 
+to its features and threat-model.
+
+This change in motivated by the fact that new transport-models will be implemented where the
+"remote" byte-stream oriented transport-models (TCP..etc.) are available in addition to other models
+that are local and based on protected shared-memory.
 
 ## Architectural model and implementation highlights
 
@@ -117,8 +131,8 @@ Each connection starts by announcing the version of its specification protocol a
 Since the ABI is a shared "language" between systems, interoperability and stability are of a strategic importance.
 
 The current prototype I am working on has the following design aspects:
-- Interface definition language with type system (numbers, enums, structs, traits..etc).
-- Compiler and libraries for generating language-specific ABI-compatible implementations from API-definition files.
+- IPC definition language with type system (numbers, enums, structs, traits..etc).
+- Compiler and libraries for generating language-specific ABI-compatible implementations from IPC-definition files.
 - Support generating "async" APIs.
 - Reuseable linear memory with virtual offsets for encoding and decoding.
 - Useful defaults with customizations options.

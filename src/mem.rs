@@ -64,7 +64,7 @@ pub trait ReadAligned<'a> {
     unsafe fn read_aligned_at(offset: usize, src: &'a [u8]) -> Self::Target;
 }
 
-/// Trait for types that write properly-aligned values values into slice.
+/// Trait for types that write properly-aligned values into slice.
 pub trait WriteAligned: Sized {
     type Output;
 

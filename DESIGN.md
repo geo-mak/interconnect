@@ -1,4 +1,6 @@
-Interconnect is a collection of components for constructing inter-process communication pathways.
+Interconnect is a modular framework for constructing inter-process communication pathways.
+
+Interconnect's design aims at providing OS-level framework for bridging the interaction between user-space applications, services and devices, local and remote alike, where "everything" is **neither** an **object** or a **file**, but what it actually is, and what it declares in terms of functionalities exposed directly via well-defined bindings. 
 
 ## Runtime model overview.
 ```

@@ -31,48 +31,44 @@ Collections serve grouping multiple elements of the **same** type.
 ### Vector
 
 - **Definition**: A dynamically sized group of elements.
-- **Representation**: `u32` length-prefix followed by sequence of values with size and alignment of `T`.
+- **Representation**: `u32` length-prefixed sequence of values of the storage type.
+- **Storage**:
+  - Inline: 16-bytes metadata consists of the size and the pointer to the elements's region.
+  - Outline: Sequence of values of the storage type.
 - **Syntax**: `[T]`, where `T` is the storage type. 
 
 ### Array
 
 - **Definition**: A fixed-size group of elements.
-- **Representation**: Sequence of values with size and alignment of `T`.
+- **Representation**: Sequence of values of the storage type.
+- **Storage**: Inlined.
 - **Syntax**: `[T; N]`, where `T` is the storage type and `N` is the length. 
 
 ### UTF-8 Vector
 
 - **Definition**: Variable-length sequence of UTF-8-encoded bytes.
-- **Representation**: `u32` length-prefix followed by a sequence of UTF-8-encoded bytes.
+- **Representation**: `u32` length-prefixed sequence of UTF-8-encoded bytes.
+- **Storage**:
+  - Inline: 16-bytes metadata consists of the size and the pointer to the elements's region.
+  - Outline: Sequence of UTF-8-encoded bytes.
 - **Syntax**: `string`. 
 
 ### UTF-8 Array
 
 - **Definition**: Fixed-length sequence of UTF-8-encoded bytes.
 - **Representation**: Sequence of UTF-8-encoded bytes.
+- **Storage**: Inlined.
 - **Syntax**: `string[N]` where `N` is the length. 
 
 ## 3. Composite Types
 
 Composite types aggregate multiple fields or variants.
 
-### Struct
-
-- **Definition**: A fixed-layout collection of named fields.
-- **Representation**: Array of bytes with layout aligned to the largest field.
-- **Syntax**: 
-  IIDL syntax:
-  ```rust
-    struct { 
-      ident: type, 
-      ..
-    }
-  ```
-
 ### Enums
 
 - **Definition**: A group of named constants.
 - **Representation**: Unsigned integer with representation depends on the number of variants.
+- **Storage**: Inlined.
 - **Syntax**:
   IIDL syntax:
   ```rust 
@@ -88,7 +84,10 @@ Composite types aggregate multiple fields or variants.
 ### Union
 
 - **Definition**: A tagged union with multiple members.
-- **Representation**: Metadata block contains the tag, size and the start offset of the active member.
+- **Representation**: Tag-prefixed data of the active member.
+- **Storage**:
+  - Inline: 16-bytes inlined metadata consists of the tag, size and the pointer to member's data.
+  - Outline: Active member's data.
 - **Syntax**:
   IIDL syntax:
   ```rust 
@@ -103,18 +102,33 @@ Composite types aggregate multiple fields or variants.
   - Unions can't be empty.
   - Tags can't be negative.
 
+### Struct
+
+- **Definition**: A fixed-layout collection of named fields.
+- **Representation**: Array of bytes with layout aligned to the alignment of the largest scalar member.
+- **Storage**: Inlined.
+- **Syntax**: 
+  IIDL syntax:
+  ```rust
+    struct { 
+      ident: type, 
+      ..
+    }
+  ```
+
 ### Message
 
 - **Definition**: A struct serves as a unit of data exchange.
 - **Representation**:
-  - Fixed message: Fixed messages are represented as `struct`.
-  - Dynamic message: Dynamic messages are represented using two consecutive blocks, the virtual layout and a structure of fields' data.
+  - Fixed message: Represented as `struct`.
+  - Dynamic message: Represented internally as `VStruct`.
+- **Storage**:
+  - Fixed message: The same as `struct`.
+  - Dynamic message: Stored as two consecutive blocks, the virtual layout and the fields' layout.
     The virtual layout has metadata region encodes the total size and the size of the field.
     Additionally, it encodes the `virtual offsets`, which are used to access the fields.
     Fields are only accessed using `virtual offsets`, which may be valid or invalid.
-    Accessing invalid offset is safe and indicates the absence of the field in the actual sent data.
-    This model enables safe service-level ABI-versioning, where fields can be deprecated in newer versions, 
-    while allowing older systems to access the old layout without issues.
+    Accessing invalid offset is safe and indicates the absence of the field in the fields' layout.
 - **Syntax**:
   - Fixed messages: 
     IIDL syntax:
@@ -201,9 +215,6 @@ For example, a generated function may return a union of the defined message and 
 
 Moreover, there is no dedicated syntax for annotating `async`, because it is considered an implementation detail and it is 
 not part of the "exchange" semantics between the two sides of an IPC-boundary.
-
-Runtime-characteristics like the transport-model and the role of the instance (client, server) are compiler-parameters,
-but they are not part of the IPC-definition.
 
 The IPC-definition is concerned mainly with the data-model and its correct expression in terms of exchange layouts, regardless 
 of the runtime-config.

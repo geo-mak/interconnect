@@ -33,7 +33,7 @@ Collections serve grouping multiple elements of the **same** type.
 - **Definition**: A dynamically sized group of elements.
 - **Representation**: `u32` length-prefixed sequence of values of the storage type.
 - **Storage**:
-  - Inline: 16-bytes metadata consists of the size and the pointer to the elements's region.
+  - Inline: Metadata consists of the size and the pointer to the elements's region.
   - Outline: Sequence of values of the storage type.
 - **Syntax**: `[T]`, where `T` is the storage type. 
 
@@ -49,7 +49,7 @@ Collections serve grouping multiple elements of the **same** type.
 - **Definition**: Variable-length sequence of UTF-8-encoded bytes.
 - **Representation**: `u32` length-prefixed sequence of UTF-8-encoded bytes.
 - **Storage**:
-  - Inline: 16-bytes metadata consists of the size and the pointer to the elements's region.
+  - Inline: Metadata consists of the size and the pointer to the elements's region.
   - Outline: Sequence of UTF-8-encoded bytes.
 - **Syntax**: `string`. 
 
@@ -86,7 +86,7 @@ Composite types aggregate multiple fields or variants.
 - **Definition**: A tagged union with multiple members.
 - **Representation**: Tag-prefixed data of the active member.
 - **Storage**:
-  - Inline: 16-bytes inlined metadata consists of the tag, size and the pointer to member's data.
+  - Inline: Metadata consists of the tag, size and the pointer to member's data.
   - Outline: Active member's data.
 - **Syntax**:
   IIDL syntax:

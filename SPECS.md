@@ -88,7 +88,7 @@ Composite types aggregate multiple fields or variants.
 ### Union
 
 - **Definition**: A tagged union with multiple members.
-- **Representation**: Tag-prefix followed by the metadata and the data of the active member.
+- **Representation**: Metadata block contains the tag, size and the start offset of the active member.
 - **Syntax**:
   IIDL syntax:
   ```rust 
@@ -202,7 +202,11 @@ For example, a generated function may return a union of the defined message and 
 Moreover, there is no dedicated syntax for annotating `async`, because it is considered an implementation detail and it is 
 not part of the "exchange" semantics between the two sides of an IPC-boundary.
 
-This specification is concerned with the memory-model and its correct expression in terms of correct exchange layouts.
+Runtime-characteristics like the transport-model and the role of the instance (client, server) are compiler-parameters,
+but they are not part of the IPC-definition.
+
+The IPC-definition is concerned mainly with the data-model and its correct expression in terms of exchange layouts, regardless 
+of the runtime-config.
 
 ## 5. Attributes
 

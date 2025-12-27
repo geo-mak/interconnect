@@ -30,16 +30,16 @@ Collections serve grouping multiple elements of the **same** type.
 
 ### Vector
 
-- **Definition**: A dynamically sized group of elements.
-- **Representation**: `u32` length-prefixed sequence of values of the storage type.
+- **Definition**: Variable-length sized group of elements.
+- **Representation**: The length and sequence of values of the storage type.
 - **Storage**:
-  - Inline: Metadata consists of the size and the pointer to the elements's region.
-  - Outline: Sequence of values of the storage type.
+  - Inline: Metadata consists of the length and a pointer to elements' data.
+  - Out-of-line: Sequence of values of the storage type.
 - **Syntax**: `[T]`, where `T` is the storage type. 
 
 ### Array
 
-- **Definition**: A fixed-size group of elements.
+- **Definition**: A fixed-length group of elements.
 - **Representation**: Sequence of values of the storage type.
 - **Storage**: Inlined.
 - **Syntax**: `[T; N]`, where `T` is the storage type and `N` is the length. 
@@ -47,10 +47,10 @@ Collections serve grouping multiple elements of the **same** type.
 ### UTF-8 Vector
 
 - **Definition**: Variable-length sequence of UTF-8-encoded bytes.
-- **Representation**: `u32` length-prefixed sequence of UTF-8-encoded bytes.
+- **Representation**: The length and a sequence of UTF-8-encoded bytes.
 - **Storage**:
-  - Inline: Metadata consists of the size and the pointer to the elements's region.
-  - Outline: Sequence of UTF-8-encoded bytes.
+  - Inline: Metadata consists of the length and a pointer to elements' data.
+  - Out-of-line: Sequence of UTF-8-encoded bytes.
 - **Syntax**: `string`. 
 
 ### UTF-8 Array
@@ -67,12 +67,12 @@ Composite types aggregate multiple fields or variants.
 ### Enums
 
 - **Definition**: A group of named constants.
-- **Representation**: Unsigned integer with representation depends on the number of variants.
+- **Representation**: Integer-value with representation depends on the number of variants.
 - **Storage**: Inlined.
 - **Syntax**:
   IIDL syntax:
   ```rust 
-    // Represented as unsigned integer-value determined by the compiler.
+    // Represented as integer-value determined by the compiler.
     enum { 
       Ident1,
       Ident2,
@@ -84,10 +84,10 @@ Composite types aggregate multiple fields or variants.
 ### Union
 
 - **Definition**: A tagged union with multiple members.
-- **Representation**: Tag-prefixed data of the active member.
+- **Representation**: A Tag, size and the data of the active member.
 - **Storage**:
-  - Inline: Metadata consists of the tag, size and the pointer to member's data.
-  - Outline: Active member's data.
+  - Inline: Metadata consists of the tag, size and a pointer to member's data.
+  - Out-of-line: Active member's data.
 - **Syntax**:
   IIDL syntax:
   ```rust 
@@ -121,7 +121,7 @@ Composite types aggregate multiple fields or variants.
 - **Definition**: A struct serves as a unit of data exchange.
 - **Representation**:
   - Fixed message: Represented as `struct`.
-  - Dynamic message: Represented internally as `VStruct`.
+  - Dynamic message: Represented as `VStruct`. `VStruct` is an internal type and can't be defined in the syntax.
 - **Storage**:
   - Fixed message: The same as `struct`.
   - Dynamic message: Stored as two consecutive blocks, the virtual layout and the fields' layout.

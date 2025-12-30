@@ -72,9 +72,8 @@ Composite types aggregate multiple fields or variants.
 - **Syntax**:
   IIDL syntax:
   ```rust 
-    enum: type { 
-      Ident1,
-      Ident2,
+    enum Enum: type { 
+      VariantIdent = 0,
       ..
     }
   ```
@@ -91,9 +90,8 @@ Composite types aggregate multiple fields or variants.
   IIDL syntax:
   ```rust 
     union TaggedUnion {
-      1: IdentA: type,
-      2: IdentB: type,
-      ...
+      1: MemberIdent: type,
+      ..
     }
   ```
 - **Constraints**: 

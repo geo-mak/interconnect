@@ -67,13 +67,12 @@ Composite types aggregate multiple fields or variants.
 ### Enums
 
 - **Definition**: A group of named constants.
-- **Representation**: Integer-value with representation depends on the number of variants.
+- **Representation**: Integer-value with representation depends on the specified integer-type (e.g. `u8`).
 - **Storage**: Inlined.
 - **Syntax**:
   IIDL syntax:
   ```rust 
-    // Represented as integer-value determined by the compiler.
-    enum { 
+    enum: type { 
       Ident1,
       Ident2,
       ..
@@ -91,7 +90,6 @@ Composite types aggregate multiple fields or variants.
 - **Syntax**:
   IIDL syntax:
   ```rust 
-    // Tag is represented as unsigned integer-value determined by the compiler.
     union TaggedUnion {
       1: IdentA: type,
       2: IdentB: type,
@@ -231,4 +229,4 @@ of the runtime-config.
 - **Syntax**: `namespace name`.
 - **Representation**: Target-specific. `mod` in Rust.
 
-All of the generated code from the `iidl` file will be accessible under the defined namespace.
+All of the generated code from the `ic` file will be accessible under the defined namespace.

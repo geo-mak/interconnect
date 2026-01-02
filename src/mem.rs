@@ -32,7 +32,6 @@ pub const ALIGN_OF_F64: usize = align_of::<f64>();
 
 pub const SIZE_OF_S_OFFSET: usize = SIZE_OF_I32;
 pub const SIZE_OF_U_OFFSET: usize = SIZE_OF_U32;
-pub const SIZE_OF_V_OFFSET: usize = SIZE_OF_U16;
 
 mod private {
     /// A type where any combination of its bits represents a valid value of it.
@@ -285,17 +284,12 @@ impl_write_aligned_for_primitive!(f32);
 impl_write_aligned_for_primitive!(f64);
 
 /// A `signed` relative pointer.
-///
-/// Used mainly as relative pointer from the start of the data layout of the `VStruct` back to its `VLayout`.
 pub type SOffset = i32;
 
 /// An `unsigned` relative pointer.
 ///
 /// Used to represent both the relative pointers and lengths of vectors and strings.
 pub type UOffset = u32;
-
-/// A relative pointer in `VLayout` points to field's data in the data layout of the `VStruct`.
-pub type VOffset = u16;
 
 /// A `SOffset` that supports typed read/write via `ReadAligned` and `WriteAligned` respectively.
 #[derive(Debug)]
@@ -370,38 +364,5 @@ impl<T> WriteAligned for TypedUOffset<T> {
     #[inline(always)]
     unsafe fn write_aligned_into(&self, dst: &mut [u8], current_len: usize) {
         unsafe { self.value().write_aligned_into(dst, current_len) };
-    }
-}
-
-/// A `VOffset` that supports typed read/write via `ReadAligned` and `WriteAligned` respectively.
-#[derive(Debug)]
-pub struct TypedVOffset<T>(VOffset, PhantomData<T>);
-
-impl<T> TypedVOffset<T> {
-    #[inline(always)]
-    pub fn value(&self) -> VOffset {
-        self.0
-    }
-}
-
-impl<'a, T: ReadAligned<'a>> ReadAligned<'a> for TypedVOffset<T> {
-    type Target = T::Target;
-
-    #[inline(always)]
-    unsafe fn read_aligned_at(offset: usize, src: &'a [u8]) -> Self::Target {
-        let slice = &src[offset..offset + SIZE_OF_V_OFFSET];
-        unsafe {
-            let step = read_aligned_from::<VOffset>(slice) as usize;
-            T::read_aligned_at(offset + step, src)
-        }
-    }
-}
-
-impl<T> WriteAligned for TypedVOffset<T> {
-    type Output = Self;
-
-    #[inline]
-    unsafe fn write_aligned_into(&self, dst: &mut [u8], written_len: usize) {
-        unsafe { self.value().write_aligned_into(dst, written_len) };
     }
 }

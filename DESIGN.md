@@ -101,11 +101,11 @@ Each connection starts by announcing the version of its specification protocol a
 Since the ABI is a shared "language" between systems, interoperability and stability are of a strategic importance.
 
 The current prototype I am working on has the following design aspects:
-- IPC definition language with type system (numbers, enums, structs, traits..etc).
+- IPC definition language with type system (numbers, enums, structs, interfaces..etc).
 - Compiler and libraries for generating language-specific ABI-compatible implementations from IPC-definition files.
 - Support generating "async" APIs.
-- Reuseable linear memory with virtual offsets for encoding and decoding.
-- Useful defaults with customizations options.
+- Reuseable linear memory for encoding and decoding.
+- Compiling to standardized format that acts as intermediate representation for building native runtimes and code-generators (Bring your own bottle and welcome to the party).
 
 These design aspects aim at abstracting the details of the ABI using higher-level representation of the API, for 
 automated management of interoperability and compatibility.

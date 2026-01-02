@@ -60,9 +60,9 @@ Collections serve grouping multiple elements of the **same** type.
 - **Storage**: Inlined.
 - **Syntax**: `string[N]` where `N` is the length. 
 
-## 3. Composite Types
+## 3. Compound Types
 
-Composite types aggregate multiple fields or variants.
+Compound types aggregate multiple fields or variants.
 
 ### Enums
 
@@ -72,7 +72,7 @@ Composite types aggregate multiple fields or variants.
 - **Syntax**:
   IIDL syntax:
   ```rust 
-    enum Enum: type { 
+    enum EnumIdent: type { 
       VariantIdent = 0,
       ..
     }
@@ -89,7 +89,7 @@ Composite types aggregate multiple fields or variants.
 - **Syntax**:
   IIDL syntax:
   ```rust 
-    union TaggedUnion {
+    union UnionIdent {
       1: MemberIdent: type,
       ..
     }
@@ -106,7 +106,7 @@ Composite types aggregate multiple fields or variants.
 - **Syntax**: 
   IIDL syntax:
   ```rust
-    struct { 
+    struct StructIdent { 
       ident: type, 
       ..
     }
@@ -114,69 +114,25 @@ Composite types aggregate multiple fields or variants.
 
 ### Message
 
-- **Definition**: A struct serves as a unit of data exchange.
-- **Representation**:
-  - Fixed message: Represented as `struct`.
-  - Dynamic message: Represented as `VStruct`. `VStruct` is an internal type and can't be defined in the syntax.
-- **Storage**:
-  - Fixed message: The same as `struct`.
-  - Dynamic message: Stored as two consecutive blocks, the virtual layout and the fields' layout.
-    The virtual layout has metadata region encodes the total size and the size of the field.
-    Additionally, it encodes the `virtual offsets`, which are used to access the fields.
-    Fields are only accessed using `virtual offsets`, which may be valid or invalid.
-    Accessing invalid offset is safe and indicates the absence of the field in the fields' layout.
+- **Definition**: A transactional unit of exchanging data.
+- **Representation**: Represented as `struct`.
+- **Storage**: Inlined.
 - **Syntax**:
-  - Fixed messages: 
     IIDL syntax:
     ```rust
-      message { 
+      message MessageIdent { 
         ident: type, 
         ..
       }
     ```
-
-  - Dynamic messages:
-    IIDL syntax:
-    ```rust
-      dynamic message { 
-        ident: type, 
-        ..
-      }
-    ```
-
-- **Example**:
-  IIDL syntax:
-  ```rust
-        // Fixed message compiled as plain struct.
-        message AddParams {
-            lhs: i32,
-            rhs: i32,
-        }
-
-        // Dynamic message compiled as `VStruct`.
-        dynamic message DynAddParams {
-            lhs: i32,
-            rhs: i32,
-            @deprecated
-            legacy_field: bool,  // May be absent in newer messages, but safe to access in older systems.
-            new_field: [u8],  // New field will be observed only by newer systems.
-        }
-  ```
 - **Constraints**:
-  - Messages are the only types that know how to encode and decode full exchange layouts.
+  - Messages are the only types that know how to encode and decode full exchange-layouts.
   - Messages are the only types that can cross the API-boundary, all other types are fragments of their data.
   - Messages can't be fields of anything, including other messages.
-  - Fixed messages are ABI-stable only if their layout remains **unchanged**.
-  - Refactoring dynamic messages requires adding new fields at the **end**, and annotating old fields as `@deprecated`.
-
-Dynamic messages shall be the preferred choice for maintaining ABI-stability at the service-level.
-
-Messages are sent with runtime-metadata that is not expressible in the syntax (runtime-implementation details).
 
 The runtime-metadata include the header, in addition to transport-specific metadata.
 
-Messages are the only encoding/decoding intermediaries between two sides of the IPC-boundary, where reading from and writing to 
-the transport model require a message instance, which exposes APIs for writing and reading their fields by the rest of the application.
+Messages are the only encoding/decoding intermediaries between two sides of the IPC-boundary, where reading from and writing to the transport model require a message-instance, which exposes APIs for writing and reading their fields by the rest of the application.
 
 ## 4. Interface
 
@@ -184,7 +140,7 @@ the transport model require a message instance, which exposes APIs for writing a
 - **Syntax**:
   IIDL syntax:
   ```rust
-      interface IPCInterface {
+      interface InterfaceIdent {
           // Niladic one-way call.
           @attr
           ident();

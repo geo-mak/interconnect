@@ -70,14 +70,25 @@ Compound types aggregate multiple fields or variants.
 - **Representation**: Integer-value with representation depends on the specified integer-type (e.g. `u8`).
 - **Storage**: Inlined.
 - **Syntax**:
-  IIDL syntax:
   ```rust 
     enum EnumIdent: type { 
       VariantIdent = 0,
       ..
     }
   ```
-- **Constraints**: Enums can't be empty.
+- **Constraints**: 
+  - Enums can't be empty.
+  - Tag's value is explicit.
+
+- **Example**:
+  ```rust
+    enum EnumA: u8 {
+      A = 0,
+      B = 4,
+      C = 2,
+      D = 3,
+    }
+  ```
 
 ### Union
 
@@ -87,7 +98,6 @@ Compound types aggregate multiple fields or variants.
   - Inline: Metadata consists of the tag, size and a pointer to member's data.
   - Out-of-line: Active member's data.
 - **Syntax**:
-  IIDL syntax:
   ```rust 
     union UnionIdent {
       1: MemberIdent: type,
@@ -97,14 +107,24 @@ Compound types aggregate multiple fields or variants.
 - **Constraints**: 
   - Unions can't be empty.
   - Tags can't be negative.
+  - Tags can't be sparse.
+
+- **Example**:
+  ```rust
+    // 16-bytes inline size aligned to 8 bytes.
+    union UnionA {
+      1: MemberA: StructA,
+      2: MemberB: EnumA,
+      3: MemberC: f32,
+    }
+  ```
 
 ### Struct
 
 - **Definition**: A fixed-layout collection of named fields.
 - **Representation**: Array of bytes with layout aligned to the alignment of the largest scalar member.
 - **Storage**: Inlined.
-- **Syntax**: 
-  IIDL syntax:
+- **Syntax**:
   ```rust
     struct StructIdent { 
       ident: type, 
@@ -112,13 +132,38 @@ Compound types aggregate multiple fields or variants.
     }
   ```
 
+Interconnect's structs are identical to C-structs in terms of memory-layout.
+
+- **Example**:
+  ```rust
+    // Struct's size: 24 bytes.
+    // Struct's alignment: 8 bytes.
+    struct StructA {
+      // Size: 16,  Alignment: 8,  Offset: 0, Padding: 0.
+      first: [StructB],
+      // Size: 4,  Alignment: 4,  Offset: 16, Padding: 0.
+      second: f32,
+      // Size: 4,  Alignment: 4,  Offset: 20, Padding: 0.
+      third: f32,
+    }
+  ```
+
+  Struct's fields allow assignment of default values, but like optionality-rules their rules are not well-defined.
+
+  ```rust
+    struct StructB {
+      first: i32 = -5,
+      second: f64 = 5.6,
+      third: string = "hi there",
+    }
+  ```
+
 ### Message
 
 - **Definition**: A transactional unit of exchanging data.
-- **Representation**: Represented as `struct`.
+- **Representation**: Represented as `struct` with identical layout-rules.
 - **Storage**: Inlined.
 - **Syntax**:
-    IIDL syntax:
     ```rust
       message MessageIdent { 
         ident: type, 
@@ -138,7 +183,6 @@ Messages are the only encoding/decoding intermediaries between two sides of the 
 
 - **Definition**: A collection of IPC functions.
 - **Syntax**:
-  IIDL syntax:
   ```rust
       interface InterfaceIdent {
           // Niladic one-way call.

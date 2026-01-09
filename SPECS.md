@@ -160,7 +160,7 @@ Interconnect's structs are identical to C-structs in terms of memory-layout.
 
 ### Message
 
-- **Definition**: A transactional unit of exchanging data.
+- **Definition**: User-defined transactional unit of data exchanged between the two sides of the interface-boundary.
 - **Representation**: Represented as `struct` with identical layout-rules.
 - **Storage**: Inlined.
 - **Syntax**:
@@ -175,9 +175,15 @@ Interconnect's structs are identical to C-structs in terms of memory-layout.
   - Messages are the only types that can cross the API-boundary, all other types are fragments of their data.
   - Messages can't be fields of anything, including other messages.
 
-The runtime-metadata include the header, in addition to transport-specific metadata.
+User-defined messages are sent and received with additional **control** metadata. 
 
-Messages are the only encoding/decoding intermediaries between two sides of the IPC-boundary, where reading from and writing to the transport model require a message-instance, which exposes APIs for writing and reading their fields by the rest of the application.
+The layout of user-defined messages consists of two main regions:
+- Inlined message-fields as defined.
+- Out-of-line region (if applicable) for storing the sequence of the data blocks referenced by the inline-fields.
+
+The out-of-line data blocks are appended after the inline-layout in **traversal order**.
+
+Both regions are aligned to **8-bytes**, this implies that the size of encoding/decoding memory must be multiple of 8.
 
 ## 4. Interface
 

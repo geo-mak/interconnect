@@ -80,9 +80,15 @@ The panic-policy is to abort. The reasons for adopting abort instead of unwind a
 - Maintaining the conceptual clarity of the control-flow.
 - Designing for "unexpected" failure is an oxymoron.
 
-In simple terms, guarding execution against unexpected "things" is either wrapping possibly "misbehaving" code **external** 
-to the system with "isolated effect" (e.g OS with processes), or a messed-up implementation of the system itself that lacks 
-proper design and **system analysis**.
+Interconnect's design differentiates between control-flow errors and error-reporting with two separate types:
+- Constrained error-type.
+- Reporter instance providing access to the reporting sub-system.
+
+Returned errors serve **informing** the calling context which path to take after an error has been encountered, 
+with enough information to serve as **branching flags**.
+
+Error-reporting is performed via the reporting sub-system, that produces reports with certain structure and format, 
+for machines and/or humans.
 
 ## Data exchange
 Interconnect's unit of exchange is "message".

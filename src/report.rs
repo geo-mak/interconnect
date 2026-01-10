@@ -48,20 +48,20 @@ pub mod colors {
 
 /// Types implementing this trait act as detailed context for a report.
 ///
-/// **Currently**, only `Display` is required to be qualified as `ReportMaterial`,
+/// **Currently**, only `Display` is required to be qualified as `ReportContent`,
 /// but the trait would be extended with methods that enable optimizations.
-pub trait ReportMaterial: Display {}
+pub trait ReportContent: Display {}
 
-/// A no-op implementation of `ReportMaterial`.
-pub struct NoMaterial;
+/// A no-op implementation of `ReportContent`.
+pub struct NoContent;
 
-impl Display for NoMaterial {
+impl Display for NoContent {
     fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
         Ok(())
     }
 }
 
-impl<T> ReportMaterial for T where T: Display {}
+impl<T> ReportContent for T where T: Display {}
 
 /// The common unified interface of reporting agents.
 ///
@@ -87,23 +87,23 @@ impl<T> ReportMaterial for T where T: Display {}
 /// - Instance reference (&self): The reference is immutable,
 ///   because in most cases, the implementation must be `Sync`.
 /// - `description`: A short text that describe the event.
-/// - `material`: An added detailed context to the event.
+/// - `content`: An added detailed context to the event.
 ///
 /// # No-Op
 /// - The no-op implementation of reporter is `()`.
-/// - The no-op implementation of `ReportMaterial` is `NoMaterial`.
+/// - The no-op implementation of `ReportContent` is `NoContent`.
 pub trait Reporter {
-    fn trace<M: ReportMaterial>(&self, description: &str, material: &M);
-    fn info<M: ReportMaterial>(&self, description: &str, material: &M);
-    fn alert<M: ReportMaterial>(&self, description: &str, material: &M);
-    fn error<M: ReportMaterial>(&self, description: &str, material: &M);
+    fn trace<C: ReportContent>(&self, description: &str, content: &C);
+    fn info<C: ReportContent>(&self, description: &str, content: &C);
+    fn alert<C: ReportContent>(&self, description: &str, content: &C);
+    fn error<C: ReportContent>(&self, description: &str, content: &C);
 }
 
 impl Reporter for () {
-    fn trace<M: ReportMaterial>(&self, _description: &str, _material: &M) {}
-    fn info<M: ReportMaterial>(&self, _description: &str, _material: &M) {}
-    fn alert<M: ReportMaterial>(&self, _description: &str, _material: &M) {}
-    fn error<M: ReportMaterial>(&self, _description: &str, _material: &M) {}
+    fn trace<C: ReportContent>(&self, _description: &str, _content: &C) {}
+    fn info<C: ReportContent>(&self, _description: &str, _content: &C) {}
+    fn alert<C: ReportContent>(&self, _description: &str, _content: &C) {}
+    fn error<C: ReportContent>(&self, _description: &str, _content: &C) {}
 }
 
 thread_local! {
@@ -132,10 +132,10 @@ impl STDIOReporter {
 
 impl Reporter for STDIOReporter {
     #[inline]
-    fn trace<M: ReportMaterial>(&self, description: &str, material: &M) {
+    fn trace<C: ReportContent>(&self, description: &str, content: &C) {
         REPORT_LOCAL_CACHE.with_borrow_mut(|cache| {
             let _ = cache.write_fmt(format_args!(
-                "{}TRACE: {description}. {material}{}\n",
+                "{}TRACE: {description}. {content}{}\n",
                 colors::BLUE,
                 colors::RESET
             ));
@@ -145,10 +145,10 @@ impl Reporter for STDIOReporter {
     }
 
     #[inline]
-    fn info<M: ReportMaterial>(&self, description: &str, material: &M) {
+    fn info<C: ReportContent>(&self, description: &str, content: &C) {
         REPORT_LOCAL_CACHE.with_borrow_mut(|cache| {
             let _ = cache.write_fmt(format_args!(
-                "{}INFO: {description}. {material}{}\n",
+                "{}INFO: {description}. {content}{}\n",
                 colors::GREEN,
                 colors::RESET
             ));
@@ -158,10 +158,10 @@ impl Reporter for STDIOReporter {
     }
 
     #[inline]
-    fn alert<M: ReportMaterial>(&self, description: &str, material: &M) {
+    fn alert<C: ReportContent>(&self, description: &str, content: &C) {
         REPORT_LOCAL_CACHE.with_borrow_mut(|cache| {
             let _ = cache.write_fmt(format_args!(
-                "{}ALERT: {description}. {material}{}\n",
+                "{}ALERT: {description}. {content}{}\n",
                 colors::ORANGE,
                 colors::RESET
             ));
@@ -171,10 +171,10 @@ impl Reporter for STDIOReporter {
     }
 
     #[inline]
-    fn error<M: ReportMaterial>(&self, description: &str, material: &M) {
+    fn error<C: ReportContent>(&self, description: &str, content: &C) {
         REPORT_LOCAL_CACHE.with_borrow_mut(|cache| {
             let _ = cache.write_fmt(format_args!(
-                "{}ERROR: {description}. {material}{}\n",
+                "{}ERROR: {description}. {content}{}\n",
                 colors::BRIGHT_RED,
                 colors::RESET
             ));
@@ -191,9 +191,9 @@ mod tests {
     #[test]
     fn test_stdio_reporter() {
         let instance = STDIOReporter::new();
-        instance.trace("Test trace report", &"Test materials");
-        instance.info("Test info report", &"Test materials");
-        instance.alert("Test alert report", &"Test materials");
-        instance.error("Test error report", &"Test materials");
+        instance.trace("Test trace report", &"Test contents");
+        instance.info("Test info report", &"Test contents");
+        instance.alert("Test alert report", &"Test contents");
+        instance.error("Test error report", &"Test contents");
     }
 }

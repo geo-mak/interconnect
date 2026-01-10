@@ -24,7 +24,7 @@ use crate::error::{ErrKind, RpcError, RpcResult};
 use crate::report::Reporter;
 use crate::specs::{EncryptionState, negotiation};
 use crate::sync::{DynamicLatch, IList, INode, NOOP_WAKER};
-use crate::transport::{TransportLayer, TransportListener};
+use crate::transport::{Transport, TransportListener};
 use crate::{Directive, message};
 
 thread_local! {
@@ -460,7 +460,7 @@ where
         encryption_required: bool,
     ) -> RpcResult<()>
     where
-        T: TransportLayer,
+        T: Transport,
     {
         // TODO: Is it worth cancellation logic?
         let encrypted = timeout(
@@ -490,7 +490,7 @@ where
         encryption_required: bool,
     ) -> RpcResult<Option<(EncryptionState, EncryptionState)>>
     where
-        T: TransportLayer,
+        T: Transport,
     {
         let proposed = negotiation::read_frame(transport).await?;
 

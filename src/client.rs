@@ -28,7 +28,7 @@ use crate::io::IOSegment;
 use crate::report::Reporter;
 use crate::specs::{RpcSpecification, negotiation};
 use crate::sync::{DynamicLatch, NOOP_WAKER};
-use crate::transport::TransportLayer;
+use crate::transport::Transport;
 
 /// The common RPC client interface of async clients.
 pub trait AsyncRpcClient {
@@ -554,7 +554,7 @@ where
 
 impl<T, H, E> RpcAsyncClient<MessageSender<T>, H, E>
 where
-    T: TransportLayer + 'static,
+    T: Transport + 'static,
     H: RpcApplication + Send + Sync + 'static,
     E: Reporter + Send + Sync + 'static,
 {
@@ -582,7 +582,7 @@ where
 
 impl<T, H, E> RpcAsyncClient<EncMessageSender<T>, H, E>
 where
-    T: TransportLayer + 'static,
+    T: Transport + 'static,
     H: RpcApplication + Send + Sync + 'static,
     E: Reporter + Send + Sync + 'static,
 {

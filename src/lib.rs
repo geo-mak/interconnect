@@ -18,4 +18,4 @@ pub use client::RpcAsyncClient;
 pub use core::{Directive, message};
 pub use error::{RpcError, RpcResult};
 pub use server::RpcServer;
-pub use transport::{TransportLayer, TransportListener};
+pub use transport::{Transport, TransportListener};

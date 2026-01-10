@@ -12,7 +12,7 @@ use crate::io::{AsyncIORead, AsyncIOWrite};
 
 pub trait TransportListener<A> {
     type Address;
-    type Transport: TransportLayer;
+    type Transport: Transport;
 
     fn bind(addr: A) -> impl Future<Output = io::Result<Self>>
     where
@@ -72,7 +72,7 @@ impl<A: AsRef<Path>> TransportListener<A> for UnixListener {
 /// - They provide two modes of operation: single-mode and split-mode.
 ///
 /// - In split-mode, the reader and writer shall enable unconstrained full-duplex communication style.
-pub trait TransportLayer: AsyncIORead + AsyncIOWrite + Send + Unpin {
+pub trait Transport: AsyncIORead + AsyncIOWrite + Send + Unpin {
     type Reader: AsyncIORead + Send + Sync + Unpin;
     type Writer: AsyncIOWrite + Send + Sync + Unpin;
     fn into_split(self) -> (Self::Reader, Self::Writer);
@@ -254,7 +254,7 @@ impl AsyncIOWrite for unix::OwnedWriteHalf {
     }
 }
 
-impl TransportLayer for TcpStream {
+impl Transport for TcpStream {
     type Reader = tcp::OwnedReadHalf;
     type Writer = tcp::OwnedWriteHalf;
 
@@ -264,7 +264,7 @@ impl TransportLayer for TcpStream {
     }
 }
 
-impl TransportLayer for UnixStream {
+impl Transport for UnixStream {
     type Reader = unix::OwnedReadHalf;
     type Writer = unix::OwnedWriteHalf;
 

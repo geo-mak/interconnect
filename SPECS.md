@@ -183,7 +183,7 @@ The layout of user-defined messages consists of two main regions:
 
 The out-of-line data blocks are appended after the inline-layout in **traversal order**.
 
-Both regions are aligned to **8-bytes**, this implies that the size of encoding/decoding memory must be multiple of 8.
+Both regions are aligned to **8-bytes**, this implies that the allocated encoding/decoding memory must be aligned to 8-bytes.
 
 ## 4. Interface
 

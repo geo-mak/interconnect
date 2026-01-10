@@ -12,6 +12,7 @@ rust-version = "1.92.0"
 tokio = { version = "1.48.0", features = ["rt-multi-thread", "macros", "net", "io-util", "time", "sync"] }
 parking_lot = { version = "0.12.5" }
 pin-project-lite = { version = "0.2.11" }
+zerocopy = { version = "0.8.33", features = ["derive"]}
 
 bincode =  { version = "2.0.1", features = ["serde", "derive"] }
 serde = { version = "1.0.228", features = ["derive"] }

@@ -30,35 +30,47 @@ Collections serve grouping multiple elements of the **same** type.
 
 ### Vector
 
-- **Definition**: Variable-length sized group of elements.
-- **Representation**: The length and sequence of values of the storage type.
-- **Storage**:
+**Definition**: Variable-length sized group of elements.
+
+**Representation**: The length and sequence of values of the storage type.
+
+**Storage**:
   - Inline: Metadata consists of the length and a pointer to elements' data.
   - Out-of-line: Sequence of values of the storage type.
-- **Syntax**: `[T]`, where `T` is the storage type. 
+
+**Syntax**: `[T]`, where `T` is the storage type. 
 
 ### Array
 
-- **Definition**: A fixed-length group of elements.
-- **Representation**: Sequence of values of the storage type.
-- **Storage**: Inlined.
-- **Syntax**: `[T; N]`, where `T` is the storage type and `N` is the length. 
+**Definition**: A fixed-length group of elements.
+
+**Representation**: Sequence of values of the storage type.
+
+**Storage**: Inlined.
+
+**Syntax**: `[T; N]`, where `T` is the storage type and `N` is the length. 
 
 ### UTF-8 Vector
 
-- **Definition**: Variable-length sequence of UTF-8-encoded bytes.
-- **Representation**: The length and a sequence of UTF-8-encoded bytes.
-- **Storage**:
+**Definition**: Variable-length sequence of UTF-8-encoded bytes.
+
+**Representation**: The length and a sequence of UTF-8-encoded bytes.
+
+**Storage**:
   - Inline: Metadata consists of the length and a pointer to elements' data.
   - Out-of-line: Sequence of UTF-8-encoded bytes.
-- **Syntax**: `string`. 
+
+**Syntax**: `string`. 
 
 ### UTF-8 Array
 
-- **Definition**: Fixed-length sequence of UTF-8-encoded bytes.
-- **Representation**: Sequence of UTF-8-encoded bytes.
-- **Storage**: Inlined.
-- **Syntax**: `string[N]` where `N` is the length. 
+**Definition**: Fixed-length sequence of UTF-8-encoded bytes.
+
+**Representation**: Sequence of UTF-8-encoded bytes.
+
+**Storage**: Inlined.
+
+**Syntax**: `string[N]` where `N` is the length. 
 
 ## 3. Compound Types
 
@@ -66,21 +78,25 @@ Compound types aggregate multiple fields or variants.
 
 ### Enums
 
-- **Definition**: A group of named constants.
-- **Representation**: Integer-value with representation depends on the specified integer-type (e.g. `u8`).
-- **Storage**: Inlined.
-- **Syntax**:
+**Definition**: A group of named constants.
+
+**Representation**: Integer-value with representation depends on the specified integer-type (e.g. `u8`).
+
+**Storage**: Inlined.
+
+**Syntax**:
   ```rust 
     enum EnumIdent: type { 
       VariantIdent = 0,
       ..
     }
   ```
-- **Constraints**: 
+
+**Constraints**: 
   - Enums can't be empty.
   - Tag's value is explicit.
 
-- **Example**:
+**Example**:
   ```rust
     enum EnumA: u8 {
       A = 0,
@@ -92,24 +108,28 @@ Compound types aggregate multiple fields or variants.
 
 ### Union
 
-- **Definition**: A tagged union with multiple members.
-- **Representation**: A Tag, size and the data of the active member.
-- **Storage**:
+**Definition**: A tagged union with multiple members.
+
+**Representation**: A Tag, size and the data of the active member.
+
+**Storage**:
   - Inline: Metadata consists of the tag, size and a pointer to member's data.
   - Out-of-line: Active member's data.
-- **Syntax**:
+
+**Syntax**:
   ```rust 
     union UnionIdent {
       1: MemberIdent: type,
       ..
     }
   ```
-- **Constraints**: 
+
+**Constraints**: 
   - Unions can't be empty.
   - Tags can't be negative.
   - Tags can't be sparse.
 
-- **Example**:
+**Example**:
   ```rust
     // 16-bytes inline size aligned to 8 bytes.
     union UnionA {
@@ -121,10 +141,13 @@ Compound types aggregate multiple fields or variants.
 
 ### Struct
 
-- **Definition**: A fixed-layout collection of named fields.
-- **Representation**: Array of bytes with layout aligned to the alignment of the largest scalar member.
-- **Storage**: Inlined.
-- **Syntax**:
+**Definition**: A fixed-layout collection of named fields.
+
+**Representation**: Array of bytes with layout aligned to the alignment of the largest scalar member.
+
+**Storage**: Inlined.
+
+**Syntax**:
   ```rust
     struct StructIdent { 
       ident: type, 
@@ -132,9 +155,11 @@ Compound types aggregate multiple fields or variants.
     }
   ```
 
+**Constraints**: Structs can't be empty.
+
 Interconnect's structs are identical to C-structs in terms of memory-layout.
 
-- **Example**:
+**Example**:
   ```rust
     // Struct's size: 24 bytes.
     // Struct's alignment: 8 bytes.
@@ -160,20 +185,25 @@ Interconnect's structs are identical to C-structs in terms of memory-layout.
 
 ### Message
 
-- **Definition**: User-defined transactional unit of data exchanged between the two sides of the interface-boundary.
-- **Representation**: Represented as `struct` with identical layout-rules.
-- **Storage**: Inlined.
-- **Syntax**:
+**Definition**: User-defined transactional unit of data exchanged between the two sides of the interface-boundary.
+
+**Representation**: Represented as `struct` with identical layout-rules.
+
+**Storage**: Inlined.
+
+**Syntax**:
     ```rust
       message MessageIdent { 
         ident: type, 
         ..
       }
     ```
-- **Constraints**:
+
+**Constraints**:
+  - Messages can't be empty.
+  - Messages can't be fields of anything, including other messages.
   - Messages are the only types that know how to encode and decode full exchange-layouts.
   - Messages are the only types that can cross the API-boundary, all other types are fragments of their data.
-  - Messages can't be fields of anything, including other messages.
 
 User-defined messages are sent and received with additional **control** metadata. 
 
@@ -187,8 +217,9 @@ Both regions are aligned to **8-bytes**, this implies that the allocated encodin
 
 ## 4. Interface
 
-- **Definition**: A collection of IPC functions.
-- **Syntax**:
+**Definition**: A collection of IPC functions.
+
+**Syntax**:
   ```rust
       interface InterfaceIdent {
           // Niladic one-way call.
@@ -209,7 +240,8 @@ Both regions are aligned to **8-bytes**, this implies that the allocated encodin
           ident(param: MessageDef): MessageDef;
       }
   ```
-- **Constraints**: Interfaces defines functions that can take `message` types as arguments and returns `message` types **only**.
+
+**Constraints**: Interfaces defines functions that can take `message` types as arguments and returns `message` types **only**.
 
 Interfaces guarantee the semantics of the IPC in terms of sent and received messages, but their concrete implementation
 can vary. The exact implementation depends on the `linked` runtime-libraries used by the code generator.
@@ -223,14 +255,18 @@ of the runtime-config.
 
 ## 5. Attributes
 
-- **Definition**: Compiler directives that add extra context to the defined element.
-- **Syntax**: `@attr`, `@attr(value)`.
-- **Constraints**: Each definition accepts specific set of attributes only.
+**Definition**: Compiler directives that add extra context to the defined element.
+
+**Syntax**: `@attr`, `@attr(value)`.
+
+**Constraints**: Each definition accepts specific set of attributes only.
 
 ## 6. Name Spaces
 
-- **Definition**: A grouping namespace for the generated code.
-- **Syntax**: `namespace name`.
-- **Representation**: Target-specific. `mod` in Rust.
+**Definition**: A grouping namespace for the generated code.
+
+**Syntax**: `namespace name`.
+
+**Representation**: Target-specific. `mod` in Rust.
 
 All of the generated code from the `ic` file will be accessible under the defined namespace.

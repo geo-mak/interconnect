@@ -1,6 +1,8 @@
 #[cfg(not(target_endian = "little"))]
 compile_error!("only little-endian targets are supported by Interconnect");
 
+use core::mem::MaybeUninit;
+
 macro_rules! impl_core_op_unary {
     (trait = $trait:ident, fn = $fn:ident, for $name:ident : $inner:ty) => {
         impl core::ops::$trait for $name {
@@ -449,3 +451,48 @@ define_uint!(TypeU64: u64, 8);
 
 define_float!(TypeF32: f32, 4);
 define_float!(TypeF64: f64, 8);
+
+/// Interconnect type.
+pub unsafe trait ICType: 'static + Sized {
+    /// The referenced type with exclusive ownership.
+    type Data<'de>: 'de;
+
+    /// Writes zeroes to the padding for this type, if any.
+    fn write_zero_padding(to: &mut MaybeUninit<Self>);
+}
+
+macro_rules! impl_ic_type_for {
+    ($ty:ty) => {
+        unsafe impl ICType for $ty {
+            type Data<'de> = Self;
+
+            #[inline]
+            fn write_zero_padding(_: &mut MaybeUninit<Self>) {}
+        }
+    };
+}
+
+impl_ic_type_for!(());
+impl_ic_type_for!(bool);
+impl_ic_type_for!(TypeI8);
+impl_ic_type_for!(TypeI16);
+impl_ic_type_for!(TypeI32);
+impl_ic_type_for!(TypeI64);
+impl_ic_type_for!(TypeU8);
+impl_ic_type_for!(TypeU16);
+impl_ic_type_for!(TypeU32);
+impl_ic_type_for!(TypeU64);
+impl_ic_type_for!(TypeF32);
+impl_ic_type_for!(TypeF64);
+
+unsafe impl<T: ICType, const N: usize> ICType for [T; N] {
+    type Data<'de> = [T::Data<'de>; N];
+
+    #[inline]
+    fn write_zero_padding(to: &mut MaybeUninit<Self>) {
+        for i in 0..N {
+            let item = unsafe { &mut *to.as_mut_ptr().cast::<MaybeUninit<T>>().add(i) };
+            T::write_zero_padding(item);
+        }
+    }
+}

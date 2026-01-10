@@ -12,6 +12,7 @@ pub mod specs;
 pub mod sync;
 pub mod transport;
 pub mod types;
+pub mod codec;
 
 pub use client::RpcAsyncClient;
 pub use core::{Directive, message};

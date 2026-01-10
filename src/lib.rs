@@ -5,7 +5,6 @@ pub mod client;
 pub mod core;
 pub mod error;
 pub mod io;
-pub mod mem;
 pub mod specs;
 
 pub mod application;

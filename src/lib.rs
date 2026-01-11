@@ -3,6 +3,7 @@ mod private;
 
 pub mod application;
 pub mod client;
+pub mod codec;
 pub mod core;
 pub mod error;
 pub mod io;
@@ -12,7 +13,6 @@ pub mod specs;
 pub mod sync;
 pub mod transport;
 pub mod types;
-pub mod codec;
 
 pub use client::RpcAsyncClient;
 pub use core::{Directive, message};

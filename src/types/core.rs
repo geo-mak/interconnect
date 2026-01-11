@@ -453,7 +453,7 @@ define_float!(TypeF32: f32, 4);
 define_float!(TypeF64: f64, 8);
 
 /// Interconnect type.
-pub unsafe trait ICType: 'static + Sized {
+pub unsafe trait ProtocolType: 'static + Sized {
     /// The referenced type with exclusive ownership.
     type Data<'de>: 'de;
 
@@ -461,9 +461,9 @@ pub unsafe trait ICType: 'static + Sized {
     fn write_zero_padding(to: &mut MaybeUninit<Self>);
 }
 
-macro_rules! impl_ic_type_for {
+macro_rules! impl_protocol_type_for {
     ($ty:ty) => {
-        unsafe impl ICType for $ty {
+        unsafe impl ProtocolType for $ty {
             type Data<'de> = Self;
 
             #[inline]
@@ -472,20 +472,20 @@ macro_rules! impl_ic_type_for {
     };
 }
 
-impl_ic_type_for!(());
-impl_ic_type_for!(bool);
-impl_ic_type_for!(TypeI8);
-impl_ic_type_for!(TypeI16);
-impl_ic_type_for!(TypeI32);
-impl_ic_type_for!(TypeI64);
-impl_ic_type_for!(TypeU8);
-impl_ic_type_for!(TypeU16);
-impl_ic_type_for!(TypeU32);
-impl_ic_type_for!(TypeU64);
-impl_ic_type_for!(TypeF32);
-impl_ic_type_for!(TypeF64);
+impl_protocol_type_for!(());
+impl_protocol_type_for!(bool);
+impl_protocol_type_for!(TypeI8);
+impl_protocol_type_for!(TypeI16);
+impl_protocol_type_for!(TypeI32);
+impl_protocol_type_for!(TypeI64);
+impl_protocol_type_for!(TypeU8);
+impl_protocol_type_for!(TypeU16);
+impl_protocol_type_for!(TypeU32);
+impl_protocol_type_for!(TypeU64);
+impl_protocol_type_for!(TypeF32);
+impl_protocol_type_for!(TypeF64);
 
-unsafe impl<T: ICType, const N: usize> ICType for [T; N] {
+unsafe impl<T: ProtocolType, const N: usize> ProtocolType for [T; N] {
     type Data<'de> = [T::Data<'de>; N];
 
     #[inline]

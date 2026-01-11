@@ -1,0 +1,293 @@
+use core::marker::PhantomData;
+use core::mem::{MaybeUninit, forget};
+use core::ptr::copy_nonoverlapping;
+
+use crate::types::core::{
+    TypeF32, TypeF64, TypeI8, TypeI16, TypeI32, TypeI64, TypeU8, TypeU16, TypeU32, TypeU64,
+};
+
+/// Conversion hint, that tells if conversion from `T` to `U` is can be done by bitwise-copying bytes of `T`.
+pub struct CopyConversion<T: ?Sized, U: ?Sized>(bool, PhantomData<(*mut T, *mut U)>);
+
+impl<T: ?Sized, U: ?Sized> CopyConversion<T, U> {
+    /// Returns an instance with conversion enabled.
+    ///
+    /// # Safety
+    ///
+    /// `T` and `U` must be the same size and without their padding bytes.
+    pub const unsafe fn enable() -> Self {
+        Self(true, PhantomData)
+    }
+
+    /// Returns an instance with conversion enabled if `value` is `true`.
+    ///
+    /// # Safety
+    ///
+    /// `T` and `U` must be the same size and without their padding bytes.
+    pub const unsafe fn enable_if(value: bool) -> Self {
+        Self(value, PhantomData)
+    }
+
+    /// Returns an instance with conversion disabled.
+    pub const fn disable() -> Self {
+        Self(false, PhantomData)
+    }
+
+    /// Checks if conversion by copying is enabled.
+    pub const fn is_enabled(&self) -> bool {
+        self.0
+    }
+
+    /// Returns an enabled instance, if conversion from `[T; N]` to `[U; N]` is already enabled.
+    pub const fn eval_array<const N: usize>(&self) -> CopyConversion<[T; N], [U; N]>
+    where
+        T: Sized,
+        U: Sized,
+    {
+        unsafe { CopyConversion::enable_if(self.is_enabled()) }
+    }
+
+    /// Returns an enabled instance, if conversion from `[T]` to `[U]` is already enabled.
+    pub const fn eval_slice(&self) -> CopyConversion<[T], [U]>
+    where
+        T: Sized,
+        U: Sized,
+    {
+        unsafe { CopyConversion::enable_if(self.is_enabled()) }
+    }
+}
+
+impl<T: ?Sized> CopyConversion<T, T> {
+    /// Returns an instance with conversion enabled.
+    pub const fn identity() -> Self {
+        unsafe { Self::enable() }
+    }
+}
+
+macro_rules! impl_copy_conversion_for {
+    ($ty:ty) => {
+        impl CopyConversion<$ty, $ty> {
+            /// Checks if conversion by copying between the two primitive types is enabled.
+            pub const PRIMITIVE: Self = Self::identity();
+        }
+    };
+    (native = $native:ty, protocol = $protocol:ty) => {
+        impl_copy_conversion_for!($protocol);
+
+        impl CopyConversion<$native, $protocol> {
+            /// Checks if conversion by copying between the two primitive types is enabled.
+            pub const PRIMITIVE: Self =
+                unsafe {
+                    CopyConversion::enable_if(
+                        size_of::<Self>() <= 1 || cfg!(target_endian = "little"),
+                    )
+                };
+        }
+
+        impl CopyConversion<$protocol, $native> {
+            /// Checks if conversion by copying between the two primitive types is enabled.
+            pub const PRIMITIVE: Self =
+                unsafe {
+                    CopyConversion::enable_if(
+                        CopyConversion::<$native, $protocol>::PRIMITIVE.is_enabled(),
+                    )
+                };
+        }
+    };
+}
+
+impl_copy_conversion_for! {()}
+
+impl_copy_conversion_for! {bool}
+
+impl_copy_conversion_for! { native = i8, protocol = TypeI8 }
+impl_copy_conversion_for! { native = i16, protocol = TypeI16 }
+impl_copy_conversion_for! { native = i32, protocol = TypeI32 }
+impl_copy_conversion_for! { native = i64, protocol = TypeI64 }
+
+impl_copy_conversion_for! { native = u8, protocol = TypeU8 }
+impl_copy_conversion_for! { native = u16, protocol = TypeU16 }
+impl_copy_conversion_for! { native = u32, protocol = TypeU32 }
+impl_copy_conversion_for! { native = u64, protocol = TypeU64 }
+
+impl_copy_conversion_for! { native = f32, protocol = TypeF32 }
+impl_copy_conversion_for! { native = f64, protocol = TypeF64 }
+
+/// A type which is convertible from a protocol type.
+pub trait FromProtocolType<W>: Sized {
+    /// Checks if conversion by bitwise-copying is enabled.
+    const COPY_CONVERSION: CopyConversion<W, Self> = CopyConversion::disable();
+
+    /// Converts the given `protocol_type` to this type.
+    fn from_protocol_type(protocol_type: W) -> Self;
+}
+
+/// A type which is convertible from a reference to a protocol type.
+pub trait FromProtocolTypeRef<W>: FromProtocolType<W> {
+    /// Converts the given `protocol_type` reference to this type.
+    fn from_protocol_type_ref(protocol_type: &W) -> Self;
+}
+
+/// A convertible type from option of protocol type protocol type.
+pub trait FromOptionProtocolType<W>: Sized {
+    /// Converts the given `protocol_type` to an option of this type.
+    fn from_option_protocol_type(protocol_type: W) -> Option<Self>;
+}
+
+/// A convertible type from a reference to an option of protocol type.
+pub trait FromOptionProtocolTypeRef<W>: FromOptionProtocolType<W> {
+    /// Converts the given `protocol_type` reference to an option of this type.
+    fn from_option_protocol_type_ref(protocol_type: &W) -> Option<Self>;
+}
+
+macro_rules! impl_from_protocol_type_for {
+    ($ty:ty) => {
+        impl_from_protocol_type_for!(native = $ty, protocol = $ty);
+    };
+    (native = $native:ty, protocol = $protocol:ty) => {
+        impl FromProtocolType<$protocol> for $native {
+            const COPY_CONVERSION: CopyConversion<$protocol, $native> =
+                CopyConversion::<$protocol, $native>::PRIMITIVE;
+
+            #[inline]
+            fn from_protocol_type(protocol_type: $protocol) -> Self {
+                protocol_type.into()
+            }
+        }
+
+        impl FromProtocolTypeRef<$protocol> for $native {
+            #[inline]
+            fn from_protocol_type_ref(protocol_type: &$protocol) -> Self {
+                (*protocol_type).into()
+            }
+        }
+    };
+}
+
+impl_from_protocol_type_for! {()}
+impl_from_protocol_type_for! {bool}
+
+impl_from_protocol_type_for! { native = i8, protocol = TypeI8 }
+impl_from_protocol_type_for! { native = i16, protocol = TypeI16 }
+impl_from_protocol_type_for! { native = i32, protocol = TypeI32 }
+impl_from_protocol_type_for! { native = i64, protocol = TypeI64 }
+
+impl_from_protocol_type_for! { native = u8, protocol = TypeU8 }
+impl_from_protocol_type_for! { native = u16, protocol = TypeU16 }
+impl_from_protocol_type_for! { native = u32, protocol = TypeU32 }
+impl_from_protocol_type_for! { native = u64, protocol = TypeU64 }
+
+impl_from_protocol_type_for! { native = f32, protocol = TypeF32 }
+impl_from_protocol_type_for! { native = f64, protocol = TypeF64 }
+
+impl<T: FromProtocolType<W>, W, const N: usize> FromProtocolType<[W; N]> for [T; N] {
+    fn from_protocol_type(protocol_type: [W; N]) -> Self {
+        let mut result = MaybeUninit::<[T; N]>::uninit();
+        if T::COPY_CONVERSION.is_enabled() {
+            // Safety: `T` is convertible by copying bitwise its bytes.
+            unsafe {
+                copy_nonoverlapping(protocol_type.as_ptr().cast(), result.as_mut_ptr(), 1);
+            }
+            forget(protocol_type);
+        } else {
+            for (i, item) in protocol_type.into_iter().enumerate() {
+                unsafe {
+                    result
+                        .as_mut_ptr()
+                        .cast::<T>()
+                        .add(i)
+                        .write(T::from_protocol_type(item));
+                }
+            }
+        }
+        unsafe { result.assume_init() }
+    }
+}
+
+impl<T: FromProtocolTypeRef<W>, W, const N: usize> FromProtocolTypeRef<[W; N]> for [T; N] {
+    fn from_protocol_type_ref(protocol_type: &[W; N]) -> Self {
+        let mut result = MaybeUninit::<[T; N]>::uninit();
+        if T::COPY_CONVERSION.is_enabled() {
+            // Safety: `T` is convertible by copying bitwise its bytes.
+            unsafe {
+                copy_nonoverlapping(protocol_type.as_ptr().cast(), result.as_mut_ptr(), 1);
+            }
+        } else {
+            for (i, item) in protocol_type.iter().enumerate() {
+                unsafe {
+                    result
+                        .as_mut_ptr()
+                        .cast::<T>()
+                        .add(i)
+                        .write(T::from_protocol_type_ref(item));
+                }
+            }
+        }
+        unsafe { result.assume_init() }
+    }
+}
+
+impl<T: FromProtocolType<W>, W> FromProtocolType<W> for Box<T> {
+    fn from_protocol_type(protocol_type: W) -> Self {
+        Box::new(T::from_protocol_type(protocol_type))
+    }
+}
+
+impl<T: FromProtocolTypeRef<W>, W> FromProtocolTypeRef<W> for Box<T> {
+    fn from_protocol_type_ref(protocol_type: &W) -> Self {
+        Box::new(T::from_protocol_type_ref(protocol_type))
+    }
+}
+
+impl<T: FromOptionProtocolType<W>, W> FromProtocolType<W> for Option<T> {
+    fn from_protocol_type(protocol_type: W) -> Self {
+        T::from_option_protocol_type(protocol_type)
+    }
+}
+
+impl<T: FromOptionProtocolTypeRef<W>, W> FromProtocolTypeRef<W> for Option<T> {
+    fn from_protocol_type_ref(protocol_type: &W) -> Self {
+        T::from_option_protocol_type_ref(protocol_type)
+    }
+}
+
+/// Type that is convertible to native type.
+pub trait IntoNativeType: Sized {
+    type NativeType: FromProtocolType<Self>;
+
+    /// Converts this type into its native equivalent.
+    fn into_native_type(self) -> Self::NativeType {
+        Self::NativeType::from_protocol_type(self)
+    }
+}
+
+macro_rules! impl_into_native_for {
+    ($ty:ty) => {
+        impl_into_native_for!(native = $ty, protocol = $ty);
+    };
+    (native = $native:ty, protocol = $protocol:ty) => {
+        impl IntoNativeType for $protocol {
+            type NativeType = $native;
+        }
+    };
+}
+
+impl_into_native_for! {()}
+impl_into_native_for! {bool}
+
+impl_into_native_for! { native = i8, protocol = TypeI8 }
+impl_into_native_for! { native = i16, protocol = TypeI16 }
+impl_into_native_for! { native = i32, protocol = TypeI32 }
+impl_into_native_for! { native = i64, protocol = TypeI64 }
+
+impl_into_native_for! { native = u8, protocol = TypeU8 }
+impl_into_native_for! { native = u16, protocol = TypeU16 }
+impl_into_native_for! { native = u32, protocol = TypeU32 }
+impl_into_native_for! { native = u64, protocol = TypeU64 }
+
+impl_into_native_for! { native = f32, protocol = TypeF32 }
+impl_into_native_for! { native = f64, protocol = TypeF64 }
+
+impl<W: IntoNativeType, const N: usize> IntoNativeType for [W; N] {
+    type NativeType = [W::NativeType; N];
+}

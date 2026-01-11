@@ -3,6 +3,11 @@ compile_error!("only little-endian targets are supported by Interconnect");
 
 use core::mem::MaybeUninit;
 
+pub const ALLOC_MEM_ALIGN: usize = 8;
+
+/// Slice of eight bytes aligned to an 8-byte boundary.
+pub type BasicBlock = TypeU64;
+
 macro_rules! impl_core_op_unary {
     (trait = $trait:ident, fn = $fn:ident, for $name:ident : $inner:ty) => {
         impl core::ops::$trait for $name {

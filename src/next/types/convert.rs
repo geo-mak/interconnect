@@ -2,7 +2,7 @@ use core::marker::PhantomData;
 use core::mem::{MaybeUninit, forget};
 use core::ptr::copy_nonoverlapping;
 
-use crate::types::core::{
+use crate::next::types::core::{
     TypeF32, TypeF64, TypeI8, TypeI16, TypeI32, TypeI64, TypeU8, TypeU16, TypeU32, TypeU64,
 };
 

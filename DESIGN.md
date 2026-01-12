@@ -2,51 +2,57 @@ Interconnect is a modular framework for constructing inter-process communication
 
 Interconnect's design aims at providing OS-level framework for bridging the interaction between user-space applications, services and devices, local and remote alike, where "everything" is **neither** an **object** nor a **file**, but what it actually is, and what it declares in terms of functionalities exposed directly via well-defined bindings. 
 
-## Runtime model overview.
-```
-┌─────────────────────────────────────────────┐
-│              Application Layer              │
-│   (Operations' Handlers, Extensions, etc.)  │
-├─────────────────────────────────────────────┤
-│                Session Layer                │
-│     (Client, Server, Routing, Policies)     │
-├─────────────────────────────────────────────┤
-│                Message Layer                │
-│            (Encoding/Decoding etc.)         │
-├─────────────────────────────────────────────┤
-│               Connection Layer              │
-│    (Specs Negotiation, Establishing etc.)   │
-├─────────────────────────────────────────────┤
-│                Transport Layer              |
-│    (Framing, Encryption, Flow Control etc.) │
-└─────────────────────────────────────────────┘
-```
-
-Note:
-The connection-Layer will get merged with transport-layer, where establishing a connection is the 
-responsibility of the selected transport-model, according to its semantics.
-
-That's to say that the current specification protocol will be deprecated as transport-agnostic mechanism 
-of establishing connections, in favour of transport-defined mechanisms.
-
-This will give the transport-model fine-grained optimized control over establishing connections according 
-to its features and threat-model.
-
-This change in motivated by the fact that new transport-models will be implemented where the
-"remote" byte-stream oriented transport-models (TCP..etc.) are available in addition to other models
-that are local and based on protected shared-memory.
-
 ## Architectural model and implementation highlights
 
 Interconnect has dataflow oriented architecture where data availability drives computation.
 
-The entire system is modeled as a set of "functional units" that can be similar or heterogenous.
+Interconnect's runtime is layered with modular components and makes heavy use of static parametric polymorphism.
 
-Functional units are specialized processing units that encapsulate "control flow".
+The main layers are:
 
-Functional units may have exclusive data stores or operate on shared data stores.
+**Transport Layer**:
+Transport components implement the actual mechanics of delivering data from I/O devices to decoders, and from encoders to I/O devices.
 
-Statically sized types with static memory allocation are the main way of creating data stores.
+Each transport components is viewed **and** implemented as a fully-fledged transport-protocol, with its own transport-model, and its own
+specifications and semantics for establishing connections.
+
+From design perspective, the underlying device, technology or networking stack used by the transport model is considered implementation detail, because it doesn't play role in its identify as a transport type.
+
+Transport models will not be identified as TCP, UDS or something else, because these are just internals, even if they are mentions in the documentation. 
+
+For instance two transport models may utilize TCP, but they might have very different features and with different protocol for establishing
+connections, so saying that the transport is "TCP" would say "too little" about it.
+
+Each transport model offers optimizations and tradeoffs for particular use-case.
+
+Designing and implementing transport models is an essential part of the project, where new transport components may get
+added.
+
+**Session Layer**: 
+Session layer provides the components that store the session-state and perform dispatch according to that state.
+
+The provided components are role-based like server and client.
+
+That actual implementation of these types may vary in terms of multiplexing-capabilities and efficiency.
+
+The design takes into account the various needs and their tradeoffs in terms of multiplexing-capabilities and the required
+resources.
+
+**Message Layer**:
+Provides components for encoding, decoding and validation of messages, when sending and receiving.
+
+Message layer exposes types the application can use to construct a **correct message** for the **target method**, and 
+enables efficient and safe zero-copy encoding and decoding of messages.
+
+Messages are passed to the interface carrying borrowed data, and get returned after receiving carrying borrowed data.
+
+Thanks to the custom-layout and strict alignment rules, all types in a message can be accessed in borrowed form, without restrictions other than the lifetime-bound, something that would be very limited, not possible or recklessly unsafe in the "naïve" common 
+world of encoding and decoding out there.
+
+**Application Layer**:
+Application layer is where the user-code constructs messages and makes use of the received messages. This layer is external to the project in terms of implementation.
+
+Interconnect uses this layer to model various use-cases for better understandability and for providing more support types and options where needed.
 
 ## Async, concurrency and parallelism
 
@@ -64,8 +70,8 @@ Within the context of this project, these terms are understood as defined:
 Concurrency and parallelism are synonymous within the context of this project, because the programming model
 must assume parallelism to enure sound access to data stores and the proper data transformation.
 
-The challenges and complexities of these models are inherent to the dominant **"Von Neumann"** hardware architecture,
-where the "control flow" drives computation, and problems like multiple "runtimes" (CPU scheduler, OS scheduler, Process scheduler), memory ordering, synchronizations..etc are just a byproduct.
+Interconnect utilizes "async" for implementing its data-flow model, because this model is inherently "async", 
+or the other way around, "async" has by-definition data-flow model.
 
 ## Error handling and panic policy
 

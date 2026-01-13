@@ -469,7 +469,7 @@ where
         )
         .await??;
 
-        let (r, w) = transport.into_split();
+        let (r, w) = transport.split();
         match encrypted {
             None => {
                 let mut s = MessageSender::new(w);

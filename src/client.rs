@@ -563,10 +563,10 @@ where
         mut transport: T,
         reporter: E,
         application: H,
-    ) -> RpcResult<RpcAsyncClient<MessageSender<T::Writer>, H, E>> {
+    ) -> RpcResult<RpcAsyncClient<MessageSender<T::Sender>, H, E>> {
         negotiation::initiate(&mut transport, RpcSpecification::new(1, false)).await?;
 
-        let (r, w) = transport.into_split();
+        let (r, w) = transport.split();
 
         let instance = RpcAsyncClient::init(
             capacity,
@@ -591,12 +591,12 @@ where
         mut transport: T,
         reporter: E,
         application: H,
-    ) -> RpcResult<RpcAsyncClient<EncMessageSender<T::Writer>, H, E>> {
+    ) -> RpcResult<RpcAsyncClient<EncMessageSender<T::Sender>, H, E>> {
         negotiation::initiate(&mut transport, RpcSpecification::new(1, true)).await?;
 
         let (r_key, w_key) = negotiation::initiate_key_exchange(&mut transport).await?;
 
-        let (r, w) = transport.into_split();
+        let (r, w) = transport.split();
 
         let instance = RpcAsyncClient::init(
             capacity,

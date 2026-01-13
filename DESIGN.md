@@ -23,6 +23,10 @@ Transport models will not be identified as TCP, UDS or something else, because t
 For instance two transport models may utilize TCP, but they might have very different features and with different protocol for establishing
 connections, so saying that the transport is "TCP" would say "too little" about it.
 
+Moreover, I/O abstractions are somehow "clunky" and a major source of bugs and inefficiency, because they tell too little about the underlying mechanics with a lot of redundant buffering and copying in the chain.
+
+The implementation of transport components aim at providing **tight integration** with the underlying I/O device with high level of transparency about the allocation details and buffering strategy.
+
 Each transport model offers optimizations and tradeoffs for particular use-case.
 
 Designing and implementing transport models is an essential part of the project, where new transport components may get

@@ -1,10 +1,9 @@
 [package]
 name = "interconnect_compiler"
 description = "Interconnect's compiler and toolchain"
-repository = "https://github.com/geo-mak/interconnect/compiler"
-
 version = "0.1.0"
 
 rust-version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true

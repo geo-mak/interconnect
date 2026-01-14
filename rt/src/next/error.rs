@@ -5,10 +5,10 @@ use std::io;
 use serde::{Deserialize, Serialize};
 use tokio::time::error::Elapsed;
 
-/// Result type alias for RPC operations.
+/// Result type alias for protocol's operations.
 pub type ProtocolResult<T> = Result<T, ProtocolError>;
 
-/// RPC error variant.
+/// Protocol error variant.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
 #[non_exhaustive]
 #[repr(u8)]
@@ -58,6 +58,12 @@ pub enum ErrKind {
     Unidentified,
 
     Unimplemented,
+
+    Validation,
+
+    NotEnoughData,
+
+    InvalidPadding,
 }
 
 impl ErrKind {
@@ -87,6 +93,9 @@ impl ErrKind {
             19 => DroppedMessage,
             20 => Unidentified,
             21 => Unimplemented,
+            22 => Validation,
+            23 => NotEnoughData,
+            24 => InvalidPadding,
             _ => return None,
         })
     }

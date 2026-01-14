@@ -26,7 +26,7 @@ where
     /// Returns a new instance backed by the given `storage`.
     ///
     /// This method shall be called when referencing new value.
-    pub const fn new(storage: &'de mut MaybeUninit<T>) -> Self
+    pub const fn new_assume_uninit(storage: &'de mut MaybeUninit<T>) -> Self
     where
         T: Sized,
     {
@@ -100,7 +100,7 @@ where
     /// Creates a new instance from the given `storage`.
     ///
     /// Safety: The `storage` must fully **initialized** with valid value of type `T`.
-    pub const unsafe fn new_unchecked_from_init(storage: &mut MaybeUninit<T>) -> Self {
+    pub const unsafe fn new_assume_init(storage: &mut MaybeUninit<T>) -> Self {
         Self {
             ptr: storage.as_mut_ptr(),
             _t: PhantomData,
@@ -222,35 +222,36 @@ unsafe impl<'de, T, U: 'de> Restructure<U> for TypeRef<'de, T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use core::mem::MaybeUninit;
 
     #[test]
     fn test_type_ref_write() {
         let mut storage = MaybeUninit::<u32>::uninit();
-        let mut type_ref = TypeRef::new(&mut storage);
+        let mut tr = TypeRef::new_assume_uninit(&mut storage);
 
-        type_ref.write(10);
-        assert_eq!(unsafe { *type_ref.deref_unchecked() }, 10);
-        assert_eq!(type_ref.as_bytes(), 10u32.to_le_bytes());
+        tr.write(42);
+        assert_eq!(unsafe { *tr.deref_unchecked() }, 42);
+        assert_eq!(tr.as_bytes(), 42u32.to_le_bytes());
     }
 
     #[test]
     fn test_type_ref_index() {
         // Test array indexing
         let mut storage = MaybeUninit::<[u32; 3]>::uninit();
-        let mut type_ref = TypeRef::new(&mut storage);
-        type_ref.write([10, 20, 30]);
+        let mut tr = TypeRef::new_assume_uninit(&mut storage);
+        tr.write([10, 20, 30]);
 
-        assert_eq!(unsafe { *type_ref.index(0).deref_unchecked() }, 10);
-        assert_eq!(unsafe { *type_ref.index(1).deref_unchecked() }, 20);
-        assert_eq!(unsafe { *type_ref.index(2).deref_unchecked() }, 30);
+        assert_eq!(unsafe { *tr.index(0).deref_unchecked() }, 10);
+        assert_eq!(unsafe { *tr.index(1).deref_unchecked() }, 20);
+        assert_eq!(unsafe { *tr.index(2).deref_unchecked() }, 30);
     }
 
     #[test]
     fn test_type_ref_iterator() {
         let mut data = [10i32, 20i32, 30i32];
-        let type_ref = unsafe { TypeRef::new_slice_unchecked(data.as_mut_ptr(), 3) };
+        let slice_ref = unsafe { TypeRef::new_slice_unchecked(data.as_mut_ptr(), 3) };
 
-        let mut iter = type_ref;
+        let mut iter = slice_ref;
         assert_eq!(iter.len(), 3);
         assert_eq!(iter.size_hint(), (3, Some(3)));
 

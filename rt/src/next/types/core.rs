@@ -454,8 +454,8 @@ define_float!(TypeF64: f64, 8);
 
 /// Interconnect type.
 pub unsafe trait ProtocolType: 'static + Sized {
-    /// The referenced type with exclusive ownership.
-    type Data<'de>: 'de;
+    /// The referenced inner type.
+    type Type<'de>: 'de;
 
     /// Writes zeroes to the padding for this type, if any.
     fn write_zero_padding(to: &mut MaybeUninit<Self>);
@@ -464,7 +464,7 @@ pub unsafe trait ProtocolType: 'static + Sized {
 macro_rules! impl_protocol_type_for {
     ($ty:ty) => {
         unsafe impl ProtocolType for $ty {
-            type Data<'de> = Self;
+            type Type<'de> = Self;
 
             #[inline]
             fn write_zero_padding(_: &mut MaybeUninit<Self>) {}
@@ -486,7 +486,7 @@ impl_protocol_type_for!(TypeF32);
 impl_protocol_type_for!(TypeF64);
 
 unsafe impl<T: ProtocolType, const N: usize> ProtocolType for [T; N] {
-    type Data<'de> = [T::Data<'de>; N];
+    type Type<'de> = [T::Type<'de>; N];
 
     #[inline]
     fn write_zero_padding(to: &mut MaybeUninit<Self>) {

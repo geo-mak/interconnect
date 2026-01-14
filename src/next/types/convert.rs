@@ -12,18 +12,14 @@ pub struct CopyConversion<T: ?Sized, U: ?Sized>(bool, PhantomData<(*mut T, *mut 
 impl<T: ?Sized, U: ?Sized> CopyConversion<T, U> {
     /// Returns an instance with conversion enabled.
     ///
-    /// # Safety
-    ///
-    /// `T` and `U` must be the same size and without their padding bytes.
+    /// Safety: `T` and `U` must be the same size and without their padding bytes.
     pub const unsafe fn enable() -> Self {
         Self(true, PhantomData)
     }
 
     /// Returns an instance with conversion enabled if `value` is `true`.
     ///
-    /// # Safety
-    ///
-    /// `T` and `U` must be the same size and without their padding bytes.
+    /// Safety: `T` and `U` must be the same size and without their padding bytes.
     pub const unsafe fn enable_if(value: bool) -> Self {
         Self(value, PhantomData)
     }
@@ -59,7 +55,7 @@ impl<T: ?Sized, U: ?Sized> CopyConversion<T, U> {
 
 impl<T: ?Sized> CopyConversion<T, T> {
     /// Returns an instance with conversion enabled.
-    pub const fn identity() -> Self {
+    pub const fn identical() -> Self {
         unsafe { Self::enable() }
     }
 }
@@ -67,22 +63,19 @@ impl<T: ?Sized> CopyConversion<T, T> {
 macro_rules! impl_copy_conversion_for {
     ($ty:ty) => {
         impl CopyConversion<$ty, $ty> {
-            /// Checks if conversion by copying between the two primitive types is enabled.
-            pub const PRIMITIVE: Self = Self::identity();
+            pub const PRIMITIVE: Self = Self::identical();
         }
     };
     (native = $native:ty, protocol = $protocol:ty) => {
         impl_copy_conversion_for!($protocol);
 
         impl CopyConversion<$native, $protocol> {
-            /// Checks if conversion by copying between the two primitive types is enabled.
             pub const PRIMITIVE: Self = unsafe {
                 CopyConversion::enable_if(size_of::<Self>() <= 1 || cfg!(target_endian = "little"))
             };
         }
 
         impl CopyConversion<$protocol, $native> {
-            /// Checks if conversion by copying between the two primitive types is enabled.
             pub const PRIMITIVE: Self = unsafe {
                 CopyConversion::enable_if(
                     CopyConversion::<$native, $protocol>::PRIMITIVE.is_enabled(),

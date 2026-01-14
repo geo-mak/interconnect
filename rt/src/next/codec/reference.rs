@@ -32,7 +32,7 @@ where
     {
         unsafe {
             storage.as_mut_ptr().write_bytes(0, 1);
-            Self::new_unchecked(storage.as_mut_ptr())
+            Self::from_ptr(storage.as_mut_ptr())
         }
     }
 
@@ -41,7 +41,7 @@ where
     /// Safety:
     /// - The memory-location pointed to by the pointer must be fully initialized.
     /// - The pointer must be at offset aligned to the alignment of `T`.
-    pub const unsafe fn new_unchecked(ptr: *mut T) -> Self {
+    pub const unsafe fn from_ptr(ptr: *mut T) -> Self {
         Self {
             ptr,
             _t: PhantomData,
@@ -227,23 +227,23 @@ mod tests {
     #[test]
     fn test_type_ref_write() {
         let mut storage = MaybeUninit::<u32>::uninit();
-        let mut tr = TypeRef::new_assume_uninit(&mut storage);
+        let mut type_ref = TypeRef::new_assume_uninit(&mut storage);
 
-        tr.write(42);
-        assert_eq!(unsafe { *tr.deref_unchecked() }, 42);
-        assert_eq!(tr.as_bytes(), 42u32.to_le_bytes());
+        type_ref.write(42);
+        assert_eq!(unsafe { *type_ref.deref_unchecked() }, 42);
+        assert_eq!(type_ref.as_bytes(), 42u32.to_le_bytes());
     }
 
     #[test]
     fn test_type_ref_index() {
         // Test array indexing
         let mut storage = MaybeUninit::<[u32; 3]>::uninit();
-        let mut tr = TypeRef::new_assume_uninit(&mut storage);
-        tr.write([10, 20, 30]);
+        let mut type_ref = TypeRef::new_assume_uninit(&mut storage);
+        type_ref.write([10, 20, 30]);
 
-        assert_eq!(unsafe { *tr.index(0).deref_unchecked() }, 10);
-        assert_eq!(unsafe { *tr.index(1).deref_unchecked() }, 20);
-        assert_eq!(unsafe { *tr.index(2).deref_unchecked() }, 30);
+        assert_eq!(unsafe { *type_ref.index(0).deref_unchecked() }, 10);
+        assert_eq!(unsafe { *type_ref.index(1).deref_unchecked() }, 20);
+        assert_eq!(unsafe { *type_ref.index(2).deref_unchecked() }, 30);
     }
 
     #[test]

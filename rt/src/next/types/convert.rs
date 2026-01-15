@@ -1,5 +1,5 @@
 use core::marker::PhantomData;
-use core::mem::{MaybeUninit, forget};
+use core::mem::{ManuallyDrop, MaybeUninit};
 use core::ptr::copy_nonoverlapping;
 
 use crate::next::types::core::{
@@ -17,13 +17,6 @@ impl<T: ?Sized, U: ?Sized> CopyConversion<T, U> {
         Self(true, PhantomData)
     }
 
-    /// Returns an instance with conversion enabled if `value` is `true`.
-    ///
-    /// Safety: `T` and `U` must be the same size and without their padding bytes.
-    pub const unsafe fn enable_if(value: bool) -> Self {
-        Self(value, PhantomData)
-    }
-
     /// Returns an instance with conversion disabled.
     pub const fn disable() -> Self {
         Self(false, PhantomData)
@@ -34,13 +27,20 @@ impl<T: ?Sized, U: ?Sized> CopyConversion<T, U> {
         self.0
     }
 
+    /// Returns an instance with conversion-hint matching the passed predicate.
+    ///
+    /// Safety: `T` and `U` must be the same size and without their padding bytes.
+    pub const unsafe fn from_predicate(predicate: bool) -> Self {
+        Self(predicate, PhantomData)
+    }
+
     /// Returns an enabled instance, if conversion from `[T; N]` to `[U; N]` is already enabled.
     pub const fn eval_array<const N: usize>(&self) -> CopyConversion<[T; N], [U; N]>
     where
         T: Sized,
         U: Sized,
     {
-        unsafe { CopyConversion::enable_if(self.is_enabled()) }
+        unsafe { CopyConversion::from_predicate(self.is_enabled()) }
     }
 
     /// Returns an enabled instance, if conversion from `[T]` to `[U]` is already enabled.
@@ -49,7 +49,7 @@ impl<T: ?Sized, U: ?Sized> CopyConversion<T, U> {
         T: Sized,
         U: Sized,
     {
-        unsafe { CopyConversion::enable_if(self.is_enabled()) }
+        unsafe { CopyConversion::from_predicate(self.is_enabled()) }
     }
 }
 
@@ -71,13 +71,15 @@ macro_rules! impl_copy_conversion_for {
 
         impl CopyConversion<$native, $protocol> {
             pub const PRIMITIVE: Self = unsafe {
-                CopyConversion::enable_if(size_of::<Self>() <= 1 || cfg!(target_endian = "little"))
+                CopyConversion::from_predicate(
+                    size_of::<Self>() <= 1 || cfg!(target_endian = "little"),
+                )
             };
         }
 
         impl CopyConversion<$protocol, $native> {
             pub const PRIMITIVE: Self = unsafe {
-                CopyConversion::enable_if(
+                CopyConversion::from_predicate(
                     CopyConversion::<$native, $protocol>::PRIMITIVE.is_enabled(),
                 )
             };
@@ -171,17 +173,16 @@ impl_from_protocol_type_for! { native = f64, protocol = TypeF64 }
 
 impl<T: FromProtocolType<P>, P, const N: usize> FromProtocolType<[P; N]> for [T; N] {
     fn from_protocol_type(protocol_type: [P; N]) -> Self {
-        let mut result = MaybeUninit::<[T; N]>::uninit();
+        let mut value = MaybeUninit::<[T; N]>::uninit();
         if T::COPY_CONVERSION.is_enabled() {
-            // Safety: `T` is convertible by copying bitwise its bytes.
             unsafe {
-                copy_nonoverlapping(protocol_type.as_ptr().cast(), result.as_mut_ptr(), 1);
+                copy_nonoverlapping(protocol_type.as_ptr().cast(), value.as_mut_ptr(), 1);
             }
-            forget(protocol_type);
+            let _ = ManuallyDrop::new(protocol_type);
         } else {
             for (i, item) in protocol_type.into_iter().enumerate() {
                 unsafe {
-                    result
+                    value
                         .as_mut_ptr()
                         .cast::<T>()
                         .add(i)
@@ -189,22 +190,21 @@ impl<T: FromProtocolType<P>, P, const N: usize> FromProtocolType<[P; N]> for [T;
                 }
             }
         }
-        unsafe { result.assume_init() }
+        unsafe { value.assume_init() }
     }
 }
 
 impl<T: FromProtocolTypeRef<P>, P, const N: usize> FromProtocolTypeRef<[P; N]> for [T; N] {
     fn from_protocol_type_ref(protocol_type: &[P; N]) -> Self {
-        let mut result = MaybeUninit::<[T; N]>::uninit();
+        let mut value = MaybeUninit::<[T; N]>::uninit();
         if T::COPY_CONVERSION.is_enabled() {
-            // Safety: `T` is convertible by copying bitwise its bytes.
             unsafe {
-                copy_nonoverlapping(protocol_type.as_ptr().cast(), result.as_mut_ptr(), 1);
+                copy_nonoverlapping(protocol_type.as_ptr().cast(), value.as_mut_ptr(), 1);
             }
         } else {
             for (i, item) in protocol_type.iter().enumerate() {
                 unsafe {
-                    result
+                    value
                         .as_mut_ptr()
                         .cast::<T>()
                         .add(i)
@@ -212,7 +212,7 @@ impl<T: FromProtocolTypeRef<P>, P, const N: usize> FromProtocolTypeRef<[P; N]> f
                 }
             }
         }
-        unsafe { result.assume_init() }
+        unsafe { value.assume_init() }
     }
 }
 

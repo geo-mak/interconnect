@@ -1,15 +1,15 @@
 use core::mem::MaybeUninit;
 use core::ptr::copy_nonoverlapping;
 
-use crate::next::codec::limits::TypeLimits;
 use crate::next::error::ProtocolResult;
 use crate::next::types::convert::CopyConversion;
 use crate::next::types::core::{
     TypeF32, TypeF64, TypeI8, TypeI16, TypeI32, TypeI64, TypeU8, TypeU16, TypeU32, TypeU64,
 };
+use crate::next::types::limits::TypeLimits;
 
 pub unsafe trait Encode<P: TypeLimits, E: ?Sized>: Sized {
-    /// Hint for encoders that enables fast copying if the type can be copied bitwise.
+    /// Hint for encoders that enables fast conversion if the type can be copied bitwise.
     const COPY_CONVERSION: CopyConversion<Self, P> = CopyConversion::disable();
     /// Encodes the value in two stages.
     ///

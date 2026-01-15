@@ -3,10 +3,10 @@ use core::mem::MaybeUninit;
 use core::slice::from_raw_parts;
 
 use crate::next::codec::encode::Encode;
-use crate::next::codec::limits::TypeLimits;
 use crate::next::codec::reference::TypeRef;
 use crate::next::error::ProtocolResult;
 use crate::next::types::core::ProtocolType;
+use crate::next::types::limits::TypeLimits;
 
 pub struct Skip<'a, E: ?Sized, T> {
     pub encoder: &'a mut E,

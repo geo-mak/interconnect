@@ -3,7 +3,6 @@ use core::mem::ManuallyDrop;
 use core::ops::Deref;
 use core::ptr::NonNull;
 
-use crate::next::codec::limits::TypeLimits;
 use crate::next::codec::reference::TypeRef;
 use crate::next::error::{ErrKind, ProtocolError, ProtocolResult};
 use crate::next::types::convert::{FromProtocolType, IntoNativeType};
@@ -11,6 +10,7 @@ use crate::next::types::core::{
     ProtocolType, TypeF32, TypeF64, TypeI8, TypeI16, TypeI32, TypeI64, TypeU8, TypeU16, TypeU32,
     TypeU64,
 };
+use crate::next::types::limits::TypeLimits;
 
 /// A type that can construct itself as protocol type from bytes.
 pub unsafe trait Decode<D: ?Sized>: ProtocolType + TypeLimits {

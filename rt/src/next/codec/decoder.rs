@@ -3,10 +3,10 @@ use core::ptr::NonNull;
 use core::slice;
 
 use crate::next::codec::decode::{Decode, Decoded};
-use crate::next::codec::limits::TypeLimits;
 use crate::next::codec::reference::TypeRef;
 use crate::next::error::{ErrKind, ProtocolError, ProtocolResult};
 use crate::next::mem::{ALLOC_MEM_ALIGN, BasicBlock};
+use crate::next::types::limits::TypeLimits;
 
 #[inline]
 const fn assert_alloc_mem_aligned<T>() {

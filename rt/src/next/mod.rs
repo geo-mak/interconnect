@@ -5,3 +5,4 @@ pub mod error;
 pub mod mem;
 pub mod transport;
 pub mod types;
+pub mod concurrency;

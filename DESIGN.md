@@ -45,18 +45,19 @@ resources.
 **Message Layer**:
 Provides components for encoding, decoding and validation of messages, when sending and receiving.
 
-Message layer exposes types the application can use to construct a **correct message** for the **target method**, and 
-enables efficient and safe zero-copy encoding and decoding of messages.
+Message layer implements the machinery to safely and correctly encode and decode the **defined message** for the **target method**.
 
-Messages are passed to the interface carrying borrowed data, and get returned after receiving carrying borrowed data.
+By default, messages are passed to the interface carrying borrowed data, and get returned after receiving carrying borrowed data.
 
-Thanks to the custom-layout and strict alignment rules, all types in a message can be accessed in borrowed form, without restrictions other than the lifetime-bound, something that would be very limited, not possible or recklessly unsafe in the "naïve" common 
+Thanks to the custom-layout and strict alignment rules, all types in a message can be accessed borrowed without conversion to owned types and with the lifetime-bound as the only restriction applied, something that would be very limited, not possible or recklessly unsafe in the "naïve" common 
 world of encoding and decoding out there.
 
-**Application Layer**:
-Application layer is where the user-code constructs messages and makes use of the received messages. This layer is external to the project in terms of implementation.
+However, received messages allow conversion to owned types when borrowing can be restrictive.
 
-Interconnect uses this layer to model various use-cases for better understandability and for providing more support types and options where needed.
+**Application Layer**:
+Application layer serves typing and runtime-configurations where the user-code constructs messages, and makes use of the received messages using the generated types and the generated interface as a "thin" layer on top of the other layers.
+
+Interconnect uses this layer also to model various use-cases for better understandability and for providing more support types and options where needed.
 
 ## Async, concurrency and parallelism
 

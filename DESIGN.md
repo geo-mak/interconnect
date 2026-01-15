@@ -55,7 +55,7 @@ world of encoding and decoding out there.
 However, received messages allow conversion to owned types when borrowing can be restrictive.
 
 **Application Layer**:
-Application layer serves typing and runtime-configurations where the user-code constructs messages, and makes use of the received messages using the generated types and the generated interface as a "thin" layer on top of the other layers.
+Application layer serves typing and runtime-configurations where the user-code constructs messages, and makes use of the received messages using the defined types and the implementation of the application's interfaces as a "thin" layer on top of the other layers.
 
 Interconnect uses this layer also to model various use-cases for better understandability and for providing more support types and options where needed.
 

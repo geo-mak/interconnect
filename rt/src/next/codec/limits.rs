@@ -59,11 +59,11 @@ where
 
     fn check_limits(mut value: TypeRef<'_, Self>, limits: Self::Limits) -> ProtocolResult<()> {
         // RT_ASSERT.
-        // Safety: The all values must have been initialized.
+        // Safety: All values must have been initialized.
         let slice = unsafe { (value.as_mut_ptr() as *mut [T]).as_mut() }.unwrap();
 
         for i in slice {
-            let value_i = unsafe { TypeRef::from_ptr(i) };
+            let value_i = unsafe { TypeRef::from_ptr_assume_init(i) };
             T::check_limits(value_i, limits)?;
         }
 

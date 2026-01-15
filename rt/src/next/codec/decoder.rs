@@ -48,10 +48,10 @@ pub unsafe trait Decoder {
 
         let blocks = self.get_blocks(count)?;
 
-        unsafe { Ok(TypeRef::from_ptr(blocks.as_mut_ptr().cast())) }
+        unsafe { Ok(TypeRef::from_ptr_assume_init(blocks.as_mut_ptr().cast())) }
     }
 
-    fn ref_slice_as<'de, T>(
+    fn slice_ref_as<'de, T>(
         self: &mut &'de mut Self,
         len: usize,
     ) -> ProtocolResult<TypeRef<'de, [T]>> {
@@ -77,7 +77,7 @@ pub unsafe trait Decoder {
             return Err(ProtocolError::error(ErrKind::InvalidPadding));
         }
 
-        unsafe { Ok(TypeRef::new_slice_unchecked(blocks_ptr.cast(), len)) }
+        unsafe { Ok(TypeRef::new_slice_assume_init(blocks_ptr.cast(), len)) }
     }
 
     fn decode<T>(mut self, limits: T::Limits) -> ProtocolResult<Decoded<T, Self>>

@@ -60,7 +60,7 @@ where
     fn check_limits(mut value: TypeRef<'_, Self>, limits: Self::Limits) -> ProtocolResult<()> {
         // RT_ASSERT.
         // Safety: All values must have been initialized.
-        let slice = unsafe { (value.as_mut_ptr() as *mut [T]).as_mut() }.unwrap();
+        let slice = unsafe { (value.as_ptr_mut() as *mut [T]).as_mut() }.unwrap();
 
         for i in slice {
             let value_i = unsafe { TypeRef::from_ptr_assume_init(i) };

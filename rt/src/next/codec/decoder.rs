@@ -89,9 +89,9 @@ pub unsafe trait Decoder {
 
         let mut view = decoder.ref_as::<T>()?;
 
-        T::decode(view.as_mut(), decoder, limits)?;
+        T::decode(view.borrow_mut(), decoder, limits)?;
 
-        unsafe { Ok(Decoded::new_assume_valid(view.as_mut_ptr(), self)) }
+        unsafe { Ok(Decoded::new_assume_valid(view.as_ptr_mut(), self)) }
     }
 
     fn decode_inner_type<'de, T>(
@@ -103,9 +103,9 @@ pub unsafe trait Decoder {
     {
         let mut view = self.ref_as::<T>()?;
 
-        T::decode(view.as_mut(), self, limits)?;
+        T::decode(view.borrow_mut(), self, limits)?;
 
-        unsafe { Ok(view.as_mut_ptr().cast::<T::Type<'de>>().read()) }
+        unsafe { Ok(view.as_ptr_mut().cast::<T::Type<'de>>().read()) }
     }
 }
 

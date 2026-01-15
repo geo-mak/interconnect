@@ -49,7 +49,7 @@ where
     }
 
     /// Creates an a copy by borrowing `self` mutably.
-    pub const fn as_mut(&mut self) -> TypeRef<'_, T> {
+    pub const fn borrow_mut(&mut self) -> TypeRef<'_, T> {
         Self {
             ptr: self.ptr,
             _t: PhantomData,
@@ -64,7 +64,7 @@ where
     }
 
     /// Returns a mutable pointer to the underlying potentially-invalid value.
-    pub const fn as_mut_ptr(&mut self) -> *mut T {
+    pub const fn as_ptr_mut(&mut self) -> *mut T {
         self.ptr
     }
 
@@ -78,8 +78,8 @@ where
     /// Returns a mutable reference to the underlying value.
     ///
     /// Safety: The referenced value must be ensured to be a valid value of type `T`.
-    pub const unsafe fn deref_mut_unchecked(&mut self) -> &mut T {
-        unsafe { &mut *self.as_mut_ptr() }
+    pub const unsafe fn deref_unchecked_mut(&mut self) -> &mut T {
+        unsafe { &mut *self.as_ptr_mut() }
     }
 
     /// Stores a value to the memory location referenced by this instance.
@@ -88,7 +88,7 @@ where
         T: IntoBytes + Sized,
     {
         unsafe {
-            self.as_mut_ptr().write(value);
+            self.as_ptr_mut().write(value);
         }
     }
 }
@@ -120,7 +120,7 @@ impl<T, const N: usize> TypeRef<'_, [T; N]> {
     pub const fn index(&mut self, index: usize) -> TypeRef<'_, T> {
         assert!(index < N, "Referencing out-of-bounds");
         TypeRef {
-            ptr: unsafe { self.as_mut_ptr().cast::<T>().add(index) },
+            ptr: unsafe { self.as_ptr_mut().cast::<T>().add(index) },
             _t: PhantomData,
         }
     }
@@ -143,7 +143,7 @@ impl<T> TypeRef<'_, [T]> {
     pub const fn index(&mut self, index: usize) -> TypeRef<'_, T> {
         assert!(index < self.ptr.len(), "Referencing out-of-bounds");
         TypeRef {
-            ptr: unsafe { self.as_mut_ptr().cast::<T>().add(index) },
+            ptr: unsafe { self.as_ptr_mut().cast::<T>().add(index) },
             _t: PhantomData,
         }
     }
@@ -195,7 +195,7 @@ impl<T: FromBytes> Deref for TypeRef<'_, T> {
 
 impl<T: FromBytes> DerefMut for TypeRef<'_, T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        unsafe { &mut *self.as_mut_ptr() }
+        unsafe { &mut *self.as_ptr_mut() }
     }
 }
 
@@ -204,7 +204,7 @@ unsafe impl<T> Destructure for TypeRef<'_, T> {
     type Destructuring = Move;
 
     fn underlying(&mut self) -> *mut Self::Underlying {
-        self.as_mut_ptr()
+        self.as_ptr_mut()
     }
 }
 

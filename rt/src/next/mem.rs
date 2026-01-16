@@ -26,14 +26,20 @@ pub unsafe trait IOSegment {
 
     /// Checks the current capacity if it is sufficient enough for the `required` capacity in total.
     ///
-    /// The required capacity is compared against total capacity, **not** the remaining capacity,
+    /// The `required` capacity is compared against total capacity, **not** the remaining capacity,
     /// which might be less if data has been written already.
     ///
     /// Tries to allocates more if the segment allows dynamic allocation.
     ///
-    /// Returns `false` if the requested capacity can't be satisfied, either because the segment is fixed,
-    /// or allocating more has failed.
+    /// Returns `false` if the `required` capacity can't be satisfied, either because the segment is fixed,
+    /// or attempting to allocate more has failed.
     fn ensure_capacity(&self, required: usize) -> bool;
+
+    /// Returns the base pointer of the allocated segment.
+    fn as_ptr(&self) -> *const u8;
+
+    /// Returns the base pointer of the allocated segment.
+    fn as_ptr_mut(&mut self) -> *mut u8;
 
     /// Returns an immutable view to the **initialized** data.
     #[inline]
@@ -82,12 +88,6 @@ pub unsafe trait IOSegment {
         debug_assert!(count <= self.capacity());
         unsafe { core::slice::from_raw_parts_mut(self.as_ptr_mut(), count) }
     }
-
-    /// Returns the base pointer of the allocated segment.
-    fn as_ptr(&self) -> *const u8;
-
-    /// Returns the base pointer of the allocated segment.
-    fn as_ptr_mut(&mut self) -> *mut u8;
 
     /// Sets the current length to `0`.
     fn clear(&mut self);

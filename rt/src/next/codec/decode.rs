@@ -16,7 +16,7 @@ use crate::next::types::limits::TypeLimits;
 pub unsafe trait Decode<D: ?Sized>: ProtocolType + TypeLimits {
     /// Decodes a the type into the provided value.
     ///
-    /// This call checks for valid memory-representation conformance to the defined limits.
+    /// This call checks for valid memory-representation and conformance to the defined limits.
     fn decode(
         value: TypeRef<'_, Self>,
         decoder: &mut D,

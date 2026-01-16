@@ -1,5 +1,3 @@
-use core::slice::{from_raw_parts, from_raw_parts_mut};
-
 use aead::{Buffer, Error};
 
 use crate::next::error::{ErrKind, ProtocolError, ProtocolResult};
@@ -9,11 +7,11 @@ use crate::next::transport::stream::specs::EncryptionState;
 use crate::next::transport::traits::{BytesReceiver, BytesSender};
 use crate::next::types::message::MAX_MESSAGE_SIZE;
 
-struct EncryptionSegment<'a, T> {
+struct EncryptionAdapter<'a, T> {
     pub seg: &'a mut T,
 }
 
-impl<'a, T> EncryptionSegment<'a, T>
+impl<'a, T> EncryptionAdapter<'a, T>
 where
     T: IOSegment,
 {
@@ -23,7 +21,7 @@ where
     }
 }
 
-impl<'a, T> AsRef<[u8]> for EncryptionSegment<'a, T>
+impl<'a, T> AsRef<[u8]> for EncryptionAdapter<'a, T>
 where
     T: IOSegment,
 {
@@ -33,7 +31,7 @@ where
     }
 }
 
-impl<'a, T> AsMut<[u8]> for EncryptionSegment<'a, T>
+impl<'a, T> AsMut<[u8]> for EncryptionAdapter<'a, T>
 where
     T: IOSegment,
 {
@@ -43,7 +41,7 @@ where
     }
 }
 
-impl<'a, T> Buffer for EncryptionSegment<'a, T>
+impl<'a, T> Buffer for EncryptionAdapter<'a, T>
 where
     T: IOSegment,
 {
@@ -62,12 +60,12 @@ where
     }
 }
 
-struct DecryptionSegment<'a, T> {
+struct DecryptionAdapter<'a, T> {
     seg: &'a mut T,
     len: usize,
 }
 
-impl<'a, T> DecryptionSegment<'a, T>
+impl<'a, T> DecryptionAdapter<'a, T>
 where
     T: IOSegment,
 {
@@ -76,15 +74,15 @@ where
     }
 
     fn as_slice(&self) -> &[u8] {
-        unsafe { from_raw_parts(self.seg.as_ptr(), self.len) }
+        unsafe { self.seg.view(self.len) }
     }
 
     fn as_slice_mut(&mut self) -> &mut [u8] {
-        unsafe { from_raw_parts_mut(self.seg.as_ptr_mut(), self.len) }
+        unsafe { self.seg.view_mut(self.len) }
     }
 }
 
-impl<'a, T> AsRef<[u8]> for DecryptionSegment<'a, T>
+impl<'a, T> AsRef<[u8]> for DecryptionAdapter<'a, T>
 where
     T: IOSegment,
 {
@@ -94,7 +92,7 @@ where
     }
 }
 
-impl<'a, T> AsMut<[u8]> for DecryptionSegment<'a, T>
+impl<'a, T> AsMut<[u8]> for DecryptionAdapter<'a, T>
 where
     T: IOSegment,
 {
@@ -104,7 +102,7 @@ where
     }
 }
 
-impl<'a, T> Buffer for DecryptionSegment<'a, T>
+impl<'a, T> Buffer for DecryptionAdapter<'a, T>
 where
     T: IOSegment,
 {
@@ -152,8 +150,9 @@ pub async fn receive<T: BytesReceiver, D: IOSegment>(
 
     // Safety: Capacity must be ensured before segmentation.
     if destination.ensure_capacity(len) {
-        let segment = unsafe { from_raw_parts_mut(destination.as_ptr_mut(), len) };
-        transport.receive_bytes(segment).await?;
+        debug_assert!(destination.capacity() >= len);
+        let view_mut = unsafe { destination.view_mut(len) };
+        transport.receive_bytes(view_mut).await?;
         // Safety: `len` bytes are assumed to have been initialized.
         unsafe { destination.set_len(len) };
         return Ok(());
@@ -167,8 +166,8 @@ pub async fn send_encrypted<T: BytesSender, S: IOSegment>(
     source: &mut S,
     state: &mut EncryptionState,
 ) -> ProtocolResult<()> {
-    let mut encryption_buf = EncryptionSegment::new(source);
-    state.encrypt(&mut encryption_buf, b"")?;
+    let mut adapter_segment = EncryptionAdapter::new(source);
+    state.encrypt(&mut adapter_segment, b"")?;
     // TODO: use protocol types.
     let len_u32 = source.len() as u32;
     transport.send_bytes(&len_u32.to_le_bytes()).await?;
@@ -198,15 +197,18 @@ pub async fn receive_encrypted<T: BytesReceiver, D: IOSegment>(
 
     // Safety: Capacity must be ensured before segmentation.
     if destination.ensure_capacity(len) {
-        let mut segment = DecryptionSegment::new(destination, len);
+        debug_assert!(destination.capacity() >= len);
+
+        let view_mut = unsafe { destination.view_mut(len) };
 
         // Safety: This call must initialize the provided segment or it must fail and return.
-        transport.receive_bytes(segment.as_slice_mut()).await?;
+        transport.receive_bytes(view_mut).await?;
 
         // Safety:
         // - Reading is assumed to be done on initialized bytes at this stage.
-        // - len is updated after decryption by calling FixedBufferView::truncate.
-        return state.decrypt(&mut segment, b"");
+        // - len is updated after decryption by calling DecryptionSegment::truncate.
+        let mut adapter_segment = DecryptionAdapter::new(destination, len);
+        return state.decrypt(&mut adapter_segment, b"");
     }
 
     Err(ProtocolError::error(ErrKind::MemoryAllocation))

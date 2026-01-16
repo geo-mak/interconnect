@@ -69,6 +69,9 @@ where
     T: AsyncReadExt + Send + Unpin,
 {
     async fn receive_bytes(&mut self, destination: &mut [u8]) -> ProtocolResult<()> {
+        // TODO:
+        // Passing "MaybeUninit" makes it safer, clear and more efficient.
+        // Problem: "MaybeUninit" in arrays will transform the codebase into "casting-spaghetti".
         self.read_exact(destination).await?;
         Ok(())
     }

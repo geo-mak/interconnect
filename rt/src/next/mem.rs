@@ -36,10 +36,52 @@ pub unsafe trait IOSegment {
     fn ensure_capacity(&self, required: usize) -> bool;
 
     /// Returns an immutable view to the **initialized** data.
-    fn as_slice(&self) -> &[u8];
+    #[inline]
+    fn as_slice(&self) -> &[u8] {
+        unsafe { from_raw_parts(self.as_ptr(), self.len()) }
+    }
 
     /// Returns a mutable view to the **initialized** data.
-    fn as_slice_mut(&mut self) -> &mut [u8];
+    #[inline]
+    fn as_slice_mut(&mut self) -> &mut [u8] {
+        unsafe { from_raw_parts_mut(self.as_ptr_mut(), self.len()) }
+    }
+
+    /// Constructs a view as slice of `count` bytes.
+    ///
+    /// Safety:
+    /// - The count must be within the bounds of the allocated memory.
+    /// - The bytes of the slice might be uninitialized.
+    ///
+    /// Note:
+    /// There is currently no point of storing "Maybeuninit<u8>" if the call chain until
+    /// the point of writing is not conforming to the parameter.
+    ///
+    /// "Maybeuninit<u8>" in arrays and slices will dramatically increase the code complexity
+    /// and transforms the codebase into "spaghetti of casting and transmuting".
+    #[inline]
+    unsafe fn view(&self, count: usize) -> &[u8] {
+        debug_assert!(count <= self.capacity());
+        unsafe { core::slice::from_raw_parts(self.as_ptr(), count) }
+    }
+
+    /// Constructs a mutable view as mutable slice of `count` bytes.
+    ///
+    /// # Safety
+    /// - The count must be within the bounds of the allocated memory.
+    /// - The bytes of the slice might be uninitialized.
+    ///
+    /// Note:
+    /// There is currently no point of storing "Maybeuninit<u8>" if the call chain until
+    /// the point of writing is not conforming to the parameter.
+    ///
+    /// "Maybeuninit<u8>" in arrays and slices will dramatically increase the code complexity
+    /// and transforms the codebase into "spaghetti of casting and transmuting".
+    #[inline]
+    unsafe fn view_mut(&mut self, count: usize) -> &mut [u8] {
+        debug_assert!(count <= self.capacity());
+        unsafe { core::slice::from_raw_parts_mut(self.as_ptr_mut(), count) }
+    }
 
     /// Returns the base pointer of the allocated segment.
     fn as_ptr(&self) -> *const u8;
@@ -135,16 +177,6 @@ unsafe impl IOSegment for IOPoolSegment {
     #[inline]
     fn as_ptr_mut(&mut self) -> *mut u8 {
         self.segment_ptr
-    }
-
-    #[inline]
-    fn as_slice(&self) -> &[u8] {
-        unsafe { from_raw_parts(self.segment_ptr, self.len) }
-    }
-
-    #[inline]
-    fn as_slice_mut(&mut self) -> &mut [u8] {
-        unsafe { from_raw_parts_mut(self.segment_ptr, self.len) }
     }
 
     #[inline]
@@ -337,18 +369,6 @@ unsafe impl<'a> IOSegment for IORingSegment<'a> {
     #[inline]
     fn as_ptr_mut(&mut self) -> *mut u8 {
         self.data.as_mut_ptr()
-    }
-
-    #[inline]
-    fn as_slice(&self) -> &[u8] {
-        let written_len = self.metadata.written.get() as usize;
-        &self.data[..written_len]
-    }
-
-    #[inline]
-    fn as_slice_mut(&mut self) -> &mut [u8] {
-        let written_len = self.metadata.written.get() as usize;
-        &mut self.data[..written_len]
     }
 
     #[inline]

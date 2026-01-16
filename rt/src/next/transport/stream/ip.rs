@@ -164,8 +164,8 @@ where
 
 pub struct IPLinkSecure<T> {
     stream: TcpStream,
-    r_key: EncryptionState,
-    w_key: EncryptionState,
+    send_state: EncryptionState,
+    recv_state: EncryptionState,
     _t: PhantomData<T>,
 }
 
@@ -184,22 +184,22 @@ where
 
         negotiation::initiate(&mut stream, ConnectionSpecs::new(1, true)).await?;
 
-        let (r_key, w_key) = negotiation::initiate_key_exchange(&mut stream).await?;
+        let (send_state, recv_state) = negotiation::initiate_key_exchange(&mut stream).await?;
 
         Ok(Self {
             stream,
-            r_key,
-            w_key,
+            send_state,
+            recv_state,
             _t: PhantomData,
         })
     }
 
     async fn send(&mut self, source: &mut T) -> ProtocolResult<()> {
-        stream::core::send_encrypted(&mut self.stream, source, &mut self.w_key).await
+        stream::core::send_encrypted(&mut self.stream, source, &mut self.send_state).await
     }
 
     async fn receive(&mut self, destination: &mut T) -> ProtocolResult<()> {
-        stream::core::receive_encrypted(&mut self.stream, destination, &mut self.r_key).await
+        stream::core::receive_encrypted(&mut self.stream, destination, &mut self.recv_state).await
     }
 
     async fn terminate(&mut self) -> ProtocolResult<()> {
@@ -210,8 +210,8 @@ where
     fn split(self) -> (Self::Sender, Self::Receiver) {
         let (r, w) = self.stream.into_split();
         (
-            IPLinkSecureSender::new(w, self.w_key),
-            IPLinkSecureReceiver::new(r, self.r_key),
+            IPLinkSecureSender::new(w, self.send_state),
+            IPLinkSecureReceiver::new(r, self.recv_state),
         )
     }
 }
@@ -289,7 +289,7 @@ mod tests {
             negotiation::confirm(&mut socket).await.unwrap();
 
             // Key exchange.
-            let (mut r_state, mut w_state) =
+            let (mut send_state, mut recv_state) =
                 negotiation::accept_key_exchange(&mut socket).await.unwrap();
 
             // Receive encrypted message.
@@ -300,12 +300,12 @@ mod tests {
             socket.read_exact(&mut data).await.unwrap();
 
             let mut buffer = data;
-            r_state.decrypt(&mut buffer, b"").unwrap();
+            recv_state.decrypt(&mut buffer, b"").unwrap();
             assert_eq!(buffer, b"hello secure client");
 
             // Send encrypted response.
             let mut response_data = b"hello secure server".to_vec();
-            w_state.encrypt(&mut response_data, b"").unwrap();
+            send_state.encrypt(&mut response_data, b"").unwrap();
             let total_len = (response_data.len() as u32).to_le_bytes();
             socket.write_all(&total_len).await.unwrap();
             socket.write_all(&response_data).await.unwrap();

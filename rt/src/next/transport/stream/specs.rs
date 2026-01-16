@@ -82,10 +82,9 @@ impl ConnectionSpecs {
     }
 }
 
+pub type NonceBase = [u8; 4];
 pub type SendKey = [u8; 16];
 pub type ReceiveKey = [u8; 16];
-pub type NonceBase = [u8; 4];
-
 pub type SendState = EncryptionState;
 pub type ReceiveState = EncryptionState;
 
@@ -242,11 +241,11 @@ pub mod negotiation {
         let server_public = PublicKey::from(server_pub_bytes);
 
         let shared = client_secret.diffie_hellman(&server_public);
-        let (r_key, w_key, nonce_base) = derive_session_keys(shared.as_bytes())?;
+        let (recv_key, send_key, nonce_base) = derive_session_keys(shared.as_bytes())?;
 
         Ok((
-            EncryptionState::new(&r_key, nonce_base)?,
-            EncryptionState::new(&w_key, nonce_base)?,
+            EncryptionState::new(&send_key, nonce_base)?,
+            EncryptionState::new(&recv_key, nonce_base)?,
         ))
     }
 
@@ -266,11 +265,11 @@ pub mod negotiation {
         transport.send_bytes(server_public.as_bytes()).await?;
 
         let shared = server_secret.diffie_hellman(&client_public);
-        let (w_key, r_key, nonce_base) = derive_session_keys(shared.as_bytes())?;
+        let (send_key, recv_key, nonce_base) = derive_session_keys(shared.as_bytes())?;
 
         Ok((
-            EncryptionState::new(&r_key, nonce_base)?,
-            EncryptionState::new(&w_key, nonce_base)?,
+            EncryptionState::new(&send_key, nonce_base)?,
+            EncryptionState::new(&recv_key, nonce_base)?,
         ))
     }
 
@@ -280,20 +279,20 @@ pub mod negotiation {
     ) -> ProtocolResult<(SendKey, ReceiveKey, NonceBase)> {
         let hkdf = Hkdf::<Sha256>::new(Some(b"rpc-handshake"), shared_secret);
 
-        let mut r_key = [0u8; 16];
-        let mut w_key = [0u8; 16];
         let mut nonce_base = [0u8; 4];
+        let mut send_key = [0u8; 16];
+        let mut recv_key = [0u8; 16];
 
         let map_err = |_| ProtocolError::error(ErrKind::KeyDerivation);
 
-        hkdf.expand(b"rpc-session-read", &mut r_key)
+        hkdf.expand(b"rpc-session-read", &mut recv_key)
             .map_err(map_err)?;
-        hkdf.expand(b"rpc-session-write", &mut w_key)
+        hkdf.expand(b"rpc-session-write", &mut send_key)
             .map_err(map_err)?;
         hkdf.expand(b"rpc-nonce-base", &mut nonce_base)
             .map_err(map_err)?;
 
-        Ok((r_key, w_key, nonce_base))
+        Ok((send_key, recv_key, nonce_base))
     }
 }
 
@@ -322,7 +321,7 @@ mod test {
                 .await
                 .expect("Failed to send confirmation");
 
-            let (mut r_key, _w_key) = if proposed.encryption {
+            let (_s_state, mut recv_state) = if proposed.encryption {
                 negotiation::accept_key_exchange(&mut transport)
                     .await
                     .expect("server encryption failed")
@@ -338,7 +337,7 @@ mod test {
             let mut buffer = vec![0u8; len];
             transport.receive_bytes(&mut buffer).await.unwrap();
 
-            r_key.decrypt(&mut buffer, b"").unwrap();
+            recv_state.decrypt(&mut buffer, b"").unwrap();
             assert_eq!(&buffer, b"first message!");
 
             // Second message.
@@ -348,7 +347,7 @@ mod test {
             let mut buffer = vec![0u8; len];
             transport.receive_bytes(&mut buffer).await.unwrap();
 
-            r_key.decrypt(&mut buffer, b"").unwrap();
+            recv_state.decrypt(&mut buffer, b"").unwrap();
             assert_eq!(&buffer, b"second message!");
         });
 
@@ -365,13 +364,13 @@ mod test {
             .await
             .expect("client negotiation failed");
 
-        let (_r_key, mut w_key) = negotiation::initiate_key_exchange(&mut transport)
+        let (mut send_state, _r_state) = negotiation::initiate_key_exchange(&mut transport)
             .await
             .expect("client encryption failed");
 
         // First message.
         let mut buffer = b"first message!".to_vec();
-        w_key.encrypt(&mut buffer, b"").unwrap();
+        send_state.encrypt(&mut buffer, b"").unwrap();
 
         let mut bytes = (buffer.len() as u16).to_le_bytes();
         transport.send_bytes(&mut bytes).await.unwrap();
@@ -379,7 +378,7 @@ mod test {
 
         // Second message.
         let mut buffer = b"second message!".to_vec();
-        w_key.encrypt(&mut buffer, b"").unwrap();
+        send_state.encrypt(&mut buffer, b"").unwrap();
 
         let mut bytes = (buffer.len() as u16).to_le_bytes();
         transport.send_bytes(&mut bytes).await.unwrap();

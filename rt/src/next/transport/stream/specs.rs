@@ -63,10 +63,11 @@ use crate::opt::branch_hints::unlikely;
 // [0..32]  Client ephemeral X25519 public key
 // [0..32]  Server ephemeral X25519 public key
 
-const CAPABILITY_FRAME_LEN: usize = 8;
+const SPECS_FRAME_LEN: usize = 8;
 
 /// Protocol flags.
-const PROTO: &[u8; 4] = b"IPC0";
+/// `ICS0` = Interconnect Specification Version 0.
+const SPECS_PROTO: &[u8; 4] = b"ICS0";
 
 #[derive(Debug, Clone, Copy)]
 pub struct ConnectionSpecs {
@@ -83,10 +84,10 @@ impl ConnectionSpecs {
 }
 
 pub type NonceBase = [u8; 4];
-pub type SendKey = [u8; 16];
-pub type ReceiveKey = [u8; 16];
-pub type SendState = EncryptionState;
-pub type ReceiveState = EncryptionState;
+pub type SenderKey = [u8; 16];
+pub type ReceiverKey = [u8; 16];
+pub type SenderState = EncryptionState;
+pub type ReceiverState = EncryptionState;
 
 /// Stores the cipher-state and provides encryption and decryption methods.
 pub struct EncryptionState {
@@ -117,9 +118,9 @@ impl EncryptionState {
 
     /// Encrypts the data in the buffer in-place.
     /// The buffer will be resized if needed.
-    pub fn encrypt(
+    pub fn encrypt<E: Buffer>(
         &mut self,
-        data: &mut impl Buffer,
+        data: &mut E,
         associated_data: &[u8],
     ) -> ProtocolResult<()> {
         // TODO: Make limit configurable.
@@ -135,9 +136,9 @@ impl EncryptionState {
 
     /// Decrypts the message in-place to its original format.
     /// The buffer will be truncated to the length of the original data upon success.
-    pub fn decrypt(
+    pub fn decrypt<D: Buffer>(
         &mut self,
-        data: &mut impl Buffer,
+        data: &mut D,
         associated_data: &[u8],
     ) -> ProtocolResult<()> {
         // TODO: Resigned the interface without requiring `Buffer` trait.
@@ -161,33 +162,30 @@ pub mod negotiation {
     where
         T: BytesTransport,
     {
-        let mut buf = [0u8; CAPABILITY_FRAME_LEN];
-        transport.receive_bytes(&mut buf).await?;
+        let mut destination = [0u8; SPECS_FRAME_LEN];
+        transport.receive_bytes(&mut destination).await?;
 
-        if &buf[0..4] != PROTO {
+        if &destination[0..4] != SPECS_PROTO {
             return Err(ProtocolError::error(ErrKind::InvalidNegotiation));
         }
 
-        let version = buf[4];
-        let flags = buf[5];
+        let abi = destination[4];
+        let flags = destination[5];
         let encryption = (flags & 0x01) != 0;
 
-        Ok(ConnectionSpecs {
-            abi: version,
-            encryption,
-        })
+        Ok(ConnectionSpecs { abi, encryption })
     }
 
     pub async fn write_frame<T>(transport: &mut T, specs: &ConnectionSpecs) -> ProtocolResult<()>
     where
         T: BytesTransport,
     {
-        let mut buf = [0u8; CAPABILITY_FRAME_LEN];
-        buf[0..4].copy_from_slice(PROTO);
-        buf[4] = specs.abi;
-        buf[5] = specs.encryption as u8;
-        buf[6..8].copy_from_slice(&0u16.to_le_bytes());
-        transport.send_bytes(&buf).await
+        let mut source = [0u8; SPECS_FRAME_LEN];
+        source[0..4].copy_from_slice(SPECS_PROTO);
+        source[4] = specs.abi;
+        source[5] = specs.encryption as u8;
+        source[6..8].copy_from_slice(&0u16.to_le_bytes());
+        transport.send_bytes(&source).await
     }
 
     /// Send a confirmation (0x01) to the transport.
@@ -215,10 +213,10 @@ pub mod negotiation {
     {
         self::write_frame(transport, &capability).await?;
 
-        let mut confirm = [0u8; 1];
-        transport.receive_bytes(&mut confirm).await?;
+        let mut confirmation = [0u8; 1];
+        transport.receive_bytes(&mut confirmation).await?;
 
-        match confirm[0] {
+        match confirmation[0] {
             0x01 => Ok(()),
             0x00 => Err(ProtocolError::error(ErrKind::SpecsMismatch)),
             _ => Err(ProtocolError::error(ErrKind::InvalidNegotiation)),
@@ -228,7 +226,7 @@ pub mod negotiation {
     /// Initiates an expected cryptographic key-exchange session.
     pub async fn initiate_key_exchange<T>(
         transport: &mut T,
-    ) -> ProtocolResult<(SendState, ReceiveState)>
+    ) -> ProtocolResult<(SenderState, ReceiverState)>
     where
         T: BytesTransport,
     {
@@ -252,7 +250,7 @@ pub mod negotiation {
     /// Accepts an expected cryptographic key-exchange session.
     pub async fn accept_key_exchange<T>(
         transport: &mut T,
-    ) -> ProtocolResult<(SendState, ReceiveState)>
+    ) -> ProtocolResult<(SenderState, ReceiverState)>
     where
         T: BytesTransport,
     {
@@ -276,8 +274,8 @@ pub mod negotiation {
     /// HMAC-based key-derivation function.
     fn derive_session_keys(
         shared_secret: &[u8],
-    ) -> ProtocolResult<(SendKey, ReceiveKey, NonceBase)> {
-        let hkdf = Hkdf::<Sha256>::new(Some(b"rpc-handshake"), shared_secret);
+    ) -> ProtocolResult<(SenderKey, ReceiverKey, NonceBase)> {
+        let hkdf = Hkdf::<Sha256>::new(Some(b"ics-negotiation"), shared_secret);
 
         let mut nonce_base = [0u8; 4];
         let mut send_key = [0u8; 16];
@@ -285,11 +283,11 @@ pub mod negotiation {
 
         let map_err = |_| ProtocolError::error(ErrKind::KeyDerivation);
 
-        hkdf.expand(b"rpc-session-read", &mut recv_key)
+        hkdf.expand(b"ics-session-read", &mut recv_key)
             .map_err(map_err)?;
-        hkdf.expand(b"rpc-session-write", &mut send_key)
+        hkdf.expand(b"ics-session-write", &mut send_key)
             .map_err(map_err)?;
-        hkdf.expand(b"rpc-nonce-base", &mut nonce_base)
+        hkdf.expand(b"ics-nonce-base", &mut nonce_base)
             .map_err(map_err)?;
 
         Ok((send_key, recv_key, nonce_base))

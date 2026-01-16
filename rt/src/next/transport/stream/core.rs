@@ -206,7 +206,7 @@ pub async fn receive_encrypted<T: BytesReceiver, D: IOSegment>(
 
         // Safety:
         // - Reading is assumed to be done on initialized bytes at this stage.
-        // - len is updated after decryption by calling DecryptionSegment::truncate.
+        // - len is updated after decryption by calling DecryptionAdapter::truncate.
         let mut adapter_segment = DecryptionAdapter::new(destination, len);
         return state.decrypt(&mut adapter_segment, b"");
     }

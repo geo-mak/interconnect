@@ -1,7 +1,7 @@
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use crate::next::error::ProtocolResult;
-use crate::next::transport::io::IOSegment;
+use crate::next::mem::IOSegment;
 
 /// The send of a particular transport component.
 pub trait TransportSender<S: IOSegment> {

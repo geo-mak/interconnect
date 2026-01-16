@@ -6,7 +6,7 @@ use tokio::net::TcpStream;
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 
 use crate::next::error::ProtocolResult;
-use crate::next::transport::io::IOSegment;
+use crate::next::mem::IOSegment;
 use crate::next::transport::stream;
 use crate::next::transport::stream::specs::{ConnectionSpecs, EncryptionState, negotiation};
 use crate::next::transport::traits::{Transport, TransportReceiver, TransportSender};
@@ -223,8 +223,8 @@ mod tests {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
 
-    use crate::next::transport::io::IOPool;
-    use crate::next::transport::io::IOPoolSegment;
+    use crate::next::mem::IOPool;
+    use crate::next::mem::IOPoolSegment;
 
     #[tokio::test]
     async fn test_ip_link_send_receive() {

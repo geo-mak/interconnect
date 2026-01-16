@@ -3,8 +3,8 @@ use core::slice::{from_raw_parts, from_raw_parts_mut};
 use aead::{Buffer, Error};
 
 use crate::next::error::{ErrKind, ProtocolError, ProtocolResult};
+use crate::next::mem::IOSegment;
 use crate::next::opt::branch_hints::unlikely;
-use crate::next::transport::io::IOSegment;
 use crate::next::transport::stream::specs::EncryptionState;
 use crate::next::transport::traits::{BytesReceiver, BytesSender};
 use crate::next::types::message::STD_MAX_MSG_SIZE;

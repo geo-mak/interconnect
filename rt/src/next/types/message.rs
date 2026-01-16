@@ -1,4 +1,4 @@
-use std::mem::MaybeUninit;
+use core::mem::MaybeUninit;
 
 use zerocopy::IntoBytes;
 
@@ -6,6 +6,8 @@ use crate::next::codec::{decode::Decode, encode::Encode};
 use crate::next::error::ProtocolResult;
 use crate::next::types::core::{ProtocolType, TypeU64};
 use crate::next::types::limits::Unlimited;
+
+pub const STD_MAX_MSG_SIZE: u32 = 4 * 1024 * 1024;
 
 pub type MessageID = TypeU64;
 
@@ -15,7 +17,7 @@ pub type MessageDirective = TypeU64;
 ///
 /// Header consists of two fields, each is 8-bytes in size and alignment.
 ///
-/// TODO: Both have embedded bit-flags
+/// TODO: Both have embedded bit-flags.
 #[derive(Debug, Clone, Copy, IntoBytes)]
 #[repr(C)]
 pub struct TypeMessageHeader {

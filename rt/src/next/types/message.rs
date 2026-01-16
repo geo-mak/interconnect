@@ -21,12 +21,12 @@ pub type MessageDirective = TypeU64;
 pub struct TypeMessageHeader {
     /// 8-bytes identifier of the message.
     ///
-    /// TODO: Not all bytes are useable.
+    /// TODO: Not all bytes are usable.
     pub id: MessageID,
 
     /// 8-bytes directive of the message.
     ///
-    /// TODO: Not all bytes are useable.
+    /// TODO: Not all bytes are usable.
     pub directive: MessageDirective,
 }
 

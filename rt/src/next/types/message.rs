@@ -7,7 +7,7 @@ use crate::next::error::ProtocolResult;
 use crate::next::types::core::{ProtocolType, TypeU64};
 use crate::next::types::limits::Unlimited;
 
-pub const STD_MAX_MSG_SIZE: u32 = 4 * 1024 * 1024;
+pub const MAX_MESSAGE_SIZE: u32 = 4 * 1024 * 1024;
 
 pub type MessageID = TypeU64;
 

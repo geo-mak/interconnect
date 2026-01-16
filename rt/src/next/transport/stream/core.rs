@@ -7,7 +7,7 @@ use crate::next::mem::IOSegment;
 use crate::next::opt::branch_hints::unlikely;
 use crate::next::transport::stream::specs::EncryptionState;
 use crate::next::transport::traits::{BytesReceiver, BytesSender};
-use crate::next::types::message::STD_MAX_MSG_SIZE;
+use crate::next::types::message::MAX_MESSAGE_SIZE;
 
 struct EncryptionSegment<'a, T> {
     pub seg: &'a mut T,
@@ -139,7 +139,7 @@ pub async fn receive<T: BytesReceiver, D: IOSegment>(
     transport.receive_bytes(&mut len_bytes).await?;
     let len = u32::from_le_bytes(len_bytes);
 
-    if unlikely(len > STD_MAX_MSG_SIZE) {
+    if unlikely(len > MAX_MESSAGE_SIZE) {
         return Err(ProtocolError::error(ErrKind::RecvSizeLimit));
     }
 
@@ -185,7 +185,7 @@ pub async fn receive_encrypted<T: BytesReceiver, D: IOSegment>(
     transport.receive_bytes(&mut len_bytes).await?;
     let len = u32::from_le_bytes(len_bytes);
 
-    if unlikely(len > STD_MAX_MSG_SIZE) {
+    if unlikely(len > MAX_MESSAGE_SIZE) {
         return Err(ProtocolError::error(ErrKind::RecvSizeLimit));
     }
 

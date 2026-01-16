@@ -16,6 +16,12 @@ pub const ALLOC_MEM_ALIGN: usize = 8;
 /// Slice of eight bytes aligned to an 8-byte boundary.
 pub type BasicBlock = TypeU64;
 
+pub trait MemoryProvider {
+    type Segment: IOSegment;
+
+    fn acquire(&self) -> Option<Self::Segment>;
+}
+
 /// A unified interface for types that perform untyped reads from and writes to a memory-region directly.
 pub unsafe trait IOSegment {
     /// Returns the number of the **initialized** bytes in the segment.
@@ -300,6 +306,15 @@ impl IOPool {
             len: 0,
             pool: Arc::clone(&self.pool),
         })
+    }
+}
+
+impl MemoryProvider for IOPool {
+    type Segment = IOPoolSegment;
+
+    #[inline(always)]
+    fn acquire(&self) -> Option<IOPoolSegment> {
+        self.acquire()
     }
 }
 

@@ -6,5 +6,6 @@ pub mod endpoints;
 pub mod error;
 pub mod mem;
 pub mod opt;
+pub mod report;
 pub mod transport;
 pub mod types;

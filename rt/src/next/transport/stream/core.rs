@@ -5,7 +5,8 @@ use crate::next::mem::IOSegment;
 use crate::next::opt::branch_hints::unlikely;
 use crate::next::transport::stream::specs::EncryptionState;
 use crate::next::transport::traits::{BytesReceiver, BytesSender};
-use crate::next::types::message::MAX_MESSAGE_SIZE;
+
+pub const MAX_MESSAGE_SIZE: u32 = 4 * 1024 * 1024;
 
 struct EncryptionAdapter<'a, T> {
     pub seg: &'a mut T,

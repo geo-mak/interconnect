@@ -106,26 +106,23 @@ Interconnect's unit of exchange is "message".
 
 Messages are exchanged in binary format with **untagged** data representation.
 
-Interconnect utilizes ABI (Application Binary Interface) for data representation, where interoperability is achieved by adhering 
-to the ABI.
+Interconnects defines its own data model that describes the byte-patterns of exchange-types and the layout of messages.
 
-Interoperability and compatibility strategy at the ABI-level is still **undetermined**. 
+Interoperability is achieved by adhering to the ABI (Application Binary Interface).
 
-The current implementation enables version-detection and multi-version support for both the specification protocol and the ABI.
-Each connection starts by announcing the version of its specification protocol and its ABI, which will be used for the entire session 
-(no per-message versioning), but it is still experimental.
+Interconnects requires native implementation of its type-system and its associated components like encoders and decoders 
+in order to send and receive messages that conform to its data model.
 
-Since the ABI is a shared "language" between systems, interoperability and stability are of a strategic importance.
+The native implementation of the type-system and other support components like the transport components and the endpoints' 
+implementations are referred to as the "runtime library".
 
-The current prototype I am working on has the following design aspects:
-- IPC definition language with type system (numbers, enums, structs, interfaces..etc).
-- Compiler and libraries for generating language-specific ABI-compatible implementations from IPC-definition files.
-- Support generating "async" APIs.
-- Reuseable linear memory for encoding and decoding.
-- Compiling to standardized format that acts as intermediate representation for building native runtimes and code-generators (Bring your own bottle and welcome to the party).
+The runtime-library provides components to construct a compliant implementation of Interconnect.
 
-These design aspects aim at abstracting the details of the ABI using higher-level representation of the API, for 
-automated management of interoperability and compatibility.
+The specifications and the details of the data model are described in-depth in "SPECS" file and updated regularly.
 
-There is already a (kind of) working implementation of the definition language and its type system in terms of 
-compiler and native-support types (for Rust), but their implementation is fragile and not yet ready to show up.
+Moreover, Interconnect defines its own IDL (IPC Definition Language) and provides toolchain like compiler and code-generation backends for
+generating integrated endpoints that conform to the user-defined interface.
+
+The IDL and its toolchain are an **usability and safety** option for making use of Interconnect in an automated manner.
+
+The architecture of the compiler and other details related to the toolchain are not published yet.

@@ -2,14 +2,16 @@ use core::marker::PhantomData;
 use core::net::SocketAddr;
 
 use tokio::io::AsyncWriteExt;
-use tokio::net::TcpStream;
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
+use tokio::net::{TcpListener, TcpStream};
 
-use crate::next::error::ProtocolResult;
+use crate::next::error::{ErrKind, ProtocolError, ProtocolResult};
 use crate::next::mem::IOSegment;
 use crate::next::transport::stream;
 use crate::next::transport::stream::specs::{ConnectionSpecs, EncryptionState, negotiation};
-use crate::next::transport::traits::{Transport, TransportReceiver, TransportSender};
+use crate::next::transport::traits::{
+    Transport, TransportInitiator, TransportReceiver, TransportSender, TransportServer,
+};
 
 pub struct IPLinkSender<T> {
     writer: OwnedWriteHalf,
@@ -65,6 +67,16 @@ where
 pub struct IPLink<T> {
     stream: TcpStream,
     _t: PhantomData<T>,
+}
+
+impl<S> IPLink<S> {
+    #[inline]
+    const fn from(stream: TcpStream) -> Self {
+        Self {
+            stream,
+            _t: PhantomData,
+        }
+    }
 }
 
 impl<T> Transport<T> for IPLink<T>
@@ -169,6 +181,22 @@ pub struct IPLinkSecure<T> {
     _t: PhantomData<T>,
 }
 
+impl<S> IPLinkSecure<S> {
+    #[inline]
+    const fn from(
+        stream: TcpStream,
+        send_state: EncryptionState,
+        recv_state: EncryptionState,
+    ) -> Self {
+        Self {
+            stream,
+            send_state,
+            recv_state,
+            _t: PhantomData,
+        }
+    }
+}
+
 impl<T> Transport<T> for IPLinkSecure<T>
 where
     T: IOSegment + Send + Sync,
@@ -186,12 +214,7 @@ where
 
         let (send_state, recv_state) = negotiation::initiate_key_exchange(&mut stream).await?;
 
-        Ok(Self {
-            stream,
-            send_state,
-            recv_state,
-            _t: PhantomData,
-        })
+        Ok(Self::from(stream, send_state, recv_state))
     }
 
     async fn send(&mut self, source: &mut T) -> ProtocolResult<()> {
@@ -216,51 +239,203 @@ where
     }
 }
 
+pub struct IPLinkInitiator<S> {
+    stream: TcpStream,
+    _t: PhantomData<S>,
+}
+
+impl<S> IPLinkInitiator<S> {
+    #[inline]
+    const fn from(stream: TcpStream) -> Self {
+        Self {
+            stream,
+            _t: PhantomData,
+        }
+    }
+}
+
+impl<S> TransportInitiator<S> for IPLinkInitiator<S>
+where
+    S: IOSegment + Send + Sync,
+{
+    type Transport = IPLink<S>;
+
+    async fn initiate(mut self) -> ProtocolResult<IPLink<S>> {
+        let specs = negotiation::read_frame(&mut self.stream).await?;
+
+        // TODO: Hardcoded because config are not accepted currently.
+        if specs.abi != 1 {
+            negotiation::reject(&mut self.stream).await?;
+            return Err(ProtocolError::error(ErrKind::SpecsMismatch));
+        }
+
+        negotiation::confirm(&mut self.stream).await?;
+
+        Ok(IPLink::from(self.stream))
+    }
+}
+
+pub struct IPLinkServer<S> {
+    listener: TcpListener,
+    _t: PhantomData<S>,
+}
+
+impl<S> TransportServer<S> for IPLinkServer<S>
+where
+    S: IOSegment + Send + Sync,
+{
+    type Transport = IPLink<S>;
+
+    type Initiator = IPLinkInitiator<S>;
+
+    type Parameter = SocketAddr;
+
+    type ID = SocketAddr;
+
+    async fn create(id: &SocketAddr) -> ProtocolResult<Self>
+    where
+        Self: Sized,
+    {
+        let listener = TcpListener::bind(id).await?;
+
+        Ok(Self {
+            listener,
+            _t: PhantomData,
+        })
+    }
+
+    async fn accept(&self) -> ProtocolResult<(IPLinkInitiator<S>, SocketAddr)> {
+        let (stream, addr) = self.listener.accept().await?;
+        Ok((IPLinkInitiator::from(stream), addr))
+    }
+
+    fn id(&self) -> ProtocolResult<SocketAddr> {
+        Ok(self.listener.local_addr()?)
+    }
+
+    async fn terminate(&mut self) -> ProtocolResult<()> {
+        Err(ProtocolError::error(ErrKind::Unimplemented))
+    }
+}
+
+pub struct IPLinkSecureInitiator<S> {
+    stream: TcpStream,
+    _t: PhantomData<S>,
+}
+
+impl<S> IPLinkSecureInitiator<S> {
+    #[inline]
+    const fn from(stream: TcpStream) -> Self {
+        Self {
+            stream,
+            _t: PhantomData,
+        }
+    }
+}
+
+impl<S> TransportInitiator<S> for IPLinkSecureInitiator<S>
+where
+    S: IOSegment + Send + Sync,
+{
+    type Transport = IPLinkSecure<S>;
+
+    async fn initiate(mut self) -> ProtocolResult<IPLinkSecure<S>> {
+        let specs = negotiation::read_frame(&mut self.stream).await?;
+
+        // TODO: Hardcoded because config are not accepted currently.
+        if specs.abi != 1 {
+            negotiation::reject(&mut self.stream).await?;
+            return Err(ProtocolError::error(ErrKind::SpecsMismatch));
+        }
+
+        negotiation::confirm(&mut self.stream).await?;
+
+        let (send_state, recv_state) = negotiation::accept_key_exchange(&mut self.stream).await?;
+
+        Ok(IPLinkSecure::from(self.stream, send_state, recv_state))
+    }
+}
+
+pub struct IPLinkSecureServer<S> {
+    listener: TcpListener,
+    _t: PhantomData<S>,
+}
+
+impl<S> TransportServer<S> for IPLinkSecureServer<S>
+where
+    S: IOSegment + Send + Sync,
+{
+    type Transport = IPLinkSecure<S>;
+
+    type Initiator = IPLinkSecureInitiator<S>;
+
+    type Parameter = SocketAddr;
+
+    type ID = SocketAddr;
+
+    async fn create(id: &SocketAddr) -> ProtocolResult<Self>
+    where
+        Self: Sized,
+    {
+        let instance = TcpListener::bind(id).await?;
+
+        Ok(Self {
+            listener: instance,
+            _t: PhantomData,
+        })
+    }
+
+    async fn accept(&self) -> ProtocolResult<(IPLinkSecureInitiator<S>, SocketAddr)> {
+        let (stream, addr) = self.listener.accept().await?;
+        Ok((IPLinkSecureInitiator::from(stream), addr))
+    }
+
+    fn id(&self) -> ProtocolResult<SocketAddr> {
+        Ok(self.listener.local_addr()?)
+    }
+
+    async fn terminate(&mut self) -> ProtocolResult<()> {
+        Err(ProtocolError::error(ErrKind::Unimplemented))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
-    use tokio::net::TcpListener;
 
     use crate::next::mem::IOPool;
     use crate::next::mem::IOPoolSegment;
 
     #[tokio::test]
     async fn test_ip_link_send_receive() {
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let addr = listener.local_addr().unwrap();
+        let addr = "127.0.0.1:0".parse().unwrap();
+        let server = IPLinkServer::<IOPoolSegment>::create(&addr).await.unwrap();
+
+        let server_addr = server.listener.local_addr().unwrap();
+        let pool = IOPool::new(4, 1024);
 
         // Server side.
+        let server_pool = pool.clone();
         let server_handle = tokio::spawn(async move {
-            let (mut socket, _) = listener.accept().await.unwrap();
-
-            // Negotiation.
-            let specs = negotiation::read_frame(&mut socket).await.unwrap();
-            assert_eq!(specs.abi, 1);
-            assert!(!specs.encryption);
-            negotiation::confirm(&mut socket).await.unwrap();
+            let (initiator, _) = server.accept().await.unwrap();
+            let mut link = initiator.initiate().await.unwrap();
 
             // Receive message.
-            let mut len_buf = [0u8; 4];
-            socket.read_exact(&mut len_buf).await.unwrap();
-            let len = u32::from_le_bytes(len_buf) as usize;
-            let mut data = vec![0u8; len];
-            socket.read_exact(&mut data).await.unwrap();
-            assert_eq!(data, b"hello from client");
+            let mut data = server_pool.acquire().unwrap();
+            link.receive(&mut data).await.unwrap();
+            assert_eq!(data.as_slice(), b"hello from client");
 
             // Send response.
-            let response = b"hello from server";
-            let total_len = (response.len() as u32).to_le_bytes();
-            socket.write_all(&total_len).await.unwrap();
-            socket.write_all(response).await.unwrap();
+            let mut response = server_pool.acquire().unwrap();
+            response.write(b"hello from server");
+            link.send(&mut response).await.unwrap();
         });
 
         // Client side.
-        let mut link = IPLink::<IOPoolSegment>::connect(&addr).await.unwrap();
+        let mut link = IPLink::<IOPoolSegment>::connect(&server_addr)
+            .await
+            .unwrap();
 
-        // Send.
-        let pool = IOPool::new(2, 1024);
         let mut segment = pool.acquire().unwrap();
         segment.write(b"hello from client");
         link.send(&mut segment).await.unwrap();
@@ -275,46 +450,36 @@ mod tests {
 
     #[tokio::test]
     async fn test_ip_link_secure_send_receive() {
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let addr = listener.local_addr().unwrap();
+        let addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
+        let server = IPLinkSecureServer::<IOPoolSegment>::create(&addr)
+            .await
+            .unwrap();
+
+        let server_addr = server.listener.local_addr().unwrap();
+
+        let pool = IOPool::new(4, 1024);
 
         // Server side.
+        let server_pool = pool.clone();
         let server_handle = tokio::spawn(async move {
-            let (mut socket, _) = listener.accept().await.unwrap();
+            let (initiator, _) = server.accept().await.unwrap();
+            let mut link = initiator.initiate().await.unwrap();
 
-            // Negotiation.
-            let specs = negotiation::read_frame(&mut socket).await.unwrap();
-            assert_eq!(specs.abi, 1);
-            assert!(specs.encryption);
-            negotiation::confirm(&mut socket).await.unwrap();
+            // Receive message.
+            let mut data = server_pool.acquire().unwrap();
+            link.receive(&mut data).await.unwrap();
+            assert_eq!(data.as_slice(), b"hello secure client");
 
-            // Key exchange.
-            let (mut send_state, mut recv_state) =
-                negotiation::accept_key_exchange(&mut socket).await.unwrap();
-
-            // Receive encrypted message.
-            let mut len_buf = [0u8; 4];
-            socket.read_exact(&mut len_buf).await.unwrap();
-            let len = u32::from_le_bytes(len_buf) as usize;
-            let mut data = vec![0u8; len];
-            socket.read_exact(&mut data).await.unwrap();
-
-            let mut buffer = data;
-            recv_state.decrypt(&mut buffer, b"").unwrap();
-            assert_eq!(buffer, b"hello secure client");
-
-            // Send encrypted response.
-            let mut response_data = b"hello secure server".to_vec();
-            send_state.encrypt(&mut response_data, b"").unwrap();
-            let total_len = (response_data.len() as u32).to_le_bytes();
-            socket.write_all(&total_len).await.unwrap();
-            socket.write_all(&response_data).await.unwrap();
+            // Send response.
+            let mut response = server_pool.acquire().unwrap();
+            response.write(b"hello secure server");
+            link.send(&mut response).await.unwrap();
         });
 
         // Client side.
-        let mut link = IPLinkSecure::<IOPoolSegment>::connect(&addr).await.unwrap();
-
-        let pool = IOPool::new(2, 1024);
+        let mut link = IPLinkSecure::<IOPoolSegment>::connect(&server_addr)
+            .await
+            .unwrap();
 
         // Send.
         let mut segment = pool.acquire().unwrap();

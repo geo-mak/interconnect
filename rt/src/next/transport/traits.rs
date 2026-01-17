@@ -1,15 +1,16 @@
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use crate::next::error::ProtocolResult;
+use crate::next::mem::IOSegment;
 
 /// The send of a particular transport component.
-pub trait TransportSender<S> {
+pub trait TransportSender<S: IOSegment> {
     fn send(&mut self, source: &mut S) -> impl Future<Output = ProtocolResult<()>> + Send;
     fn terminate(&mut self) -> impl Future<Output = ProtocolResult<()>> + Send;
 }
 
 /// The receiver of a particular transport component.
-pub trait TransportReceiver<S> {
+pub trait TransportReceiver<S: IOSegment> {
     fn receive(&mut self, destination: &mut S) -> impl Future<Output = ProtocolResult<()>> + Send;
 }
 
@@ -20,7 +21,7 @@ pub trait TransportReceiver<S> {
 /// Types that implement this trait shall ask for their memory from a specified allocator or `provider`.
 ///
 /// Memory providers shall provide properly aligned memory as types conforming to `IOSegment` trait.
-pub trait Transport<S>: Sized {
+pub trait Transport<S: IOSegment>: Sized {
     /// TODO: Add associated error-type?
 
     type Parameters;
@@ -38,6 +39,36 @@ pub trait Transport<S>: Sized {
     fn terminate(&mut self) -> impl Future<Output = ProtocolResult<()>> + Send;
 
     fn split(self) -> (Self::Sender, Self::Receiver);
+}
+
+/// A type that establishes a connection after being accepted by the transport-server.
+pub trait TransportInitiator<S: IOSegment>: Sized {
+    type Transport: Transport<S>;
+
+    fn initiate(self) -> impl Future<Output = ProtocolResult<Self::Transport>> + Send;
+}
+
+/// A type that serves transport-components.
+///
+/// This trait can be implemented by transport-components that support multi-endpoint connections.
+///
+/// Types implementing this trait are used by multi-client server-implementations.
+pub trait TransportServer<S: IOSegment>: Sized {
+    type Transport: Transport<S>;
+
+    type Initiator: TransportInitiator<S, Transport = Self::Transport>;
+
+    type Parameter;
+
+    type ID;
+
+    fn create(parameter: &Self::Parameter) -> impl Future<Output = ProtocolResult<Self>>;
+
+    fn accept(&self) -> impl Future<Output = ProtocolResult<(Self::Initiator, Self::ID)>> + Send;
+
+    fn id(&self) -> ProtocolResult<Self::ID>;
+
+    fn terminate(&mut self) -> impl Future<Output = ProtocolResult<()>> + Send;
 }
 
 pub trait BytesSender {
@@ -76,33 +107,3 @@ where
 
 pub trait BytesTransport: BytesSender + BytesReceiver {}
 impl<T> BytesTransport for T where T: BytesSender + BytesReceiver {}
-
-/// A type that establishes a connection after being accepted by the transport-server.
-pub trait TransportInitiator<S>: Sized {
-    type Transport: Transport<S>;
-
-    fn initiate(self) -> impl Future<Output = ProtocolResult<Self::Transport>> + Send;
-}
-
-/// A type that serves transport-components.
-///
-/// This trait can be implemented by transport-components that support multi-endpoint connections.
-///
-/// Types implementing this trait are used by multi-client server-implementations.
-pub trait TransportServer<S>: Sized {
-    type Transport: Transport<S>;
-
-    type Initiator: TransportInitiator<S, Transport = Self::Transport>;
-
-    type Parameter;
-
-    type ID;
-
-    fn create(parameter: &Self::Parameter) -> impl Future<Output = ProtocolResult<Self>>;
-
-    fn accept(&self) -> impl Future<Output = ProtocolResult<(Self::Initiator, Self::ID)>> + Send;
-
-    fn id(&self) -> ProtocolResult<Self::ID>;
-
-    fn terminate(&mut self) -> impl Future<Output = ProtocolResult<()>> + Send;
-}

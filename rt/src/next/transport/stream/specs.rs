@@ -99,7 +99,7 @@ pub struct EncryptionState {
 impl EncryptionState {
     pub fn new(key: &[u8], nonce_base: [u8; 4]) -> ProtocolResult<Self> {
         let cipher = Aes128Gcm::new_from_slice(key)
-            .map_err(|_| ProtocolError::error(ErrKind::InvalidKey))?;
+            .map_err(|_| ProtocolError::error(ErrKind::InvalidEncryptionKey))?;
         Ok(Self {
             cipher,
             sequence: 0,

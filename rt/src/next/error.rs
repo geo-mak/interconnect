@@ -8,7 +8,7 @@ use tokio::time::error::Elapsed;
 /// Result type alias for protocol's operations.
 pub type ProtocolResult<T> = Result<T, ProtocolError>;
 
-/// Protocol error variant.
+/// The variant of protocol's error.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
 #[non_exhaustive]
 #[repr(u8)]
@@ -16,8 +16,8 @@ pub enum ErrKind {
     /// Application-defined error.
     Application,
 
-    /// Unmapped I/O error.
-    IO,
+    /// Unmapped transport-error.
+    Transport,
 
     Disconnected,
 
@@ -29,7 +29,7 @@ pub enum ErrKind {
 
     KeyDerivation,
 
-    InvalidKey,
+    InvalidEncryptionKey,
 
     Encryption,
 
@@ -72,13 +72,13 @@ impl ErrKind {
         use ErrKind::*;
         Some(match byte {
             0 => Application,
-            1 => IO,
+            1 => Transport,
             2 => Disconnected,
             3 => Canceled,
             4 => InvalidNegotiation,
             5 => SpecsMismatch,
             6 => KeyDerivation,
-            7 => InvalidKey,
+            7 => InvalidEncryptionKey,
             8 => Encryption,
             9 => Decryption,
             10 => Encoding,
@@ -101,21 +101,18 @@ impl ErrKind {
     }
 }
 
-/// Error type of RPC operations.
+/// Error type of protocol operations.
 ///
 /// This type is designed to be very lightweight with the following scheme:
 ///
 /// - Error: A representative error that can be direct or indirect/categorical.
 /// - Reference: An extra context to the error as reference. `0` as value means `N/A` or `None`.
 ///
-/// This scheme allows efficient matching of errors, at the same time it keeps
+/// This design allows efficient matching of errors, at the same time it keeps
 /// the error type simple and small to be used internally and over the wire.
 ///
-/// For example, for reporting service-specific error, the kind can be set to `Service`
-/// as category, and the actual error can be provided as reference to service-specific error's member.
-///
-/// For text-formatted error messages, helper functions can be used to provide formatted string
-/// representation, in similar fashion to POSIX error-handling.
+/// For example, for returning an application-specific error, the kind can be set to `Application`
+/// as category, and the actual error can be provided as reference to application-specific error's member.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
 pub struct ProtocolError {
     pub kind: ErrKind,
@@ -124,8 +121,6 @@ pub struct ProtocolError {
 }
 
 impl ProtocolError {
-    pub const BYTES: usize = 5;
-
     #[inline(always)]
     pub const fn new(kind: ErrKind, refer: i32) -> Self {
         Self { kind, refer }
@@ -153,7 +148,7 @@ impl From<io::Error> for ProtocolError {
             }
         } else {
             ProtocolError {
-                kind: ErrKind::IO,
+                kind: ErrKind::Transport,
                 refer: err.raw_os_error().unwrap_or(0),
             }
         }

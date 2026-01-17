@@ -1,16 +1,16 @@
+use core::fmt;
+
 use std::collections::TryReserveError;
-use std::fmt;
 use std::io;
 
-use serde::{Deserialize, Serialize};
 use tokio::time::error::Elapsed;
 
 /// Result type alias for protocol's operations.
 pub type ProtocolResult<T> = Result<T, ProtocolError>;
 
 /// The variant of protocol's error.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
 #[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq)]
 #[repr(u8)]
 pub enum ErrKind {
     /// Application-defined error.
@@ -113,7 +113,7 @@ impl ErrKind {
 ///
 /// For example, for returning an application-specific error, the kind can be set to `Application`
 /// as category, and the actual error can be provided as reference to application-specific error's member.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ProtocolError {
     pub kind: ErrKind,
     // errno is i32.

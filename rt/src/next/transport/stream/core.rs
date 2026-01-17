@@ -48,7 +48,7 @@ where
 {
     #[inline(always)]
     fn extend_from_slice(&mut self, other: &[u8]) -> aead::Result<()> {
-        // RT_DYN_ALLOC
+        // RT_ALLOC.
         if self.seg.write(other) {
             return Ok(());
         }
@@ -75,11 +75,11 @@ where
     }
 
     fn as_slice(&self) -> &[u8] {
-        unsafe { self.seg.view(self.len) }
+        unsafe { self.seg.slice_of(self.len) }
     }
 
     fn as_slice_mut(&mut self) -> &mut [u8] {
-        unsafe { self.seg.view_mut(self.len) }
+        unsafe { self.seg.slice_mut_of(self.len) }
     }
 }
 
@@ -152,8 +152,12 @@ pub async fn receive<T: BytesReceiver, D: IOSegment>(
     // Safety: Capacity must be ensured before segmentation.
     if destination.ensure_capacity(len) {
         debug_assert!(destination.capacity() >= len);
-        let view_mut = unsafe { destination.view_mut(len) };
-        transport.receive_bytes(view_mut).await?;
+
+        let recv_segment = unsafe { destination.slice_mut_of(len) };
+
+        // Safety: This call must initialize the provided segment or it must fail and return.
+        transport.receive_bytes(recv_segment).await?;
+
         // Safety: `len` bytes are assumed to have been initialized.
         unsafe { destination.set_len(len) };
         return Ok(());
@@ -168,9 +172,12 @@ pub async fn send_encrypted<T: BytesSender, S: IOSegment>(
     state: &mut EncryptionState,
 ) -> ProtocolResult<()> {
     let mut adapter_segment = EncryptionAdapter::new(source);
+
     state.encrypt(&mut adapter_segment, b"")?;
+
     // TODO: use protocol types.
     let len_u32 = source.len() as u32;
+    // Note: We don't control the segment's layout, so it has to be two calls.
     transport.send_bytes(&len_u32.to_le_bytes()).await?;
     transport.send_bytes(source.as_slice()).await
 }
@@ -200,14 +207,14 @@ pub async fn receive_encrypted<T: BytesReceiver, D: IOSegment>(
     if destination.ensure_capacity(len) {
         debug_assert!(destination.capacity() >= len);
 
-        let view_mut = unsafe { destination.view_mut(len) };
+        let recv_segment = unsafe { destination.slice_mut_of(len) };
 
         // Safety: This call must initialize the provided segment or it must fail and return.
-        transport.receive_bytes(view_mut).await?;
+        transport.receive_bytes(recv_segment).await?;
 
         // Safety:
         // - Reading is assumed to be done on initialized bytes at this stage.
-        // - len is updated after decryption by calling DecryptionAdapter::truncate.
+        // - Segment's len is updated after successful decryption via DecryptionAdapter::truncate.
         let mut adapter_segment = DecryptionAdapter::new(destination, len);
         return state.decrypt(&mut adapter_segment, b"");
     }

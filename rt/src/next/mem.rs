@@ -59,7 +59,7 @@ pub unsafe trait IOSegment {
         unsafe { from_raw_parts_mut(self.as_ptr_mut(), self.len()) }
     }
 
-    /// Constructs a view as slice of `count` bytes.
+    /// Constructs a slice of `count` bytes.
     ///
     /// Safety:
     /// - The count must be within the bounds of the allocated memory.
@@ -72,12 +72,12 @@ pub unsafe trait IOSegment {
     /// "Maybeuninit<u8>" in arrays and slices will dramatically increase the code complexity
     /// and transforms the codebase into "spaghetti of casting and transmuting".
     #[inline]
-    unsafe fn view(&self, count: usize) -> &[u8] {
+    unsafe fn slice_of(&self, count: usize) -> &[u8] {
         debug_assert!(count <= self.capacity());
         unsafe { core::slice::from_raw_parts(self.as_ptr(), count) }
     }
 
-    /// Constructs a mutable view as mutable slice of `count` bytes.
+    /// Constructs a mutable slice of `count` bytes.
     ///
     /// # Safety
     /// - The count must be within the bounds of the allocated memory.
@@ -90,7 +90,7 @@ pub unsafe trait IOSegment {
     /// "Maybeuninit<u8>" in arrays and slices will dramatically increase the code complexity
     /// and transforms the codebase into "spaghetti of casting and transmuting".
     #[inline]
-    unsafe fn view_mut(&mut self, count: usize) -> &mut [u8] {
+    unsafe fn slice_mut_of(&mut self, count: usize) -> &mut [u8] {
         debug_assert!(count <= self.capacity());
         unsafe { core::slice::from_raw_parts_mut(self.as_ptr_mut(), count) }
     }

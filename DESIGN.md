@@ -16,7 +16,7 @@ Transport components implement the actual mechanics of delivering data from I/O 
 Each transport components is viewed **and** implemented as a fully-fledged transport-protocol, with its own transport-model, and its own
 specifications and semantics for establishing connections.
 
-From design perspective, the underlying device, technology or networking stack used by the transport model is considered implementation detail, because it doesn't play role in its identify as a transport type.
+From design perspective, the underlying device, technology or networking stack used by the transport model is considered implementation detail, because it doesn't play role in its identity as a transport type.
 
 Transport models will not be identified as TCP, UDS or something else, because these are just internals, even if they are mentions in the documentation. 
 

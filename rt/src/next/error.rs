@@ -14,56 +14,56 @@ pub type ProtocolResult<T> = Result<T, ProtocolError>;
 #[repr(u8)]
 pub enum ErrKind {
     /// Application-defined error.
-    Application,
+    Application = 0,
 
     /// Unmapped transport-error.
-    Transport,
+    Transport = 1,
 
-    Disconnected,
+    Disconnected = 2,
 
-    Canceled,
+    Canceled = 3,
 
-    InvalidNegotiation,
+    InvalidNegotiation = 4,
 
-    SpecsMismatch,
+    SpecsMismatch = 5,
 
-    KeyDerivation,
+    KeyDerivation = 6,
 
-    InvalidEncryptionKey,
+    InvalidEncryptionKey = 7,
 
-    Encryption,
+    Encryption = 8,
 
-    Decryption,
+    Decryption = 9,
 
-    Encoding,
+    Encoding = 10,
 
-    Decoding,
+    Decoding = 11,
 
-    MemoryAllocation,
+    MemoryAllocation = 12,
 
-    RoundLimit,
+    RoundLimit = 13,
 
-    CapacityLimit,
+    CapacityLimit = 14,
 
-    SendSizeLimit,
+    SendSizeLimit = 15,
 
-    RecvSizeLimit,
+    RecvSizeLimit = 16,
 
-    Timeout,
+    Timeout = 17,
 
-    UnexpectedMsg,
+    UnexpectedMsg = 18,
 
-    DroppedMessage,
+    DroppedMessage = 19,
 
-    Unidentified,
+    Unidentified = 20,
 
-    Unimplemented,
+    Unimplemented = 21,
 
-    Validation,
+    Validation = 22,
 
-    NotEnoughData,
+    NotEnoughData = 23,
 
-    InvalidPadding,
+    InvalidPadding = 24,
 }
 
 impl ErrKind {

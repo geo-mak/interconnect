@@ -2,10 +2,13 @@ use core::mem::MaybeUninit;
 
 use zerocopy::IntoBytes;
 
+use crate::next::codec::decoder::Decoder;
+use crate::next::codec::encoder::Encoder;
+use crate::next::codec::reference::TypeRef;
 use crate::next::codec::{decode::Decode, encode::Encode};
 use crate::next::error::ProtocolResult;
 use crate::next::types::core::{ProtocolType, TypeU64};
-use crate::next::types::limits::Unlimited;
+use crate::next::types::limits::{TypeLimits, Unlimited};
 
 pub type MessageID = TypeU64;
 
@@ -35,6 +38,20 @@ impl TypeMessageHeader {
     pub const fn new(id: MessageID, directive: MessageDirective) -> Self {
         Self { id, directive }
     }
+
+    pub fn encode_header<E: Encoder>(
+        message_id: u64,
+        directive: u64,
+        encoder: &mut E,
+    ) -> ProtocolResult<()> {
+        let header = Self::new(TypeU64(message_id), TypeU64(directive));
+        encoder.encode_next(header, ())
+    }
+
+    pub fn decode_header<D: Decoder>(mut decoder: &mut D) -> ProtocolResult<(u64, u64)> {
+        let header = decoder.decode_inner_type::<Self>(())?;
+        Ok((*header.id, *header.directive))
+    }
 }
 
 unsafe impl ProtocolType for TypeMessageHeader {
@@ -51,7 +68,7 @@ unsafe impl<E: ?Sized> Encode<TypeMessageHeader, E> for TypeMessageHeader {
         self,
         _encoder: &mut E,
         inline_value: &mut MaybeUninit<TypeMessageHeader>,
-        _limits: <TypeMessageHeader as super::limits::TypeLimits>::Limits,
+        _limits: <TypeMessageHeader as TypeLimits>::Limits,
     ) -> ProtocolResult<()> {
         inline_value.write(self);
         Ok(())
@@ -63,7 +80,7 @@ unsafe impl<E: ?Sized> Encode<TypeMessageHeader, E> for &TypeMessageHeader {
         self,
         encoder: &mut E,
         inline_value: &mut MaybeUninit<TypeMessageHeader>,
-        limits: <TypeMessageHeader as super::limits::TypeLimits>::Limits,
+        limits: <TypeMessageHeader as TypeLimits>::Limits,
     ) -> ProtocolResult<()> {
         Encode::encode(*self, encoder, inline_value, limits)
     }
@@ -71,7 +88,7 @@ unsafe impl<E: ?Sized> Encode<TypeMessageHeader, E> for &TypeMessageHeader {
 
 unsafe impl<D: ?Sized> Decode<D> for TypeMessageHeader {
     fn decode(
-        _value: crate::next::codec::reference::TypeRef<'_, Self>,
+        _value: TypeRef<'_, Self>,
         _decoder: &mut D,
         _limits: Self::Limits,
     ) -> ProtocolResult<()> {

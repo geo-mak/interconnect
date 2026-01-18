@@ -4,7 +4,7 @@ use core::slice::from_raw_parts;
 
 use crate::next::codec::encode::Encode;
 use crate::next::codec::reference::TypeRef;
-use crate::next::error::ProtocolResult;
+use crate::next::error::{ErrKind, ProtocolError, ProtocolResult};
 use crate::next::types::core::ProtocolType;
 use crate::next::types::limits::TypeLimits;
 
@@ -33,7 +33,7 @@ where
 
         let as_bytes_ptr = (value as *const T).cast::<u8>();
         let bytes_slice = unsafe { from_raw_parts(as_bytes_ptr, size_of::<T>()) };
-        self.encoder.store_at(self.offset, bytes_slice);
+        self.encoder.store_encoded_at(self.offset, bytes_slice);
         self.offset += size_of::<T>();
     }
 }
@@ -45,32 +45,38 @@ pub trait Encoder {
     /// Sets bytes to zeros.
     ///
     /// More bytes are set to zeros where padding is required.
-    fn memset_zeros(&mut self, len: usize);
+    ///
+    /// Returns `false` in case of lack of memory or failure to allocate more.
+    fn memset_zero(&mut self, len: usize) -> bool;
 
     /// Appends the provided bytes to the encoder.
     ///
     /// More bytes are added where padding is required.
-    fn store(&mut self, src: &[u8]);
+    ///
+    /// Returns `false` in case of lack of memory or failure to allocate more.
+    fn store_encoded(&mut self, src: &[u8]) -> bool;
 
     /// Stores bytes at the provided `offset` in the encoder.
-    fn store_at(&mut self, offset: usize, src: &[u8]);
+    fn store_encoded_at(&mut self, offset: usize, src: &[u8]);
 
     /// Skips number of bytes as reserved space and returns
     /// a type that stores the value at its original offset.
     ///
     /// The skipped bytes will be **zeroed** before returning.
-    fn skip<T>(&mut self, len: usize) -> Skip<'_, Self, T> {
+    fn skip<T>(&mut self, len: usize) -> Option<Skip<'_, Self, T>> {
         let current_offset = self.stored_bytes();
 
-        self.memset_zeros(len * size_of::<T>());
+        if !self.memset_zero(len * size_of::<T>()) {
+            return None;
+        };
 
-        Skip {
+        Some(Skip {
             encoder: self,
             offset: current_offset,
             _t: PhantomData,
             #[cfg(debug_assertions)]
             remaining: len,
-        }
+        })
     }
 
     /// Encodes a group of iterable elements.
@@ -80,25 +86,27 @@ pub trait Encoder {
         T: Encode<P, Self>,
         I: ExactSizeIterator<Item = T>,
     {
-        let mut outputs = self.skip::<P>(values.len());
+        if let Some(mut outputs) = self.skip::<P>(values.len()) {
+            let mut inlined = MaybeUninit::<P>::uninit();
 
-        let mut inlined = MaybeUninit::<P>::uninit();
+            P::write_zero_padding(&mut inlined);
 
-        P::write_zero_padding(&mut inlined);
+            for value in values {
+                value.encode(outputs.encoder, &mut inlined, limits)?;
 
-        for value in values {
-            value.encode(outputs.encoder, &mut inlined, limits)?;
+                let inline_value = unsafe { TypeRef::new_assume_init(&mut inlined) };
 
-            let inline_value = unsafe { TypeRef::new_assume_init(&mut inlined) };
+                P::check_limits(inline_value, limits)?;
 
-            P::check_limits(inline_value, limits)?;
-
-            unsafe {
-                outputs.store_next(inlined.assume_init_ref());
+                unsafe {
+                    outputs.store_next(inlined.assume_init_ref());
+                }
             }
+
+            return Ok(());
         }
 
-        Ok(())
+        Err(ProtocolError::error(ErrKind::MemoryAllocation))
     }
 
     /// Encodes a compound value.

@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use crate::next::types::core::TypeU64;
 
-pub const ALLOC_MEM_ALIGN: usize = 8;
+pub const BASIC_BLOCK_SIZE: usize = 8;
 
 /// Slice of eight bytes aligned to an 8-byte boundary.
 pub type BasicBlock = TypeU64;

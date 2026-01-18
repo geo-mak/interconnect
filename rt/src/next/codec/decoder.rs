@@ -5,13 +5,13 @@ use core::slice;
 use crate::next::codec::decode::{Decode, Decoded};
 use crate::next::codec::reference::TypeRef;
 use crate::next::error::{ErrKind, ProtocolError, ProtocolResult};
-use crate::next::mem::{ALLOC_MEM_ALIGN, BasicBlock};
+use crate::next::mem::{BASIC_BLOCK_SIZE, BasicBlock};
 use crate::next::types::limits::TypeLimits;
 
 #[inline]
 const fn assert_alloc_mem_aligned<T>() {
     assert!(
-        align_of::<T>() <= ALLOC_MEM_ALIGN,
+        align_of::<T>() <= BASIC_BLOCK_SIZE,
         "Type has higher alignment than `ALLOC_MEM_ALIGN`",
     );
 }
@@ -44,7 +44,7 @@ pub unsafe trait Decoder {
     fn ref_as<'de, T>(self: &mut &'de mut Self) -> ProtocolResult<TypeRef<'de, T>> {
         assert_alloc_mem_aligned::<T>();
 
-        let count = size_of::<T>().div_ceil(ALLOC_MEM_ALIGN);
+        let count = size_of::<T>().div_ceil(BASIC_BLOCK_SIZE);
 
         let blocks = self.get_blocks(count)?;
 
@@ -59,9 +59,9 @@ pub unsafe trait Decoder {
 
         let total_bytes = size_of::<T>() * len;
 
-        let count = total_bytes.div_ceil(ALLOC_MEM_ALIGN);
+        let count = total_bytes.div_ceil(BASIC_BLOCK_SIZE);
 
-        let blocks_len = ALLOC_MEM_ALIGN * count;
+        let blocks_len = BASIC_BLOCK_SIZE * count;
 
         let padding_len = blocks_len - total_bytes;
 

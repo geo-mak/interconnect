@@ -274,14 +274,14 @@ where
         let specs = negotiation::read_frame(&mut self.stream).await?;
 
         // TODO: Hardcoded because config are not accepted currently.
-        if specs.abi != 1 {
-            negotiation::reject(&mut self.stream).await?;
-            return Err(ProtocolError::error(ErrKind::SpecsMismatch));
+        if specs.abi == 1 && specs.encryption == false {
+            negotiation::confirm(&mut self.stream).await?;
+
+            return Ok(IPLink::from(self.stream));
         }
 
-        negotiation::confirm(&mut self.stream).await?;
-
-        Ok(IPLink::from(self.stream))
+        negotiation::reject(&mut self.stream).await?;
+        return Err(ProtocolError::error(ErrKind::SpecsMismatch));
     }
 }
 
@@ -359,16 +359,17 @@ where
         let specs = negotiation::read_frame(&mut self.stream).await?;
 
         // TODO: Hardcoded because config are not accepted currently.
-        if specs.abi != 1 {
-            negotiation::reject(&mut self.stream).await?;
-            return Err(ProtocolError::error(ErrKind::SpecsMismatch));
+        if specs.abi == 1 && specs.encryption == true {
+            negotiation::confirm(&mut self.stream).await?;
+
+            let (send_state, recv_state) =
+                negotiation::accept_key_exchange(&mut self.stream).await?;
+
+            return Ok(IPLinkSecure::from(self.stream, send_state, recv_state));
         }
 
-        negotiation::confirm(&mut self.stream).await?;
-
-        let (send_state, recv_state) = negotiation::accept_key_exchange(&mut self.stream).await?;
-
-        Ok(IPLinkSecure::from(self.stream, send_state, recv_state))
+        negotiation::reject(&mut self.stream).await?;
+        return Err(ProtocolError::error(ErrKind::SpecsMismatch));
     }
 }
 

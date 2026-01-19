@@ -3,13 +3,13 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use crate::next::error::ProtocolResult;
 use crate::next::mem::IOSegment;
 
-/// The send of a particular transport component.
+/// The sender of the transport-component.
 pub trait TransportSender<S: IOSegment> {
     fn send(&mut self, source: &mut S) -> impl Future<Output = ProtocolResult<()>> + Send;
     fn terminate(&mut self) -> impl Future<Output = ProtocolResult<()>> + Send;
 }
 
-/// The receiver of a particular transport component.
+/// The receiver of the transport-component.
 pub trait TransportReceiver<R: IOSegment> {
     fn receive(&mut self, destination: &mut R) -> impl Future<Output = ProtocolResult<()>> + Send;
 }

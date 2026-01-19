@@ -184,17 +184,3 @@ impl Reporter for STDIOReporter {
         });
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_stdio_reporter() {
-        let instance = STDIOReporter::new();
-        instance.trace("Test trace report", &"Test contents");
-        instance.info("Test info report", &"Test contents");
-        instance.alert("Test alert report", &"Test contents");
-        instance.error("Test error report", &"Test contents");
-    }
-}

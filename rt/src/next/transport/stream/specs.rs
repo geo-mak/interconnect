@@ -6,63 +6,6 @@ use sha2::Sha256;
 use crate::next::error::ProtocolResult;
 use crate::next::error::{ErrKind, ProtocolError};
 use crate::opt::branch_hints::unlikely;
-
-//           ----------------------------------------------
-//           |         IPC SPECIFICATION PROTOCOL         |
-//           ----------------------------------------------
-//
-//                         ----------------
-//                         |  DATA FLOW   |
-//                         ----------------
-//
-//              CLIENT                           SERVER
-//                |                                 |
-//                | Specification Frame (8 bytes)   |
-//                |-------------------------------> |
-//                |                                 |
-//                | Server applies its policy then: |
-//                |                                 |
-//                | 1-byte Confirmation             |
-//                |    0x01 = Accepted              |
-//                |    0x00 = Rejected              |
-//                | <-------------------------------|
-//                |                                 |
-//
-//                If encryption is enabled:
-//
-//                | Ephemeral X25519 Public Key     |
-//                |-------------------------------> |
-//                | Ephemeral X25519 Public Key     |
-//                | <-------------------------------|
-//
-// ------------------------                 ------------------------
-// | derive shared secret |                 | derive shared secret |
-// | via x25519 + HKDF    |                 | via x25519 + HKDF    |
-// ------------------------                 ------------------------
-//
-//                       ENCRYPTED SESSION BEGINS
-//
-
-// ----------------------------------------------
-// |         SPECIFICATION FRAME DATA           |
-// ----------------------------------------------
-//
-// Specification frame (8 bytes)
-// [0..4]   Specification protocol signature (and version)
-// [4]      Stream version
-// [5]      Flags:
-//            0x01 = encryption enabled
-//            0x02 = identity required (not implemented, future use)
-// [6..8]   Reserved = 0 (2 bytes)
-//
-// Confirmation byte (1 byte):
-// 0x01 = accepted
-// 0x00 = rejected/abort
-//
-// Key exchange (currently):
-// [0..32]  Client ephemeral X25519 public key
-// [0..32]  Server ephemeral X25519 public key
-
 const SPECS_FRAME_LEN: usize = 8;
 
 /// Protocol flags.
@@ -84,9 +27,11 @@ impl ConnectionSpecs {
 }
 
 pub type NonceBase = [u8; 4];
+
 pub type SenderKey = [u8; 16];
-pub type ReceiverKey = [u8; 16];
 pub type SenderState = EncryptionState;
+
+pub type ReceiverKey = [u8; 16];
 pub type ReceiverState = EncryptionState;
 
 /// Stores the cipher-state and provides encryption and decryption methods.
@@ -150,6 +95,42 @@ impl EncryptionState {
     }
 }
 
+/// This modules contains the functions used to establish connections according to specifications.
+///
+/// The client-side initiates the negotiation using `initiate` function.
+///
+/// Initiation starts by sending `specification-frame`.
+///
+/// The `specification-frame` is 8-bytes in size and its bytes represent the following:
+///
+/// [0..4]   Specification protocol signature (and version)
+/// [4]      ABI version
+/// [5]      Flags:
+///            0x01 = encryption enabled
+///            0x02 = identity required (not implemented, future use)
+/// [6..8]   Reserved = 0 (2 bytes)
+///
+/// The server-side waits for the `specification-frame` to arrive and reads its data.
+///
+/// The server shall compares the announced specifications with its configurations,
+/// then it sends back `confirmation-byte`.
+///
+/// The confirmation-byte` represents two states:
+/// 0x01 = accepted
+/// 0x00 = rejected/abort
+///
+/// If the agreed-upon specifications have the encryption-flag set, the two sides shall start key-exchange session.
+///
+/// The key-exchange session shall be initiated by the client using using `initiate_key_exchange` function.
+/// The server waits for client-key to arrive, then it sends back its public key using `accept_key_exchange` function.
+///
+/// Both keys are ephemeral 32-bytes X25519 public key.
+///
+/// The the shared-secret is derived using `diffie-hellman` algorithm.
+///
+/// The derived shared-secret is then passed to HMAC-based key derivation function to construct two encryption-states:
+/// - Encryption state for sending with internal counter.
+/// - Encryption state for receiving with internal counter.
 pub mod negotiation {
     use super::*;
 
@@ -277,15 +258,15 @@ pub mod negotiation {
     ) -> ProtocolResult<(SenderKey, ReceiverKey, NonceBase)> {
         let hkdf = Hkdf::<Sha256>::new(Some(b"ics-negotiation"), shared_secret);
 
-        let mut nonce_base = [0u8; 4];
         let mut send_key = [0u8; 16];
         let mut recv_key = [0u8; 16];
+        let mut nonce_base = [0u8; 4];
 
         let map_err = |_| ProtocolError::error(ErrKind::KeyDerivation);
 
-        hkdf.expand(b"ics-session-read", &mut recv_key)
-            .map_err(map_err)?;
         hkdf.expand(b"ics-session-write", &mut send_key)
+            .map_err(map_err)?;
+        hkdf.expand(b"ics-session-read", &mut recv_key)
             .map_err(map_err)?;
         hkdf.expand(b"ics-nonce-base", &mut nonce_base)
             .map_err(map_err)?;

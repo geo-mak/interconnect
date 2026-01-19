@@ -17,9 +17,11 @@ pub const BASIC_BLOCK_SIZE: usize = 8;
 pub type BasicBlock = TypeU64;
 
 pub trait MemoryProvider {
-    type Segment: IOSegment;
+    type SendSegment: IOSegment;
+    type ReceiveSegment: IOSegment;
 
-    fn acquire(&self) -> Option<Self::Segment>;
+    fn acquire_send(&self) -> Option<Self::SendSegment>;
+    fn acquire_receive(&self) -> Option<Self::ReceiveSegment>;
 }
 
 /// A unified interface for types that perform untyped reads from and writes to a memory-region directly.
@@ -116,7 +118,7 @@ pub unsafe trait IOSegment {
     /// Safety:
     /// - The source slice must consist of fully initialized bytes.
     /// - The source slice must be a non-overlapping (disjoint) memory-region.
-    fn write(&mut self, src: &[u8]) -> bool;
+    fn write(&mut self, source: &[u8]) -> bool;
 
     /// Writes data to the segment in unchecked-mode.
     ///
@@ -126,7 +128,7 @@ pub unsafe trait IOSegment {
     /// - The segment must have enough capacity to accommodate the the source data.
     /// - The segment is valid for writing/overwriting withing the range [`offset`: source length - 1].
     /// - Length is **not** advanced after writing.
-    unsafe fn write_at(&mut self, offset: usize, src: &[u8]);
+    unsafe fn write_at(&mut self, offset: usize, source: &[u8]);
 }
 
 pub(crate) struct IOPoolSegment {
@@ -197,31 +199,35 @@ unsafe impl IOSegment for IOPoolSegment {
     }
 
     #[inline]
-    fn write(&mut self, src: &[u8]) -> bool {
+    fn write(&mut self, source: &[u8]) -> bool {
         let capacity = self.pool.seg_size;
         let current_len = self.len;
 
         let free = capacity - current_len;
-        let src_len = src.len();
+        let source_len = source.len();
 
-        if free < src_len {
+        if free < source_len {
             return false;
         }
 
         unsafe {
-            copy_nonoverlapping(src.as_ptr(), self.segment_ptr.add(current_len), src_len);
+            copy_nonoverlapping(
+                source.as_ptr(),
+                self.segment_ptr.add(current_len),
+                source_len,
+            );
         }
 
-        self.len += src_len;
+        self.len += source_len;
 
         true
     }
 
     #[inline]
-    unsafe fn write_at(&mut self, offset: usize, src: &[u8]) {
-        let count = src.len();
+    unsafe fn write_at(&mut self, offset: usize, source: &[u8]) {
+        let count = source.len();
         debug_assert!(offset + count <= self.pool.seg_size);
-        unsafe { copy_nonoverlapping(src.as_ptr(), self.segment_ptr.add(offset), count) };
+        unsafe { copy_nonoverlapping(source.as_ptr(), self.segment_ptr.add(offset), count) };
     }
 }
 
@@ -310,10 +316,16 @@ impl IOPool {
 }
 
 impl MemoryProvider for IOPool {
-    type Segment = IOPoolSegment;
+    type SendSegment = IOPoolSegment;
+    type ReceiveSegment = IOPoolSegment;
 
     #[inline(always)]
-    fn acquire(&self) -> Option<IOPoolSegment> {
+    fn acquire_send(&self) -> Option<IOPoolSegment> {
+        self.acquire()
+    }
+
+    #[inline(always)]
+    fn acquire_receive(&self) -> Option<Self::ReceiveSegment> {
         self.acquire()
     }
 }

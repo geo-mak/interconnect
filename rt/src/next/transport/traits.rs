@@ -10,8 +10,8 @@ pub trait TransportSender<S: IOSegment> {
 }
 
 /// The receiver of a particular transport component.
-pub trait TransportReceiver<S: IOSegment> {
-    fn receive(&mut self, destination: &mut S) -> impl Future<Output = ProtocolResult<()>> + Send;
+pub trait TransportReceiver<R: IOSegment> {
+    fn receive(&mut self, destination: &mut R) -> impl Future<Output = ProtocolResult<()>> + Send;
 }
 
 /// A type that can act as transport layer.
@@ -21,20 +21,20 @@ pub trait TransportReceiver<S: IOSegment> {
 /// Types that implement this trait shall ask for their memory from a specified allocator or `provider`.
 ///
 /// Memory providers shall provide properly aligned memory as types conforming to `IOSegment` trait.
-pub trait Transport<S: IOSegment>: Sized {
+pub trait Transport<S: IOSegment, R: IOSegment>: Sized {
     /// TODO: Add associated error-type?
 
     type Parameters;
 
     type Sender: TransportSender<S>;
 
-    type Receiver: TransportReceiver<S>;
+    type Receiver: TransportReceiver<R>;
 
     fn connect(parameters: &Self::Parameters) -> impl Future<Output = ProtocolResult<Self>> + Send;
 
     fn send(&mut self, source: &mut S) -> impl Future<Output = ProtocolResult<()>> + Send;
 
-    fn receive(&mut self, destination: &mut S) -> impl Future<Output = ProtocolResult<()>> + Send;
+    fn receive(&mut self, destination: &mut R) -> impl Future<Output = ProtocolResult<()>> + Send;
 
     fn terminate(&mut self) -> impl Future<Output = ProtocolResult<()>> + Send;
 
@@ -42,8 +42,8 @@ pub trait Transport<S: IOSegment>: Sized {
 }
 
 /// A type that establishes a connection after being accepted by the transport-server.
-pub trait TransportInitiator<S: IOSegment>: Sized {
-    type Transport: Transport<S>;
+pub trait TransportInitiator<S: IOSegment, R: IOSegment>: Sized {
+    type Transport: Transport<S, R>;
 
     fn initiate(self) -> impl Future<Output = ProtocolResult<Self::Transport>> + Send;
 }
@@ -53,10 +53,10 @@ pub trait TransportInitiator<S: IOSegment>: Sized {
 /// This trait can be implemented by transport-components that support multi-endpoint connections.
 ///
 /// Types implementing this trait are used by multi-client server-implementations.
-pub trait TransportServer<S: IOSegment>: Sized {
-    type Transport: Transport<S>;
+pub trait TransportServer<S: IOSegment, R: IOSegment>: Sized {
+    type Transport: Transport<S, R>;
 
-    type Initiator: TransportInitiator<S, Transport = Self::Transport>;
+    type Initiator: TransportInitiator<S, R, Transport = Self::Transport>;
 
     type Parameter;
 

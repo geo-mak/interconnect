@@ -63,30 +63,33 @@ where
     }
 }
 
-pub struct UnixLink<T> {
+pub struct UnixLink<S, R> {
     stream: UnixStream,
-    _t: PhantomData<T>,
+    _s: PhantomData<S>,
+    _r: PhantomData<R>,
 }
 
-impl<S> UnixLink<S> {
+impl<S, R> UnixLink<S, R> {
     #[inline]
     const fn from(stream: UnixStream) -> Self {
         Self {
             stream,
-            _t: PhantomData,
+            _s: PhantomData,
+            _r: PhantomData,
         }
     }
 }
 
-impl<T> Transport<T> for UnixLink<T>
+impl<S, R> Transport<S, R> for UnixLink<S, R>
 where
-    T: IOSegment + Send + Sync,
+    S: IOSegment + Send + Sync,
+    R: IOSegment + Send + Sync,
 {
     type Parameters = &'static str;
 
-    type Sender = UnixLinkSender<T>;
+    type Sender = UnixLinkSender<S>;
 
-    type Receiver = UnixLinkReceiver<T>;
+    type Receiver = UnixLinkReceiver<R>;
 
     async fn connect(parameters: &Self::Parameters) -> ProtocolResult<Self> {
         let mut stream = UnixStream::connect(parameters).await?;
@@ -95,15 +98,16 @@ where
 
         Ok(Self {
             stream,
-            _t: PhantomData,
+            _s: PhantomData,
+            _r: PhantomData,
         })
     }
 
-    async fn send(&mut self, source: &mut T) -> ProtocolResult<()> {
+    async fn send(&mut self, source: &mut S) -> ProtocolResult<()> {
         stream::core::send(&mut self.stream, source).await
     }
 
-    async fn receive(&mut self, destination: &mut T) -> ProtocolResult<()> {
+    async fn receive(&mut self, destination: &mut R) -> ProtocolResult<()> {
         stream::core::receive(&mut self.stream, destination).await
     }
 
@@ -118,28 +122,31 @@ where
     }
 }
 
-pub struct UnixLinkInitiator<S> {
+pub struct UnixLinkInitiator<S, R> {
     stream: UnixStream,
     _s: PhantomData<S>,
+    _r: PhantomData<R>,
 }
 
-impl<S> UnixLinkInitiator<S> {
+impl<S, R> UnixLinkInitiator<S, R> {
     #[inline]
     pub const fn from(stream: UnixStream) -> Self {
         Self {
             stream,
             _s: PhantomData,
+            _r: PhantomData,
         }
     }
 }
 
-impl<S> TransportInitiator<S> for UnixLinkInitiator<S>
+impl<S, R> TransportInitiator<S, R> for UnixLinkInitiator<S, R>
 where
     S: IOSegment + Send + Sync,
+    R: IOSegment + Send + Sync,
 {
-    type Transport = UnixLink<S>;
+    type Transport = UnixLink<S, R>;
 
-    async fn initiate(mut self) -> ProtocolResult<UnixLink<S>> {
+    async fn initiate(mut self) -> ProtocolResult<UnixLink<S, R>> {
         let specs = negotiation::read_frame(&mut self.stream).await?;
         // TODO: Hardcoded because config are not accepted currently.
         if specs.abi != 1 {
@@ -152,18 +159,20 @@ where
     }
 }
 
-pub struct UnixLinkServer<S> {
+pub struct UnixLinkServer<S, R> {
     listener: UnixListener,
-    _t: PhantomData<S>,
+    _s: PhantomData<S>,
+    _r: PhantomData<R>,
 }
 
-impl<S> TransportServer<S> for UnixLinkServer<S>
+impl<S, R> TransportServer<S, R> for UnixLinkServer<S, R>
 where
     S: IOSegment + Send + Sync,
+    R: IOSegment + Send + Sync,
 {
-    type Transport = UnixLink<S>;
+    type Transport = UnixLink<S, R>;
 
-    type Initiator = UnixLinkInitiator<S>;
+    type Initiator = UnixLinkInitiator<S, R>;
 
     type Parameter = &'static str;
 
@@ -176,11 +185,12 @@ where
         let listener = UnixListener::bind(parameters)?;
         Ok(Self {
             listener,
-            _t: PhantomData,
+            _s: PhantomData,
+            _r: PhantomData,
         })
     }
 
-    async fn accept(&self) -> ProtocolResult<(UnixLinkInitiator<S>, Self::ID)> {
+    async fn accept(&self) -> ProtocolResult<(UnixLinkInitiator<S, R>, Self::ID)> {
         let (stream, addr) = self.listener.accept().await?;
         Ok((UnixLinkInitiator::from(stream), addr))
     }
@@ -205,7 +215,7 @@ mod tests {
     async fn test_unix_link_send_receive() {
         let path = "/tmp/test_interconnect_uds.sock";
         let _ = std::fs::remove_file(path);
-        let server = UnixLinkServer::<IOPoolSegment>::create(&path)
+        let server = UnixLinkServer::<IOPoolSegment, IOPoolSegment>::create(&path)
             .await
             .unwrap();
 
@@ -229,7 +239,9 @@ mod tests {
         });
 
         // Client side.
-        let mut link = UnixLink::<IOPoolSegment>::connect(&path).await.unwrap();
+        let mut link = UnixLink::<IOPoolSegment, IOPoolSegment>::connect(&path)
+            .await
+            .unwrap();
 
         // Send.
         let mut segment = pool.acquire().unwrap();

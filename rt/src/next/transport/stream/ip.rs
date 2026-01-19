@@ -64,30 +64,33 @@ where
     }
 }
 
-pub struct IPLink<T> {
+pub struct IPLink<S, R> {
     stream: TcpStream,
-    _t: PhantomData<T>,
+    _s: PhantomData<S>,
+    _r: PhantomData<R>,
 }
 
-impl<S> IPLink<S> {
+impl<S, R> IPLink<S, R> {
     #[inline]
     const fn from(stream: TcpStream) -> Self {
         Self {
             stream,
-            _t: PhantomData,
+            _s: PhantomData,
+            _r: PhantomData,
         }
     }
 }
 
-impl<T> Transport<T> for IPLink<T>
+impl<S, R> Transport<S, R> for IPLink<S, R>
 where
-    T: IOSegment + Send + Sync,
+    S: IOSegment + Send + Sync,
+    R: IOSegment + Send + Sync,
 {
     type Parameters = SocketAddr;
 
-    type Sender = IPLinkSender<T>;
+    type Sender = IPLinkSender<S>;
 
-    type Receiver = IPLinkReceiver<T>;
+    type Receiver = IPLinkReceiver<R>;
 
     async fn connect(parameters: &Self::Parameters) -> ProtocolResult<Self> {
         let mut stream = TcpStream::connect(parameters).await?;
@@ -96,15 +99,16 @@ where
 
         Ok(Self {
             stream,
-            _t: PhantomData,
+            _s: PhantomData,
+            _r: PhantomData,
         })
     }
 
-    async fn send(&mut self, source: &mut T) -> ProtocolResult<()> {
+    async fn send(&mut self, source: &mut S) -> ProtocolResult<()> {
         stream::core::send(&mut self.stream, source).await
     }
 
-    async fn receive(&mut self, destination: &mut T) -> ProtocolResult<()> {
+    async fn receive(&mut self, destination: &mut R) -> ProtocolResult<()> {
         stream::core::receive(&mut self.stream, destination).await
     }
 
@@ -174,14 +178,15 @@ where
     }
 }
 
-pub struct IPLinkSecure<T> {
+pub struct IPLinkSecure<S, R> {
     stream: TcpStream,
     send_state: EncryptionState,
     recv_state: EncryptionState,
-    _t: PhantomData<T>,
+    _s: PhantomData<S>,
+    _r: PhantomData<R>,
 }
 
-impl<S> IPLinkSecure<S> {
+impl<S, R> IPLinkSecure<S, R> {
     #[inline]
     const fn from(
         stream: TcpStream,
@@ -192,20 +197,22 @@ impl<S> IPLinkSecure<S> {
             stream,
             send_state,
             recv_state,
-            _t: PhantomData,
+            _s: PhantomData,
+            _r: PhantomData,
         }
     }
 }
 
-impl<T> Transport<T> for IPLinkSecure<T>
+impl<S, R> Transport<S, R> for IPLinkSecure<S, R>
 where
-    T: IOSegment + Send + Sync,
+    S: IOSegment + Send + Sync,
+    R: IOSegment + Send + Sync,
 {
     type Parameters = SocketAddr;
 
-    type Sender = IPLinkSecureSender<T>;
+    type Sender = IPLinkSecureSender<S>;
 
-    type Receiver = IPLinkSecureReceiver<T>;
+    type Receiver = IPLinkSecureReceiver<R>;
 
     async fn connect(parameters: &Self::Parameters) -> ProtocolResult<Self> {
         let mut stream = TcpStream::connect(parameters).await?;
@@ -217,11 +224,11 @@ where
         Ok(Self::from(stream, send_state, recv_state))
     }
 
-    async fn send(&mut self, source: &mut T) -> ProtocolResult<()> {
+    async fn send(&mut self, source: &mut S) -> ProtocolResult<()> {
         stream::core::send_encrypted(&mut self.stream, source, &mut self.send_state).await
     }
 
-    async fn receive(&mut self, destination: &mut T) -> ProtocolResult<()> {
+    async fn receive(&mut self, destination: &mut R) -> ProtocolResult<()> {
         stream::core::receive_encrypted(&mut self.stream, destination, &mut self.recv_state).await
     }
 
@@ -239,28 +246,31 @@ where
     }
 }
 
-pub struct IPLinkInitiator<S> {
+pub struct IPLinkInitiator<S, R> {
     stream: TcpStream,
-    _t: PhantomData<S>,
+    _s: PhantomData<S>,
+    _r: PhantomData<R>,
 }
 
-impl<S> IPLinkInitiator<S> {
+impl<S, R> IPLinkInitiator<S, R> {
     #[inline]
     const fn from(stream: TcpStream) -> Self {
         Self {
             stream,
-            _t: PhantomData,
+            _s: PhantomData,
+            _r: PhantomData,
         }
     }
 }
 
-impl<S> TransportInitiator<S> for IPLinkInitiator<S>
+impl<S, R> TransportInitiator<S, R> for IPLinkInitiator<S, R>
 where
     S: IOSegment + Send + Sync,
+    R: IOSegment + Send + Sync,
 {
-    type Transport = IPLink<S>;
+    type Transport = IPLink<S, R>;
 
-    async fn initiate(mut self) -> ProtocolResult<IPLink<S>> {
+    async fn initiate(mut self) -> ProtocolResult<IPLink<S, R>> {
         let specs = negotiation::read_frame(&mut self.stream).await?;
 
         // TODO: Hardcoded because config are not accepted currently.
@@ -275,18 +285,20 @@ where
     }
 }
 
-pub struct IPLinkServer<S> {
+pub struct IPLinkServer<S, R> {
     listener: TcpListener,
-    _t: PhantomData<S>,
+    _s: PhantomData<S>,
+    _r: PhantomData<R>,
 }
 
-impl<S> TransportServer<S> for IPLinkServer<S>
+impl<S, R> TransportServer<S, R> for IPLinkServer<S, R>
 where
     S: IOSegment + Send + Sync,
+    R: IOSegment + Send + Sync,
 {
-    type Transport = IPLink<S>;
+    type Transport = IPLink<S, R>;
 
-    type Initiator = IPLinkInitiator<S>;
+    type Initiator = IPLinkInitiator<S, R>;
 
     type Parameter = SocketAddr;
 
@@ -300,11 +312,12 @@ where
 
         Ok(Self {
             listener,
-            _t: PhantomData,
+            _s: PhantomData,
+            _r: PhantomData,
         })
     }
 
-    async fn accept(&self) -> ProtocolResult<(IPLinkInitiator<S>, SocketAddr)> {
+    async fn accept(&self) -> ProtocolResult<(IPLinkInitiator<S, R>, SocketAddr)> {
         let (stream, addr) = self.listener.accept().await?;
         Ok((IPLinkInitiator::from(stream), addr))
     }
@@ -318,28 +331,31 @@ where
     }
 }
 
-pub struct IPLinkSecureInitiator<S> {
+pub struct IPLinkSecureInitiator<S, R> {
     stream: TcpStream,
-    _t: PhantomData<S>,
+    _s: PhantomData<S>,
+    _r: PhantomData<R>,
 }
 
-impl<S> IPLinkSecureInitiator<S> {
+impl<S, R> IPLinkSecureInitiator<S, R> {
     #[inline]
     const fn from(stream: TcpStream) -> Self {
         Self {
             stream,
-            _t: PhantomData,
+            _s: PhantomData,
+            _r: PhantomData,
         }
     }
 }
 
-impl<S> TransportInitiator<S> for IPLinkSecureInitiator<S>
+impl<S, R> TransportInitiator<S, R> for IPLinkSecureInitiator<S, R>
 where
     S: IOSegment + Send + Sync,
+    R: IOSegment + Send + Sync,
 {
-    type Transport = IPLinkSecure<S>;
+    type Transport = IPLinkSecure<S, R>;
 
-    async fn initiate(mut self) -> ProtocolResult<IPLinkSecure<S>> {
+    async fn initiate(mut self) -> ProtocolResult<IPLinkSecure<S, R>> {
         let specs = negotiation::read_frame(&mut self.stream).await?;
 
         // TODO: Hardcoded because config are not accepted currently.
@@ -356,18 +372,20 @@ where
     }
 }
 
-pub struct IPLinkSecureServer<S> {
+pub struct IPLinkSecureServer<S, R> {
     listener: TcpListener,
-    _t: PhantomData<S>,
+    _s: PhantomData<S>,
+    _r: PhantomData<R>,
 }
 
-impl<S> TransportServer<S> for IPLinkSecureServer<S>
+impl<S, R> TransportServer<S, R> for IPLinkSecureServer<S, R>
 where
     S: IOSegment + Send + Sync,
+    R: IOSegment + Send + Sync,
 {
-    type Transport = IPLinkSecure<S>;
+    type Transport = IPLinkSecure<S, R>;
 
-    type Initiator = IPLinkSecureInitiator<S>;
+    type Initiator = IPLinkSecureInitiator<S, R>;
 
     type Parameter = SocketAddr;
 
@@ -381,11 +399,12 @@ where
 
         Ok(Self {
             listener: instance,
-            _t: PhantomData,
+            _s: PhantomData,
+            _r: PhantomData,
         })
     }
 
-    async fn accept(&self) -> ProtocolResult<(IPLinkSecureInitiator<S>, SocketAddr)> {
+    async fn accept(&self) -> ProtocolResult<(IPLinkSecureInitiator<S, R>, SocketAddr)> {
         let (stream, addr) = self.listener.accept().await?;
         Ok((IPLinkSecureInitiator::from(stream), addr))
     }
@@ -409,7 +428,9 @@ mod tests {
     #[tokio::test]
     async fn test_ip_link_send_receive() {
         let addr = "127.0.0.1:0".parse().unwrap();
-        let server = IPLinkServer::<IOPoolSegment>::create(&addr).await.unwrap();
+        let server = IPLinkServer::<IOPoolSegment, IOPoolSegment>::create(&addr)
+            .await
+            .unwrap();
 
         let server_addr = server.listener.local_addr().unwrap();
         let pool = IOPool::new(4, 1024);
@@ -432,7 +453,7 @@ mod tests {
         });
 
         // Client side.
-        let mut link = IPLink::<IOPoolSegment>::connect(&server_addr)
+        let mut link = IPLink::<IOPoolSegment, IOPoolSegment>::connect(&server_addr)
             .await
             .unwrap();
 
@@ -451,7 +472,7 @@ mod tests {
     #[tokio::test]
     async fn test_ip_link_secure_send_receive() {
         let addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
-        let server = IPLinkSecureServer::<IOPoolSegment>::create(&addr)
+        let server = IPLinkSecureServer::<IOPoolSegment, IOPoolSegment>::create(&addr)
             .await
             .unwrap();
 
@@ -477,7 +498,7 @@ mod tests {
         });
 
         // Client side.
-        let mut link = IPLinkSecure::<IOPoolSegment>::connect(&server_addr)
+        let mut link = IPLinkSecure::<IOPoolSegment, IOPoolSegment>::connect(&server_addr)
             .await
             .unwrap();
 

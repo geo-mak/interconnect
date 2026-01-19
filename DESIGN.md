@@ -6,7 +6,7 @@ Interconnect's design aims at providing OS-level framework for bridging the inte
 
 Interconnect has dataflow oriented architecture where data availability drives computation.
 
-Interconnect's runtime is layered with modular components and makes heavy use of static parametric polymorphism.
+Interconnect's design is layered with modular components and makes heavy use of static parametric polymorphism.
 
 The main layers are:
 

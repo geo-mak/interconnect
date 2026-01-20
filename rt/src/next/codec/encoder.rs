@@ -24,7 +24,7 @@ where
     /// Stores a value to the original offset before skipping.
     ///
     /// Safety: `value` must be fully initialized with added **padding**.
-    pub unsafe fn store_next(&mut self, value: &T) {
+    pub unsafe fn write_next(&mut self, value: &T) {
         #[cfg(debug_assertions)]
         {
             assert!(self.remaining > 0, "Storing beyond the remained capacity");
@@ -33,40 +33,46 @@ where
 
         let as_bytes_ptr = (value as *const T).cast::<u8>();
         let bytes_slice = unsafe { from_raw_parts(as_bytes_ptr, size_of::<T>()) };
-        self.encoder.store_encoded_at(self.offset, bytes_slice);
+        self.encoder.write_encoded_at(self.offset, bytes_slice);
         self.offset += size_of::<T>();
     }
 }
 
 pub trait Encoder {
     /// Returns the number of bytes have been initialized in the encoder.
-    fn stored_bytes(&self) -> usize;
+    fn len_bytes(&self) -> usize;
 
     /// Sets bytes to zeros.
     ///
     /// More bytes are set to zeros where padding is required.
     ///
     /// Returns `false` in case of lack of memory or failure to allocate more.
-    fn memset_zero(&mut self, len: usize) -> bool;
+    ///
+    /// The length of the encoder is advanced to include the zeroed bytes and the padding bytes.
+    fn write_zero(&mut self, zeroing_len: usize) -> bool;
 
     /// Appends the provided bytes to the encoder.
     ///
     /// More bytes are added where padding is required.
     ///
     /// Returns `false` in case of lack of memory or failure to allocate more.
-    fn store_encoded(&mut self, src: &[u8]) -> bool;
+    ///
+    /// The length of the encoder is advanced to include the encoded bytes and the padding bytes.
+    fn write_encoded(&mut self, source: &[u8]) -> bool;
 
     /// Stores bytes at the provided `offset` in the encoder.
-    fn store_encoded_at(&mut self, offset: usize, src: &[u8]);
+    ///
+    /// The length of the encoder remains unchanged.
+    fn write_encoded_at(&mut self, offset: usize, source: &[u8]);
 
     /// Skips number of bytes as reserved space and returns
     /// a type that stores the value at its original offset.
     ///
     /// The skipped bytes will be **zeroed** before returning.
     fn skip<T>(&mut self, len: usize) -> Option<Skip<'_, Self, T>> {
-        let current_offset = self.stored_bytes();
+        let current_offset = self.len_bytes();
 
-        if !self.memset_zero(len * size_of::<T>()) {
+        if !self.write_zero(len * size_of::<T>()) {
             return None;
         };
 
@@ -99,7 +105,7 @@ pub trait Encoder {
                 P::check_limits(inline_value, limits)?;
 
                 unsafe {
-                    outputs.store_next(inlined.assume_init_ref());
+                    outputs.write_next(inlined.assume_init_ref());
                 }
             }
 

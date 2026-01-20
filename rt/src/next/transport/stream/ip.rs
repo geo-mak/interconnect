@@ -27,10 +27,12 @@ impl<T> IPLinkSender<T> {
     }
 }
 
-impl<T> TransportSender<T> for IPLinkSender<T>
+impl<T> TransportSender for IPLinkSender<T>
 where
     T: IOSegment + Send + Sync,
 {
+    type SendSegment = T;
+
     async fn send(&mut self, source: &mut T) -> ProtocolResult<()> {
         stream::core::send(&mut self.writer, source).await
     }
@@ -55,10 +57,12 @@ impl<T> IPLinkReceiver<T> {
     }
 }
 
-impl<T> TransportReceiver<T> for IPLinkReceiver<T>
+impl<T> TransportReceiver for IPLinkReceiver<T>
 where
     T: IOSegment + Send + Sync,
 {
+    type ReceiveSegment = T;
+
     async fn receive(&mut self, destination: &mut T) -> ProtocolResult<()> {
         stream::core::receive(&mut self.reader, destination).await
     }
@@ -81,14 +85,18 @@ impl<S, R> IPLink<S, R> {
     }
 }
 
-impl<S, R> Transport<S, R> for IPLink<S, R>
+impl<S, R> Transport for IPLink<S, R>
 where
     S: IOSegment + Send + Sync,
     R: IOSegment + Send + Sync,
 {
     type Parameters = SocketAddr;
 
+    type SendSegment = S;
+
     type Sender = IPLinkSender<S>;
+
+    type ReceiveSegment = R;
 
     type Receiver = IPLinkReceiver<R>;
 
@@ -139,10 +147,12 @@ impl<T> IPLinkSecureSender<T> {
     }
 }
 
-impl<T> TransportSender<T> for IPLinkSecureSender<T>
+impl<T> TransportSender for IPLinkSecureSender<T>
 where
     T: IOSegment + Send + Sync,
 {
+    type SendSegment = T;
+
     async fn send(&mut self, source: &mut T) -> ProtocolResult<()> {
         stream::core::send_encrypted(&mut self.writer, source, &mut self.state).await
     }
@@ -169,10 +179,12 @@ impl<T> IPLinkSecureReceiver<T> {
     }
 }
 
-impl<T> TransportReceiver<T> for IPLinkSecureReceiver<T>
+impl<T> TransportReceiver for IPLinkSecureReceiver<T>
 where
     T: IOSegment + Send + Sync,
 {
+    type ReceiveSegment = T;
+
     async fn receive(&mut self, destination: &mut T) -> ProtocolResult<()> {
         stream::core::receive_encrypted(&mut self.reader, destination, &mut self.state).await
     }
@@ -203,14 +215,18 @@ impl<S, R> IPLinkSecure<S, R> {
     }
 }
 
-impl<S, R> Transport<S, R> for IPLinkSecure<S, R>
+impl<S, R> Transport for IPLinkSecure<S, R>
 where
     S: IOSegment + Send + Sync,
     R: IOSegment + Send + Sync,
 {
     type Parameters = SocketAddr;
 
+    type SendSegment = S;
+
     type Sender = IPLinkSecureSender<S>;
+
+    type ReceiveSegment = R;
 
     type Receiver = IPLinkSecureReceiver<R>;
 
@@ -263,7 +279,7 @@ impl<S, R> IPLinkInitiator<S, R> {
     }
 }
 
-impl<S, R> TransportInitiator<S, R> for IPLinkInitiator<S, R>
+impl<S, R> TransportInitiator for IPLinkInitiator<S, R>
 where
     S: IOSegment + Send + Sync,
     R: IOSegment + Send + Sync,
@@ -291,7 +307,7 @@ pub struct IPLinkServer<S, R> {
     _r: PhantomData<R>,
 }
 
-impl<S, R> TransportServer<S, R> for IPLinkServer<S, R>
+impl<S, R> TransportServer for IPLinkServer<S, R>
 where
     S: IOSegment + Send + Sync,
     R: IOSegment + Send + Sync,
@@ -348,7 +364,7 @@ impl<S, R> IPLinkSecureInitiator<S, R> {
     }
 }
 
-impl<S, R> TransportInitiator<S, R> for IPLinkSecureInitiator<S, R>
+impl<S, R> TransportInitiator for IPLinkSecureInitiator<S, R>
 where
     S: IOSegment + Send + Sync,
     R: IOSegment + Send + Sync,
@@ -379,7 +395,7 @@ pub struct IPLinkSecureServer<S, R> {
     _r: PhantomData<R>,
 }
 
-impl<S, R> TransportServer<S, R> for IPLinkSecureServer<S, R>
+impl<S, R> TransportServer for IPLinkSecureServer<S, R>
 where
     S: IOSegment + Send + Sync,
     R: IOSegment + Send + Sync,

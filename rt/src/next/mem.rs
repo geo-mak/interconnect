@@ -17,8 +17,8 @@ pub const BASIC_BLOCK_SIZE: usize = 8;
 pub type BasicBlock = TypeU64;
 
 pub trait MemoryProvider {
-    type SendSegment: IOSegment;
-    type ReceiveSegment: IOSegment;
+    type SendSegment;
+    type ReceiveSegment;
 
     fn acquire_send(&self) -> Option<Self::SendSegment>;
     fn acquire_receive(&self) -> Option<Self::ReceiveSegment>;

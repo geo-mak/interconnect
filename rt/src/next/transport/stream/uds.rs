@@ -26,10 +26,12 @@ impl<T> UnixLinkSender<T> {
     }
 }
 
-impl<T> TransportSender<T> for UnixLinkSender<T>
+impl<T> TransportSender for UnixLinkSender<T>
 where
     T: IOSegment + Send + Sync,
 {
+    type SendSegment = T;
+
     async fn send(&mut self, source: &mut T) -> ProtocolResult<()> {
         stream::core::send(&mut self.writer, source).await
     }
@@ -54,10 +56,12 @@ impl<T> UnixLinkReceiver<T> {
     }
 }
 
-impl<T> TransportReceiver<T> for UnixLinkReceiver<T>
+impl<T> TransportReceiver for UnixLinkReceiver<T>
 where
     T: IOSegment + Send + Sync,
 {
+    type ReceiveSegment = T;
+
     async fn receive(&mut self, destination: &mut T) -> ProtocolResult<()> {
         stream::core::receive(&mut self.reader, destination).await
     }
@@ -80,14 +84,18 @@ impl<S, R> UnixLink<S, R> {
     }
 }
 
-impl<S, R> Transport<S, R> for UnixLink<S, R>
+impl<S, R> Transport for UnixLink<S, R>
 where
     S: IOSegment + Send + Sync,
     R: IOSegment + Send + Sync,
 {
     type Parameters = &'static str;
 
+    type SendSegment = S;
+
     type Sender = UnixLinkSender<S>;
+
+    type ReceiveSegment = R;
 
     type Receiver = UnixLinkReceiver<R>;
 
@@ -139,7 +147,7 @@ impl<S, R> UnixLinkInitiator<S, R> {
     }
 }
 
-impl<S, R> TransportInitiator<S, R> for UnixLinkInitiator<S, R>
+impl<S, R> TransportInitiator for UnixLinkInitiator<S, R>
 where
     S: IOSegment + Send + Sync,
     R: IOSegment + Send + Sync,
@@ -165,7 +173,7 @@ pub struct UnixLinkServer<S, R> {
     _r: PhantomData<R>,
 }
 
-impl<S, R> TransportServer<S, R> for UnixLinkServer<S, R>
+impl<S, R> TransportServer for UnixLinkServer<S, R>
 where
     S: IOSegment + Send + Sync,
     R: IOSegment + Send + Sync,

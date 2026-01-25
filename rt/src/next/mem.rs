@@ -2,6 +2,7 @@
 
 use core::cell::Cell;
 use core::mem::ManuallyDrop;
+use core::ptr::NonNull;
 use core::ptr::copy_nonoverlapping;
 use core::slice::{from_raw_parts, from_raw_parts_mut};
 use core::sync::atomic::Ordering::{AcqRel, Acquire, Relaxed, Release};
@@ -9,20 +10,16 @@ use core::sync::atomic::{AtomicU8, AtomicUsize};
 
 use std::sync::Arc;
 
+use crate::next::codec::decoder::Decoder;
+use crate::next::codec::encoder::Encoder;
+use crate::next::error::{ErrKind, ProtocolError, ProtocolResult};
 use crate::next::types::core::TypeU64;
-
-pub const BASIC_BLOCK_SIZE: usize = 8;
 
 /// Slice of eight bytes aligned to an 8-byte boundary.
 pub type BasicBlock = TypeU64;
-
-pub trait MemoryProvider {
-    type SendSegment;
-    type ReceiveSegment;
-
-    fn acquire_send(&self) -> Option<Self::SendSegment>;
-    fn acquire_receive(&self) -> Option<Self::ReceiveSegment>;
-}
+pub const BASIC_BLOCK_SIZE: usize = 8;
+pub const BASIC_BLOCK_SHIFT: usize = 3;
+pub const BASIC_BLOCK_MASK: usize = BASIC_BLOCK_SIZE - 1;
 
 /// A unified interface for types that perform untyped reads from and writes to a memory-region directly.
 pub unsafe trait IOSegment {
@@ -131,14 +128,29 @@ pub unsafe trait IOSegment {
     unsafe fn write_at(&mut self, offset: usize, source: &[u8]);
 }
 
+pub trait MemoryProvider {
+    type SendSegment;
+    type ReceiveSegment;
+
+    fn acquire_send(&self) -> Option<Self::SendSegment>;
+    fn acquire_receive(&self) -> Option<Self::ReceiveSegment>;
+}
+
 pub(crate) struct IOPoolSegment {
     pool: Arc<IOSegmentsPool>,
     segment_ptr: *mut u8,
     len: usize,
+    read_offset: usize,
 }
 
 unsafe impl Send for IOPoolSegment {}
 unsafe impl Sync for IOPoolSegment {}
+
+impl Drop for IOPoolSegment {
+    fn drop(&mut self) {
+        self.recycle();
+    }
+}
 
 impl IOPoolSegment {
     /// Returns the maximum capacity of the segment.
@@ -148,16 +160,15 @@ impl IOPoolSegment {
     }
 
     #[inline]
+    pub fn remaining_blocks(&self) -> usize {
+        (self.len - self.read_offset) >> BASIC_BLOCK_SHIFT
+    }
+
+    #[inline]
     fn recycle(&mut self) {
         let offset = self.segment_ptr as usize - self.pool.data.as_ptr() as usize;
         let index = offset >> self.pool.offset_shift;
         self.pool.free_list.lock().recycle(index);
-    }
-}
-
-impl Drop for IOPoolSegment {
-    fn drop(&mut self) {
-        self.recycle();
     }
 }
 
@@ -190,6 +201,7 @@ unsafe impl IOSegment for IOPoolSegment {
     #[inline]
     fn clear(&mut self) {
         self.len = 0;
+        self.read_offset = 0;
     }
 
     #[inline]
@@ -231,6 +243,116 @@ unsafe impl IOSegment for IOPoolSegment {
     }
 }
 
+impl Encoder for IOPoolSegment {
+    #[inline]
+    fn len_bytes(&self) -> usize {
+        self.len
+    }
+
+    #[inline]
+    fn write_zero(&mut self, zeroing_len: usize) -> bool {
+        let zeroing_len_aligned = (zeroing_len + BASIC_BLOCK_MASK) & !BASIC_BLOCK_MASK;
+
+        let segment_len = self.len;
+
+        // Assuming the current len is padded.
+        debug_assert!(segment_len % BASIC_BLOCK_SIZE == 0);
+        let new_len_aligned = segment_len + zeroing_len_aligned;
+
+        // Safety: Capacity must be enured for "extra" aligned bytes.
+        if !self.ensure_capacity(new_len_aligned) {
+            return false;
+        }
+
+        unsafe {
+            let zeroing_ptr = self.as_ptr_mut().add(segment_len);
+
+            // Zeroing aligned.
+            zeroing_ptr.write_bytes(0, zeroing_len_aligned);
+
+            // Advance aligned.
+            self.set_len(new_len_aligned);
+
+            return true;
+        }
+    }
+
+    #[inline]
+    fn write_encoded(&mut self, source: &[u8]) -> bool {
+        let source_len = source.len();
+
+        if source_len == 0 {
+            return true;
+        }
+
+        let source_len_aligned = (source_len + BASIC_BLOCK_MASK) & !BASIC_BLOCK_MASK;
+
+        let segment_len = self.len;
+
+        // Assuming the current len is padded.
+        debug_assert!(segment_len % BASIC_BLOCK_SIZE == 0);
+        let new_len_aligned = segment_len + source_len_aligned;
+
+        // Safety: Capacity must be enured for "extra" aligned bytes.
+        if !self.ensure_capacity(new_len_aligned) {
+            return false;
+        }
+
+        unsafe {
+            // Zero out the last block.
+            self.as_ptr_mut()
+                .add(new_len_aligned - BASIC_BLOCK_SIZE)
+                .cast::<BasicBlock>()
+                .write(TypeU64(0));
+
+            let copying_ptr = self.as_ptr_mut().add(segment_len);
+
+            // Copy source exact.
+            copying_ptr.copy_from_nonoverlapping(source.as_ptr(), source_len);
+
+            // Advance aligned.
+            self.set_len(new_len_aligned);
+
+            return true;
+        }
+    }
+
+    #[inline]
+    fn write_encoded_at(&mut self, offset: usize, source: &[u8]) {
+        // RT_ASSERT.
+        assert!(offset + source.len() <= self.len);
+        unsafe {
+            let ptr = self.as_ptr_mut().add(offset);
+            ptr.copy_from_nonoverlapping(source.as_ptr(), source.len());
+        }
+    }
+}
+
+unsafe impl Decoder for IOPoolSegment {
+    #[inline]
+    fn get_blocks_pointer(&mut self, count: usize) -> ProtocolResult<NonNull<BasicBlock>> {
+        let current_len = self.len;
+        let read_offset = self.read_offset;
+
+        // Ensure we have enough data initialized (len) minus what we've already read.
+        let available_bytes = current_len.saturating_sub(read_offset);
+        let required_bytes = count << BASIC_BLOCK_SHIFT;
+
+        if available_bytes < required_bytes {
+            return Err(ProtocolError::error(ErrKind::NotEnoughData));
+        }
+
+        unsafe {
+            let ptr = self.segment_ptr.add(read_offset);
+
+            // Advance the read offset in the segment
+            self.read_offset += required_bytes;
+
+            Ok(NonNull::new_unchecked(ptr.cast()))
+        }
+    }
+}
+
 struct IOPoolFreeList {
     slots: Box<[usize]>,
     free: usize,
@@ -261,7 +383,7 @@ impl IOPoolFreeList {
 }
 
 struct IOSegmentsPool {
-    data: Vec<u8>,
+    data: Vec<BasicBlock>,
     free_list: parking_lot::Mutex<IOPoolFreeList>,
     seg_size: usize,
     offset_shift: u32,
@@ -279,10 +401,15 @@ impl IOPool {
             seg_size.is_power_of_two(),
             "Segment's size must be power of 2"
         );
+        assert!(
+            seg_size >= BASIC_BLOCK_SIZE,
+            "Segment size must be at least `BasicBlock` size"
+        );
 
         let capacity = count.checked_mul(seg_size).expect("Allocation overflow");
+        let blocks_count = capacity >> BASIC_BLOCK_SHIFT;
 
-        let data = Vec::with_capacity(capacity);
+        let data = Vec::with_capacity(blocks_count);
         let free_list = IOPoolFreeList::new(count);
 
         IOPool {
@@ -305,18 +432,20 @@ impl IOPool {
         let segment_index = self.pool.free_list.lock().acquire()?;
 
         let offset = segment_index << self.pool.offset_shift;
-        let segment_ptr = unsafe { self.pool.data.as_ptr().add(offset) as *mut u8 };
+        let segment_ptr = unsafe { (self.pool.data.as_ptr() as *mut u8).add(offset) };
 
         Some(IOPoolSegment {
+            pool: Arc::clone(&self.pool),
             segment_ptr,
             len: 0,
-            pool: Arc::clone(&self.pool),
+            read_offset: 0,
         })
     }
 }
 
 impl MemoryProvider for IOPool {
     type SendSegment = IOPoolSegment;
+
     type ReceiveSegment = IOPoolSegment;
 
     #[inline(always)]
@@ -325,7 +454,7 @@ impl MemoryProvider for IOPool {
     }
 
     #[inline(always)]
-    fn acquire_receive(&self) -> Option<Self::ReceiveSegment> {
+    fn acquire_receive(&self) -> Option<IOPoolSegment> {
         self.acquire()
     }
 }
@@ -699,6 +828,47 @@ mod tests_io_pool {
 
         let segment = pool.acquire();
         assert!(segment.is_some());
+    }
+
+    #[test]
+    fn test_io_pool_segment_msg_ops() {
+        let pool = IOPool::new(1, 64);
+        let mut segment = pool.acquire().expect("must get a segment");
+
+        {
+            segment.write_zero(5);
+            // Aligned to BasicBlock.
+            assert_eq!(segment.len_bytes(), 8);
+
+            segment.write_encoded(b"there!");
+            // 8 (previous) + 8 (aligned "there!").
+            assert_eq!(segment.len_bytes(), 16);
+
+            // Patch the first block.
+            segment.write_encoded_at(0, b"hi");
+        }
+
+        {
+            assert_eq!(segment.remaining_blocks(), 2);
+
+            let block_0 = segment.get_blocks_pointer(1).expect("must get blocks");
+            assert_eq!(segment.remaining_blocks(), 1);
+
+            let block_1 = segment.get_blocks_pointer(1).expect("must get blocks");
+            assert_eq!(segment.remaining_blocks(), 0);
+
+            assert!(segment.get_blocks_pointer(1).is_err());
+
+            unsafe {
+                assert_eq!(from_raw_parts(block_0.as_ptr().cast::<u8>(), 2), b"hi");
+                assert_eq!(from_raw_parts(block_1.as_ptr().cast::<u8>(), 6), b"there!");
+            }
+
+            let data = segment.as_slice();
+            // Zeroed padding of the last block.
+            assert_eq!(data[14], 0);
+            assert_eq!(data[15], 0);
+        }
     }
 }
 

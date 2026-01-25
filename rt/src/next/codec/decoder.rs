@@ -94,7 +94,7 @@ pub unsafe trait Decoder {
         unsafe { Ok(Decoded::new_assume_valid(view.as_ptr_mut(), self)) }
     }
 
-    fn decode_inner_type<'de, T>(
+    fn decode_associated_type<'de, T>(
         self: &mut &'de mut Self,
         limits: T::Limits,
     ) -> Result<T::Type<'de>, ProtocolError>

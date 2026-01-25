@@ -50,7 +50,7 @@ where
     T::ReceiveSegment: Send,
     T::Sender: Send + 'static,
     T::Receiver: Send + 'static,
-    P: MemoryProvider<SendSegment = T::SendSegment> + Send + Sync + 'static,
+    P: MemoryProvider<SendSegment = T::SendSegment> + Send + Sync,
     P: MemoryProvider<ReceiveSegment = T::ReceiveSegment> + Send + Sync + 'static,
     P::SendSegment: Encoder,
     P::ReceiveSegment: Decoder,

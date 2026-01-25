@@ -217,7 +217,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::next::mem::{IOPool, IOPoolSegment};
+    use crate::next::mem::{IOPool, IOPoolSegment, IOSegment};
     use crate::next::transport::stream::uds::{UnixLink, UnixLinkServer};
     use crate::next::transport::traits::{
         TransportInitiator, TransportReceiver, TransportSender, TransportServer,
@@ -230,8 +230,8 @@ mod tests {
         let path = "/tmp/test_core_client_send.sock";
         let _ = std::fs::remove_file(path);
 
-        let capacity = 10;
-        let pool = IOPool::new(capacity * 2, 1024);
+        let capacity = 2;
+        let pool = IOPool::new(3, 1024);
 
         let server = UnixLinkServer::<IOPoolSegment, IOPoolSegment>::create(&path)
             .await
@@ -240,29 +240,26 @@ mod tests {
         let server_pool = pool.clone();
         let server_handle = tokio::spawn(async move {
             let (initiator, _) = server.accept().await.unwrap();
-            let link = TransportInitiator::initiate(initiator).await.unwrap();
+            let link = initiator.initiate().await.unwrap();
             let (mut sender, mut receiver) = link.split();
 
-            // Receive.
-            let mut recv_segment = server_pool.acquire().unwrap();
+            let mut segment = server_pool.acquire().unwrap();
 
-            TransportReceiver::receive(&mut receiver, &mut recv_segment)
-                .await
-                .unwrap();
+            // Receive.
+            receiver.receive(&mut segment).await.unwrap();
 
             // Decode.
-            let (id, op) = TypeMessageHeader::decode_header(&mut recv_segment).unwrap();
+            let (id, op) = TypeMessageHeader::decode_header(&mut segment).unwrap();
             assert_eq!(op, 10);
 
+            // Encode.
+            segment.clear();
+            TypeMessageHeader::encode_header(id, op, &mut segment).unwrap();
+
+            segment.encode_next(&TypeU64(200), ()).unwrap();
+
             // Resend.
-            let mut send_segment = server_pool.acquire().unwrap();
-            TypeMessageHeader::encode_header(id, op, &mut send_segment).unwrap();
-
-            send_segment.encode_next(&TypeU64(200), ()).unwrap();
-
-            TransportSender::send(&mut sender, &mut send_segment)
-                .await
-                .unwrap();
+            sender.send(&mut segment).await.unwrap();
         });
 
         let transport = UnixLink::connect(&path).await.unwrap();
@@ -271,7 +268,7 @@ mod tests {
             .await
             .unwrap();
 
-        // Test send (two-way)
+        // Send two-way.
         let response: u64 = client
             .send::<TypeU64, TypeU64, TypeU64>(10, &TypeU64(100))
             .await

@@ -99,7 +99,7 @@ where
         state: &Arc<ClientState<P, T::Sender, E>>,
     ) -> ProtocolResult<()> {
         let (id, _directive) = { TypeMessageHeader::decode_header(&mut message)? };
-        // TODO: Directive matching and routing.
+        // TODO: Directive matching according to directive-rules.
         state.publishers.publish(id, Ok(message));
         Ok(())
     }
@@ -116,6 +116,7 @@ where
         <R as IntoNativeType>::NativeType:
             for<'de> FromProtocolType<<R as ProtocolType>::Type<'de>>,
     {
+        // TODO: Generate ID according to id-rules.
         if let Some(publisher) = &self.state.publishers.acquire() {
             if let Some(mut segment) = self.state.provider.acquire_send() {
                 TypeMessageHeader::encode_header(publisher.id, op, &mut segment)?;
@@ -161,6 +162,7 @@ where
         <R as IntoNativeType>::NativeType:
             for<'de> FromProtocolType<<R as ProtocolType>::Type<'de>>,
     {
+        // TODO: Generate ID according to id-rules.
         if let Some(publisher) = &self.state.publishers.acquire() {
             if let Some(mut segment) = self.state.provider.acquire_send() {
                 TypeMessageHeader::encode_header(publisher.id, op, &mut segment)?;

@@ -14,22 +14,20 @@ pub type MessageID = TypeU64;
 
 pub type MessageDirective = TypeU64;
 
+// TODO: Define bit-flags and their semantics.
+// TODO: Should bit-falgs have their own fields?
 /// 16-bytes header of Interconnect's message.
 ///
 /// Header consists of two fields, each is 8-bytes in size and alignment.
-///
-/// TODO: Both have embedded bit-flags.
 #[derive(Debug, Clone, Copy, IntoBytes)]
 #[repr(C)]
 pub struct TypeMessageHeader {
+    // TODO: Define id-rules.
     /// 8-bytes identifier of the message.
-    ///
-    /// TODO: Not all bytes are usable.
     pub id: MessageID,
 
+    // TODO: Define directive-rules.
     /// 8-bytes directive of the message.
-    ///
-    /// TODO: Not all bytes are usable.
     pub directive: MessageDirective,
 }
 

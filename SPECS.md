@@ -269,4 +269,4 @@ of the runtime-config.
 
 **Representation**: Target-specific. `mod` in Rust.
 
-All of the generated code from the `ic` file will be accessible under the defined namespace.
+All of the generated code from a source file will be accessible under the defined namespace.

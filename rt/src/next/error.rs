@@ -101,6 +101,8 @@ impl ErrKind {
     }
 }
 
+// TODO: Specify the scope of its role. Implementation as protocol type is required in case of adoption.
+//
 /// Error type of protocol operations.
 ///
 /// This type is designed to be very lightweight with the following scheme:
@@ -151,25 +153,6 @@ impl From<io::Error> for ProtocolError {
                 kind: ErrKind::Transport,
                 refer: err.raw_os_error().unwrap_or(0),
             }
-        }
-    }
-}
-
-impl From<bincode::error::EncodeError> for ProtocolError {
-    fn from(_: bincode::error::EncodeError) -> Self {
-        ProtocolError {
-            kind: ErrKind::Encoding,
-            refer: 0,
-        }
-    }
-}
-
-impl From<bincode::error::DecodeError> for ProtocolError {
-    #[inline]
-    fn from(_: bincode::error::DecodeError) -> Self {
-        ProtocolError {
-            kind: ErrKind::Decoding,
-            refer: 0,
         }
     }
 }

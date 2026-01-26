@@ -221,9 +221,7 @@ mod tests {
     use super::*;
     use crate::next::mem::{IOPool, IOPoolSegment, IOSegment};
     use crate::next::transport::stream::uds::{UnixLink, UnixLinkServer};
-    use crate::next::transport::traits::{
-        TransportInitiator, TransportReceiver, TransportSender, TransportServer,
-    };
+    use crate::next::transport::traits::{TransportInitiator, TransportServer};
     use crate::next::types::core::TypeU64;
     use crate::next::types::message::TypeMessageHeader;
 
@@ -242,13 +240,12 @@ mod tests {
         let server_pool = pool.clone();
         let server_handle = tokio::spawn(async move {
             let (initiator, _) = server.accept().await.unwrap();
-            let link = initiator.initiate().await.unwrap();
-            let (mut sender, mut receiver) = link.split();
+            let mut link = initiator.initiate().await.unwrap();
 
             let mut segment = server_pool.acquire().unwrap();
 
             // Receive.
-            receiver.receive(&mut segment).await.unwrap();
+            link.receive(&mut segment).await.unwrap();
 
             // Decode.
             let (id, op) = TypeMessageHeader::decode_header(&mut segment).unwrap();
@@ -261,7 +258,7 @@ mod tests {
             segment.encode_next(&TypeU64(200), ()).unwrap();
 
             // Resend.
-            sender.send(&mut segment).await.unwrap();
+            link.send(&mut segment).await.unwrap();
         });
 
         let transport = UnixLink::connect(&path).await.unwrap();

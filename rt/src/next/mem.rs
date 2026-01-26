@@ -125,7 +125,12 @@ pub unsafe trait IOSegment {
     /// - The segment must have enough capacity to accommodate the the source data.
     /// - The segment is valid for writing/overwriting withing the range [`offset`: source length - 1].
     /// - Length is **not** advanced after writing.
-    unsafe fn write_at(&mut self, offset: usize, source: &[u8]);
+    #[inline]
+    unsafe fn write_at(&mut self, offset: usize, source: &[u8]) {
+        let count = source.len();
+        debug_assert!(offset + count <= self.capacity());
+        unsafe { copy_nonoverlapping(source.as_ptr(), self.as_ptr_mut().add(offset), count) };
+    }
 }
 
 pub trait MemoryProvider {
@@ -233,13 +238,6 @@ unsafe impl IOSegment for IOPoolSegment {
         self.len += source_len;
 
         true
-    }
-
-    #[inline]
-    unsafe fn write_at(&mut self, offset: usize, source: &[u8]) {
-        let count = source.len();
-        debug_assert!(offset + count <= self.pool.seg_size);
-        unsafe { copy_nonoverlapping(source.as_ptr(), self.segment_ptr.add(offset), count) };
     }
 }
 
@@ -558,13 +556,6 @@ unsafe impl<'a> IOSegment for IORingSegment<'a> {
 
         self.metadata.written.set((current_len + src_len) as u32);
         true
-    }
-
-    #[inline]
-    unsafe fn write_at(&mut self, offset: usize, src: &[u8]) {
-        let count = src.len();
-        debug_assert!(offset + count <= self.max_capacity());
-        unsafe { copy_nonoverlapping(src.as_ptr(), self.data.as_mut_ptr().add(offset), count) };
     }
 }
 

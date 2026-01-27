@@ -79,12 +79,12 @@ impl<'a, T> Future for PublishingFuture<'a, T> {
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let _self = self.get_mut();
 
-        let pub_data = &_self.publisher.pub_data;
+        let publisher = &_self.publisher.pub_data;
 
         // Safety: Access must be done under locking.
-        let _access_lock = pub_data.guard.lock();
+        let _access_lock = publisher.guard.lock();
 
-        let state = unsafe { &mut *pub_data.state.get() };
+        let state = unsafe { &mut *publisher.state.get() };
 
         match state {
             PublisherState::Acquired => {
@@ -214,25 +214,25 @@ impl<T> Publishers<T> {
     /// Releases the publisher at the provided index by making it available for ownership.
     ///
     /// Publisher's cycle will be incremented and its state will be set to wait again.
-    fn release(&self, id: u64, pub_data: &PublisherData<T>) {
+    fn release(&self, id: u64, publisher: &PublisherData<T>) {
         // Safety: Access must be done under locking.
-        let _value_lock = pub_data.guard.lock();
+        let _value_lock = publisher.guard.lock();
 
-        let (index, cycle) = Publishers::<T>::split(id);
+        let (index, cycle) = Self::split(id);
 
         let new_cycle = cycle.wrapping_add(1);
 
         // Update cycle and reset state.
-        pub_data.cycle.store(new_cycle, Relaxed);
+        publisher.cycle.store(new_cycle, Relaxed);
 
-        let current_state = unsafe { &mut *pub_data.state.get() };
+        let current_state = unsafe { &mut *publisher.state.get() };
         drop(mem::replace(current_state, PublisherState::Unused));
 
         loop {
             let current = self.free.load(Acquire);
             let (current_index, current_tag) = Self::split(current);
 
-            pub_data.next.store(current_index, Relaxed);
+            publisher.next.store(current_index, Relaxed);
 
             let new = Self::combine(index, current_tag.wrapping_add(1));
 

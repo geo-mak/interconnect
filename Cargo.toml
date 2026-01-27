@@ -2,10 +2,9 @@
 name = "interconnect"
 description = "High performance inter-process communication protocol"
 repository = "https://github.com/geo-mak/interconnect"
-
-edition = "2024"
-license = "MIT"
 rust-version = "1.93.0"
+edition = "2024"
+license-file = "LICENSE"
 
 [workspace]
 members = ["rt", "compiler"]

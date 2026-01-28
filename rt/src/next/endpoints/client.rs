@@ -104,14 +104,14 @@ where
         Ok(())
     }
 
-    async fn send<'a, M, I, R>(
+    async fn send<'a, V, M, R>(
         &self,
         op: u64,
         message: &'a M,
     ) -> ProtocolResult<<R as IntoNativeType>::NativeType>
     where
-        &'a M: Encode<I, P::SendSegment>,
-        I: ProtocolType + TypeLimits<Limits = ()>,
+        V: ProtocolType + TypeLimits<Limits = ()>,
+        &'a M: Encode<V, P::SendSegment>,
         R: Decode<P::ReceiveSegment> + TypeLimits<Limits = ()> + IntoNativeType,
         <R as IntoNativeType>::NativeType:
             for<'de> FromProtocolType<<R as ProtocolType>::Type<'de>>,
@@ -142,10 +142,10 @@ where
         Err(ProtocolError::error(ErrKind::CapacityLimit))
     }
 
-    async fn send_one_way<'a, M, I>(&self, op: u64, message: &'a M) -> ProtocolResult<()>
+    async fn send_one_way<'a, V, M>(&self, op: u64, message: &'a M) -> ProtocolResult<()>
     where
-        &'a M: Encode<I, P::SendSegment>,
-        I: ProtocolType + TypeLimits<Limits = ()>,
+        V: ProtocolType + TypeLimits<Limits = ()>,
+        &'a M: Encode<V, P::SendSegment>,
     {
         let Some(mut segment) = self.state.provider.acquire_send() else {
             return Err(ProtocolError::error(ErrKind::CapacityLimit));

@@ -136,8 +136,8 @@ pub mod negotiation {
 
     use x25519_dalek::{EphemeralSecret, PublicKey};
 
+    use crate::next::coop::traits::BytesTransport;
     use crate::next::error::{ErrKind, ProtocolError, ProtocolResult};
-    use crate::next::transport::traits::BytesTransport;
 
     pub async fn read_frame<T>(transport: &mut T) -> ProtocolResult<ConnectionSpecs>
     where
@@ -282,7 +282,7 @@ mod test {
 
     use tokio::net::{TcpListener, TcpStream};
 
-    use crate::next::transport::traits::{BytesReceiver, BytesSender};
+    use crate::next::coop::traits::{BytesReceiver, BytesSender};
 
     #[tokio::test]
     async fn test_negotiation_with_encryption() {

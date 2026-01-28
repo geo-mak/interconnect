@@ -1,10 +1,10 @@
 use aead::{Buffer, Error};
 
+use crate::next::coop::traits::{BytesReceiver, BytesSender};
 use crate::next::error::{ErrKind, ProtocolError, ProtocolResult};
 use crate::next::mem::IOSegment;
 use crate::next::opt::branch_hints::unlikely;
 use crate::next::transport::stream::specs::EncryptionState;
-use crate::next::transport::traits::{BytesReceiver, BytesSender};
 
 pub const MAX_MESSAGE_SIZE: u32 = 4 * 1024 * 1024;
 

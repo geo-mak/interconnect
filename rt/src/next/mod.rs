@@ -1,7 +1,7 @@
 //! The next-generation implementation of "Interconnect" that relies on its own data-model.
 
-pub mod asynchrony;
 pub mod codec;
+pub mod coop;
 pub mod endpoints;
 pub mod error;
 pub mod mem;

@@ -1,8 +1,8 @@
 use core::cell::UnsafeCell;
 use core::mem;
 use core::pin::Pin;
-use core::sync::atomic::Ordering::{AcqRel, Acquire, Relaxed};
-use core::sync::atomic::{AtomicU32, AtomicU64};
+use core::sync::atomic::AtomicU32;
+use core::sync::atomic::Ordering::Relaxed;
 use core::task::{Context, Poll, Waker};
 
 #[derive(Debug)]
@@ -81,7 +81,7 @@ impl<'a, T> Future for PublishingFuture<'a, T> {
 
         let publisher = &_self.publisher.pub_data;
 
-        // Safety: Access must be done under locking.
+        // Safety: Access synchronized.
         let _access_lock = publisher.guard.lock();
 
         let state = unsafe { &mut *publisher.state.get() };
@@ -103,14 +103,13 @@ impl<'a, T> Future for PublishingFuture<'a, T> {
     }
 }
 
-/// A thread-safe, lock-free component for tracking in-flight issues.
+/// A thread-safe component for tracking in-flight issues.
 ///
 /// It blocks per-publisher only when releasing and publishing simultaneously.
 pub(crate) struct Publishers<T> {
     // Practically, it is static, but const N will force full type annotation.
     publishers: Box<[PublisherData<T>]>,
-    /// Stores the current free publisher as `u32` value, and its tag as `u32` value.
-    free: AtomicU64,
+    free: parking_lot::Mutex<u32>,
 }
 
 impl<T> Publishers<T> {
@@ -136,7 +135,7 @@ impl<T> Publishers<T> {
 
         Self {
             publishers: publishers.into_boxed_slice(),
-            free: AtomicU64::new(0),
+            free: parking_lot::Mutex::new(0),
         }
     }
 
@@ -149,36 +148,27 @@ impl<T> Publishers<T> {
     }
 
     pub(crate) fn acquire(&self) -> Option<Publisher<'_, T>> {
-        loop {
-            let current_free = self.free.load(Acquire);
-            let (current_index, current_tag) = Self::split(current_free);
+        let mut current_free = self.free.lock();
 
-            if current_index == Self::INVALID_INDEX {
-                return None;
-            }
+        let current_index = *current_free;
 
-            let current_pub = &self.publishers[current_index as usize];
-            let next_index = current_pub.next.load(Relaxed);
-
-            let new_free = Self::combine(next_index, current_tag.wrapping_add(1));
-
-            if self
-                .free
-                .compare_exchange(current_free, new_free, AcqRel, Relaxed)
-                .is_ok()
-            {
-                let acquired_state = unsafe { &mut *current_pub.state.get() };
-                debug_assert!(acquired_state.discriminant_eq(&PublisherState::Unused));
-
-                *acquired_state = PublisherState::Acquired;
-
-                let cycle = current_pub.cycle.load(Relaxed);
-
-                let acquired = Self::combine(current_index, cycle);
-
-                return Some(Publisher::new(acquired, current_pub, self));
-            }
+        if current_index == Self::INVALID_INDEX {
+            return None;
         }
+
+        let current_pub = &self.publishers[current_index as usize];
+
+        let acquired_state = unsafe { &mut *current_pub.state.get() };
+        debug_assert!(acquired_state.discriminant_eq(&PublisherState::Unused));
+
+        *acquired_state = PublisherState::Acquired;
+
+        *current_free = current_pub.next.load(Relaxed);
+
+        // Bind the current cycle to the index for cycle-detection when publishing.
+        let acquired = Self::combine(current_index, current_pub.cycle.load(Relaxed));
+
+        Some(Publisher::new(acquired, current_pub, self))
     }
 
     /// Tries to published the value to an identified publisher.
@@ -197,7 +187,7 @@ impl<T> Publishers<T> {
 
         let publisher = &self.publishers[index_usize];
 
-        // Safety: Access must be done under locking.
+        // Safety: Access synchronized.
         let _access_lock = publisher.guard.lock();
 
         let current_cycle = publisher.cycle.load(Relaxed);
@@ -215,7 +205,7 @@ impl<T> Publishers<T> {
     ///
     /// Publisher's cycle will be incremented and its state will be set to wait again.
     fn release(&self, id: u64, publisher: &PublisherData<T>) {
-        // Safety: Access must be done under locking.
+        // Safety: Access synchronized.
         let _value_lock = publisher.guard.lock();
 
         let (index, cycle) = Self::split(id);
@@ -228,22 +218,14 @@ impl<T> Publishers<T> {
         let current_state = unsafe { &mut *publisher.state.get() };
         drop(mem::replace(current_state, PublisherState::Unused));
 
-        loop {
-            let current = self.free.load(Acquire);
-            let (current_index, current_tag) = Self::split(current);
+        // Update the free index.
+        let mut current_free = self.free.lock();
 
-            publisher.next.store(current_index, Relaxed);
+        let next_free = *current_free;
 
-            let new = Self::combine(index, current_tag.wrapping_add(1));
+        publisher.next.store(next_free, Relaxed);
 
-            if self
-                .free
-                .compare_exchange(current, new, AcqRel, Relaxed)
-                .is_ok()
-            {
-                return;
-            }
-        }
+        *current_free = index;
     }
 }
 
@@ -256,8 +238,8 @@ mod tests {
     fn debug_integrity<T>(publishers: &Publishers<T>) -> usize {
         let mut seen = vec![false; publishers.publishers.len()];
 
-        let current_free = publishers.free.load(Relaxed);
-        let (mut index, _) = Publishers::<T>::split(current_free);
+        let current_free = publishers.free.lock();
+        let mut index = *current_free;
 
         let mut count = 0;
 

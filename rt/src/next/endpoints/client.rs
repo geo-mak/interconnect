@@ -190,7 +190,7 @@ where
     ///
     /// This call is untracked, if the target operation returns response,
     /// the response will be discarded.
-    async fn call_nullary_one_way(&self, op: u64) -> ProtocolResult<()> {
+    async fn send_nullary_one_way(&self, op: u64) -> ProtocolResult<()> {
         let Some(mut segment) = self.state.provider.acquire_send() else {
             return Err(ProtocolError::error(ErrKind::CapacityLimit));
         };

@@ -5,8 +5,8 @@ use aes_gcm::Aes128Gcm;
 use hkdf::Hkdf;
 use sha2::Sha256;
 
-use crate::error::{ErrKind, RpcError, RpcResult};
-use crate::opt::branch_hints::unlikely;
+use crate::prev::error::{ErrKind, RpcError, RpcResult};
+use crate::prev::opt::branch_hints::unlikely;
 
 // ----------------------------------------------
 // |         RPC SPECIFICATION PROTOCOL         |
@@ -152,7 +152,7 @@ impl EncryptionState {
 
 pub mod negotiation {
     use super::*;
-    use crate::Transport;
+    use crate::prev::Transport;
     use x25519_dalek::{EphemeralSecret, PublicKey};
 
     pub async fn read_frame<T>(transport: &mut T) -> io::Result<RpcSpecification>
@@ -297,7 +297,7 @@ mod test {
     use std::time::Duration;
     use tokio::net::{TcpListener, TcpStream};
 
-    use crate::io::{AsyncIORead, AsyncIOWrite};
+    use crate::prev::io::{AsyncIORead, AsyncIOWrite};
 
     #[tokio::test]
     async fn test_negotiation_with_encryption() {

@@ -8,7 +8,7 @@ use tokio::net::tcp;
 use tokio::net::unix;
 use tokio::net::{TcpListener, TcpStream, UnixListener, UnixStream};
 
-use crate::io::{AsyncIORead, AsyncIOWrite};
+use crate::prev::io::{AsyncIORead, AsyncIOWrite};
 
 pub trait TransportListener<A> {
     type Address;

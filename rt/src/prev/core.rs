@@ -9,12 +9,12 @@ use serde::{Deserialize, Serialize};
 
 use aead::Buffer;
 
-use crate::error::{ErrKind, RpcError, RpcResult};
-use crate::io::{AsyncIORead, AsyncIOWrite, IOSegment};
-use crate::opt::branch_hints::{likely, unlikely};
-use crate::specs::EncryptionState;
+use crate::prev::error::{ErrKind, RpcError, RpcResult};
+use crate::prev::io::{AsyncIORead, AsyncIOWrite, IOSegment};
+use crate::prev::opt::branch_hints::{likely, unlikely};
+use crate::prev::specs::EncryptionState;
 
-use crate::private::Private;
+use crate::prev::private::Private;
 
 // RPC FRAME
 //   Header (unencrypted?)   Message (encrypted)

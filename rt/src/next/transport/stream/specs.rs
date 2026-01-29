@@ -5,7 +5,7 @@ use sha2::Sha256;
 
 use crate::next::error::ProtocolResult;
 use crate::next::error::{ErrKind, ProtocolError};
-use crate::opt::branch_hints::unlikely;
+use crate::next::opt::branch_hints::unlikely;
 const SPECS_FRAME_LEN: usize = 8;
 
 /// Protocol flags.

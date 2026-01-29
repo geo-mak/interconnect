@@ -15,17 +15,17 @@ use serde::Serialize;
 use tokio::task::JoinHandle;
 use tokio::time::timeout;
 
-use crate::application::{Call, CallContext, RpcApplication};
-use crate::core::{
+use crate::prev::application::{Call, CallContext, RpcApplication};
+use crate::prev::core::{
     AsyncReceiver, AsyncSender, EncMessageReceiver, EncMessageSender, MessageID, MessageReceiver,
     MessageSender,
 };
-use crate::error::{ErrKind, RpcError, RpcResult};
-use crate::report::Reporter;
-use crate::specs::{EncryptionState, negotiation};
-use crate::sync::{DynamicLatch, IList, INode, NOOP_WAKER};
-use crate::transport::{Transport, TransportListener};
-use crate::{Directive, message};
+use crate::prev::error::{ErrKind, RpcError, RpcResult};
+use crate::prev::report::Reporter;
+use crate::prev::specs::{EncryptionState, negotiation};
+use crate::prev::sync::{DynamicLatch, IList, INode, NOOP_WAKER};
+use crate::prev::transport::{Transport, TransportListener};
+use crate::prev::{Directive, message};
 
 thread_local! {
     // Must be non-zero.
@@ -585,10 +585,10 @@ mod tests {
 
     use tokio::net::{TcpListener, TcpStream, UnixListener, UnixStream};
 
-    use crate::application::Call;
-    use crate::error::{ErrKind, RpcError};
-    use crate::report::STDIOReporter;
-    use crate::specs::{self, RpcSpecification};
+    use crate::prev::application::Call;
+    use crate::prev::error::{ErrKind, RpcError};
+    use crate::prev::report::STDIOReporter;
+    use crate::prev::specs::{self, RpcSpecification};
 
     #[derive(Clone)]
     struct TestApplication {}

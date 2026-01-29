@@ -12,7 +12,7 @@ use crate::next::codec::encoder::Encoder;
 use crate::next::endpoints::publishers::Publishers;
 use crate::next::error::{ErrKind, ProtocolError, ProtocolResult};
 use crate::next::mem::MemoryProvider;
-use crate::next::report::{NoContent, Reporter};
+use crate::next::reports::{NoContent, Reporter};
 use crate::next::transport::traits::{Transport, TransportReceiver, TransportSender};
 use crate::next::types::convert::{FromProtocolType, IntoNativeType};
 use crate::next::types::core::ProtocolType;

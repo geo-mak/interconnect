@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
+use tokio::time::timeout;
 
 use crate::next::codec::decode::Decode;
 use crate::next::codec::decoder::Decoder;
@@ -67,6 +68,7 @@ where
         let state = Arc::new(ClientState::new(sender, capacity, reporter, provider));
         let client_state = Arc::clone(&state);
 
+        // TODO: Make it implementation-agnostic.
         let recv_task = tokio::spawn(async move {
             let reporter = &client_state.reporter;
             loop {
@@ -123,10 +125,12 @@ where
 
                 segment.encode_next(message, ())?;
 
+                // TODO: Async-strategy regarding cancellation.
                 self.state.sender.lock().await.send(&mut segment).await?;
 
                 // TODO: make it external.
-                let result = tokio::time::timeout(Duration::from_secs(30), publisher.wait());
+                // TODO: Make it implementation-agnostic.
+                let result = timeout(Duration::from_secs(30), publisher.wait());
 
                 // RT_ASSERT.
                 match result.await?.unwrap() {
@@ -162,15 +166,13 @@ where
         <R as IntoNativeType>::NativeType:
             for<'de> FromProtocolType<<R as ProtocolType>::Type<'de>>,
     {
-        // TODO: Generate ID according to id-rules.
         if let Some(publisher) = &self.state.publishers.acquire() {
             if let Some(mut segment) = self.state.provider.acquire_send() {
                 TypeMessageHeader::encode_header(publisher.id, op, &mut segment)?;
 
                 self.state.sender.lock().await.send(&mut segment).await?;
 
-                // TODO: make it external.
-                let result = tokio::time::timeout(Duration::from_secs(30), publisher.wait());
+                let result = timeout(Duration::from_secs(30), publisher.wait());
 
                 // RT_ASSERT.
                 match result.await?.unwrap() {

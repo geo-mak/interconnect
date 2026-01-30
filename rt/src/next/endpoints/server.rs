@@ -352,11 +352,13 @@ where
         ));
 
         let server_state = state.clone();
+        // TODO: Make it implementation-agnostic.
         let listener = tokio::spawn(async move {
             loop {
                 match transport_server.accept().await {
                     Ok((initiator, peer_id)) => {
                         let state = server_state.clone();
+                        // TODO: Make it implementation-agnostic.
                         tokio::spawn(async move {
                             // Safety:
                             // - The task and its control state are stored on the future and valid only as long
@@ -369,7 +371,7 @@ where
 
                             // Detached on drop with release effect.
                             if let Some(attached) = state.tasks.attach(&mut pinned_task) {
-                                // TODO: Make it external.
+                                // TODO: Make it implementation-agnostic.
                                 match timeout(state.timeout, initiator.initiate()).await {
                                     Ok(init_result) => match init_result {
                                         Ok(mut transport) => {

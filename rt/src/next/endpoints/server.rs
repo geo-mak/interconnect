@@ -213,7 +213,6 @@ impl Task {
 }
 
 struct AttachedTask<'a> {
-    // Must be by ref.
     tasks: &'a Tasks,
     task: &'a mut Task,
     shard: usize,

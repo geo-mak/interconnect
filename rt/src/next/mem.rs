@@ -58,7 +58,7 @@ pub unsafe trait IOSegment {
         unsafe { from_raw_parts_mut(self.as_ptr_mut(), self.len()) }
     }
 
-    /// Constructs a slice of `count` bytes.
+    /// Constructs a slice of `count` bytes from offset `0` to offset `count - 1`.
     ///
     /// Safety:
     /// - The count must be within the bounds of the allocated memory.
@@ -76,7 +76,7 @@ pub unsafe trait IOSegment {
         unsafe { core::slice::from_raw_parts(self.as_ptr(), count) }
     }
 
-    /// Constructs a mutable slice of `count` bytes.
+    /// Constructs a mutable slice of `count` bytes from offset `0` to offset `count - 1`.
     ///
     /// # Safety
     /// - The count must be within the bounds of the allocated memory.

@@ -202,14 +202,13 @@ Interconnect's structs are identical to C-structs in terms of memory-layout.
 **Constraints**:
   - Messages can't be empty.
   - Messages can't be fields of anything, including other messages.
-  - Messages are the only types that know how to encode and decode full exchange-layouts.
   - Messages are the only types that can cross the API-boundary, all other types are fragments of their data.
 
 User-defined messages are sent and received with additional **control** metadata. 
 
 The layout of user-defined messages consists of two main regions:
-- Inlined message-fields as defined.
-- Out-of-line region (if applicable) for storing the sequence of the data blocks referenced by the inline-fields.
+- Inlined region: Stores the fields of the message as defined, where each field represents inlined-data or inlined-metadata.
+- Out-of-line region (if applicable): Stores the sequence of the data blocks referenced by the fields that store metadata.
 
 The out-of-line data blocks are appended after the inline-layout in **traversal order**.
 

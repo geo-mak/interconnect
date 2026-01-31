@@ -400,7 +400,7 @@ where
                                 // This allows shutdown to access locks smoothly without contention.
                                 if attached.task.node.is_canceled() {
                                     attached.release_undetached();
-                                    state.reporter.info(
+                                    state.reporter.trace(
                                         "Session canceled by shutdown",
                                         &format_args!("Peer: {peer_id:?}"),
                                     );

@@ -3,7 +3,7 @@ use core::future::Future;
 use crate::next::codec::decoder::Decoder;
 use crate::next::codec::encode::Encode;
 use crate::next::codec::encoder::Encoder;
-use crate::next::error::{ErrKind, ProtocolError, ProtocolResult};
+use crate::next::error::ProtocolResult;
 use crate::next::types::core::ProtocolType;
 use crate::next::types::limits::TypeLimits;
 
@@ -46,8 +46,5 @@ pub trait Application {
         C: CallContext<E> + Send;
 
     /// Informs the application to terminate its state machines and waits for completion.
-    /// By default, it returns `Unimplemented` error immediately.
-    fn terminate(&self) -> impl Future<Output = ProtocolResult<()>> + Send {
-        core::future::ready(Err(ProtocolError::error(ErrKind::Unimplemented)))
-    }
+    fn terminate(&self) -> impl Future<Output = ProtocolResult<()>> + Send;
 }

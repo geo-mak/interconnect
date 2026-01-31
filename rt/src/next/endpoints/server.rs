@@ -34,9 +34,9 @@ thread_local! {
 }
 
 struct Tasks {
-    shards: Box<[parking_lot::Mutex<IList<TaskControlState>>]>,
-    mask: usize,
     observer: DynamicLatch,
+    shards: Box<[parking_lot::Mutex<IList<TaskControlState>>]>,
+    shards_mask: usize,
 }
 
 unsafe impl Send for Tasks {}
@@ -54,9 +54,9 @@ impl Tasks {
             .collect();
 
         Self {
-            shards: shards.into_boxed_slice(),
-            mask: n_shards - 1,
             observer: DynamicLatch::new(),
+            shards: shards.into_boxed_slice(),
+            shards_mask: n_shards - 1,
         }
     }
 
@@ -71,25 +71,28 @@ impl Tasks {
             x ^= x << 25;
             x ^= x >> 27;
             s.set(x);
-            (x.wrapping_mul(0x2545F4914F6CDD1D) as usize) & self.mask
+            (x.wrapping_mul(0x2545F4914F6CDD1D) as usize) & self.shards_mask
         })
     }
 
     fn attach<'a>(&'a self, task: &'a mut Task) -> Option<AttachedTask<'a>> {
+        if !self.observer.acquire_manual() {
+            return None;
+        };
+
         let shard = self.select_shard();
-        let mut shard_lock = self.shards[shard].lock();
-        if self.observer.acquire_manual() {
-            unsafe {
-                shard_lock.attach_first(&mut task.node);
-                drop(shard_lock);
-            };
-            return Some(AttachedTask {
-                task,
-                tasks: self,
-                shard,
-            });
-        }
-        None
+
+        unsafe {
+            let mut shard_lock = self.shards[shard].lock();
+            shard_lock.attach_first(&mut task.node);
+            drop(shard_lock);
+        };
+
+        Some(AttachedTask {
+            task,
+            tasks: self,
+            shard,
+        })
     }
 
     fn detach(&self, task: &mut AttachedTask<'_>) {

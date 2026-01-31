@@ -22,7 +22,7 @@ use crate::next::coop::sync::{DynamicLatch, IList, INode, NOOP_WAKER};
 use crate::next::endpoints::application::{Application, CallContext};
 use crate::next::error::{ErrKind, ProtocolError, ProtocolResult};
 use crate::next::mem::MemoryProvider;
-use crate::next::reports::Reporter;
+use crate::next::reports::traits::Reporter;
 use crate::next::transport::traits::{Transport, TransportInitiator, TransportServer};
 use crate::next::types::core::ProtocolType;
 use crate::next::types::limits::TypeLimits;

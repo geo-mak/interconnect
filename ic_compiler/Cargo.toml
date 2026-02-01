@@ -1,5 +1,5 @@
 [package]
-name = "interconnect_compiler"
+name = "ic_compiler"
 description = "Interconnect's compiler and toolchain"
 version = "0.1.0"
 

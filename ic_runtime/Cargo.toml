@@ -1,5 +1,5 @@
 [package]
-name = "interconnect_rt"
+name = "ic_runtime"
 description = "Interconnect's runtime-library"
 version = "0.1.0"
 

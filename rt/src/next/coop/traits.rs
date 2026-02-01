@@ -52,16 +52,24 @@ pub trait Timer {
 
     fn sleep(duration: Duration) -> impl Future<Output = ()> + Send;
 
-    fn timeout<F, T>(duration: Duration, future: F) -> impl Future<Output = Result<T, ProtocolError>> + Send
-    where F: Future<Output = T> + Send;
+    fn timeout<F, T>(
+        duration: Duration,
+        future: F,
+    ) -> impl Future<Output = Result<T, ProtocolError>> + Send
+    where
+        F: Future<Output = T> + Send;
 
-    fn timeout_at<F, T>(deadline: Self::TimeInstant, future: F) -> impl Future<Output = Result<T, ProtocolError>> + Send
-    where F: Future<Output = T> + Send;
+    fn timeout_at<F, T>(
+        deadline: Self::TimeInstant,
+        future: F,
+    ) -> impl Future<Output = Result<T, ProtocolError>> + Send
+    where
+        F: Future<Output = T> + Send;
 }
 
 pub trait ControlHandle<T: Send> {
     type Error;
-    
+
     fn abort(&self);
     fn result(self) -> impl Future<Output = Result<T, Self::Error>> + Send;
 }

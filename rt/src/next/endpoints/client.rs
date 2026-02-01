@@ -1,15 +1,15 @@
+use core::marker::PhantomData;
 use core::time::Duration;
 
 use std::sync::Arc;
 
 use tokio::sync::Mutex;
-use tokio::task::JoinHandle;
-use tokio::time::timeout;
 
 use crate::next::codec::decode::Decode;
 use crate::next::codec::decoder::Decoder;
 use crate::next::codec::encode::Encode;
 use crate::next::codec::encoder::Encoder;
+use crate::next::coop::traits::{ControlHandle, Executor, Timer};
 use crate::next::endpoints::publishers::Publishers;
 use crate::next::error::{ErrKind, ProtocolError, ProtocolResult};
 use crate::next::mem::MemoryProvider;
@@ -20,56 +20,70 @@ use crate::next::types::core::ProtocolType;
 use crate::next::types::limits::TypeLimits;
 use crate::next::types::message::TypeMessageHeader;
 
-struct ClientState<P: MemoryProvider, S, E> {
+struct ClientState<S, E, P, R>
+where
+    P: MemoryProvider,
+{
     publishers: Publishers<ProtocolResult<P::ReceiveSegment>>,
     sender: Mutex<S>,
     provider: P,
-    reporter: E,
+    reporter: R,
+    _executor: PhantomData<E>,
 }
 
-impl<P: MemoryProvider, S, E> ClientState<P, S, E> {
+impl<S, E, P, R> ClientState<S, E, P, R>
+where
+    P: MemoryProvider,
+{
     #[inline(always)]
-    fn new(sender: S, capacity: usize, reporter: E, provider: P) -> ClientState<P, S, E> {
+    fn new(capacity: usize, sender: S, provider: P, reporter: R) -> ClientState<S, E, P, R> {
         ClientState {
             publishers: Publishers::new(capacity),
             sender: Mutex::const_new(sender),
             provider,
             reporter,
+            _executor: PhantomData,
         }
     }
 }
 
-pub struct CoreClient<T: Transport, P: MemoryProvider, E> {
-    state: Arc<ClientState<P, T::Sender, E>>,
-    recv_task: JoinHandle<()>,
-}
-
-impl<T, P, E> CoreClient<T, P, E>
+pub struct CoreClient<T, E, P, R>
 where
     T: Transport,
-    T::SendSegment: Send,
-    T::ReceiveSegment: Send,
-    T::Sender: Send + 'static,
-    T::Receiver: Send + 'static,
+    E: Executor,
+    P: MemoryProvider,
+{
+    state: Arc<ClientState<T::Sender, E, P, R>>,
+    recv_task: E::ControlHandle<()>,
+}
+
+impl<T, E, P, R> CoreClient<T, E, P, R>
+where
+    T: Transport,
+    E: Executor + Send + Sync + 'static,
+    R: Reporter + Send + Sync + 'static,
     P: MemoryProvider<SendSegment = T::SendSegment> + Send + Sync,
     P: MemoryProvider<ReceiveSegment = T::ReceiveSegment> + Send + Sync + 'static,
+    T::SendSegment: Send,
+    T::Sender: Send + 'static,
+    T::ReceiveSegment: Send,
+    T::Receiver: Send + 'static,
     P::SendSegment: Encoder,
     P::ReceiveSegment: Decoder,
-    E: Reporter + Send + Sync + 'static,
 {
     pub async fn start(
         capacity: usize,
         transport: T,
+        executor: &E,
         provider: P,
-        reporter: E,
-    ) -> ProtocolResult<CoreClient<T, P, E>> {
+        reporter: R,
+    ) -> ProtocolResult<CoreClient<T, E, P, R>> {
         let (sender, mut receiver) = transport.split();
 
-        let state = Arc::new(ClientState::new(sender, capacity, reporter, provider));
+        let state = Arc::new(ClientState::new(capacity, sender, provider, reporter));
         let client_state = Arc::clone(&state);
 
-        // TODO: Make it implementation-agnostic.
-        let recv_task = tokio::spawn(async move {
+        let recv_task = executor.spawn(async move {
             let reporter = &client_state.reporter;
             loop {
                 let Some(mut recv_segment) = client_state.provider.acquire_receive() else {
@@ -98,7 +112,7 @@ where
 
     async fn process_message(
         mut message: P::ReceiveSegment,
-        state: &Arc<ClientState<P, T::Sender, E>>,
+        state: &Arc<ClientState<T::Sender, E, P, R>>,
     ) -> ProtocolResult<()> {
         let (id, _directive) = { TypeMessageHeader::decode_header(&mut message)? };
         // TODO: Directive matching according to directive-rules.
@@ -106,17 +120,17 @@ where
         Ok(())
     }
 
-    async fn send<'a, V, M, R>(
+    async fn send<'a, A, M, V>(
         &self,
         op: u64,
         message: &'a M,
-    ) -> ProtocolResult<<R as IntoNativeType>::NativeType>
+    ) -> ProtocolResult<<A as IntoNativeType>::NativeType>
     where
-        V: ProtocolType + TypeLimits<Limits = ()>,
-        &'a M: Encode<V, P::SendSegment>,
-        R: Decode<P::ReceiveSegment> + TypeLimits<Limits = ()> + IntoNativeType,
-        <R as IntoNativeType>::NativeType:
-            for<'de> FromProtocolType<<R as ProtocolType>::Type<'de>>,
+        A: ProtocolType + TypeLimits<Limits = ()>,
+        &'a M: Encode<A, P::SendSegment>,
+        A: Decode<P::ReceiveSegment> + TypeLimits<Limits = ()> + IntoNativeType,
+        <A as IntoNativeType>::NativeType:
+            for<'de> FromProtocolType<<A as ProtocolType>::Type<'de>>,
     {
         // TODO: Generate ID according to id-rules.
         if let Some(publisher) = &self.state.publishers.acquire() {
@@ -128,14 +142,12 @@ where
                 // TODO: Async-strategy regarding cancellation.
                 self.state.sender.lock().await.send(&mut segment).await?;
 
-                // TODO: make it external.
-                // TODO: Make it implementation-agnostic.
-                let result = timeout(Duration::from_secs(30), publisher.wait());
+                let result = E::Timer::timeout(Duration::from_secs(30), publisher.wait());
 
                 // RT_ASSERT.
                 match result.await?.unwrap() {
                     Ok(response) => {
-                        let decoded = response.decode::<R>(())?;
+                        let decoded = response.decode::<A>(())?;
                         return Ok(decoded.into_native());
                     }
                     Err(err) => return Err(err),
@@ -146,10 +158,10 @@ where
         Err(ProtocolError::error(ErrKind::CapacityLimit))
     }
 
-    async fn send_one_way<'a, V, M>(&self, op: u64, message: &'a M) -> ProtocolResult<()>
+    async fn send_one_way<'a, A, M>(&self, op: u64, message: &'a M) -> ProtocolResult<()>
     where
-        V: ProtocolType + TypeLimits<Limits = ()>,
-        &'a M: Encode<V, P::SendSegment>,
+        A: ProtocolType + TypeLimits<Limits = ()>,
+        &'a M: Encode<A, P::SendSegment>,
     {
         let Some(mut segment) = self.state.provider.acquire_send() else {
             return Err(ProtocolError::error(ErrKind::CapacityLimit));
@@ -160,11 +172,11 @@ where
         self.state.sender.lock().await.send(&mut segment).await
     }
 
-    async fn send_nullary<R>(&self, op: u64) -> ProtocolResult<<R as IntoNativeType>::NativeType>
+    async fn send_nullary<V>(&self, op: u64) -> ProtocolResult<<V as IntoNativeType>::NativeType>
     where
-        R: Decode<P::ReceiveSegment> + TypeLimits<Limits = ()> + IntoNativeType,
-        <R as IntoNativeType>::NativeType:
-            for<'de> FromProtocolType<<R as ProtocolType>::Type<'de>>,
+        V: Decode<P::ReceiveSegment> + TypeLimits<Limits = ()> + IntoNativeType,
+        <V as IntoNativeType>::NativeType:
+            for<'de> FromProtocolType<<V as ProtocolType>::Type<'de>>,
     {
         if let Some(publisher) = &self.state.publishers.acquire() {
             if let Some(mut segment) = self.state.provider.acquire_send() {
@@ -172,12 +184,12 @@ where
 
                 self.state.sender.lock().await.send(&mut segment).await?;
 
-                let result = timeout(Duration::from_secs(30), publisher.wait());
+                let result = E::Timer::timeout(Duration::from_secs(30), publisher.wait());
 
                 // RT_ASSERT.
                 match result.await?.unwrap() {
                     Ok(response) => {
-                        let decoded = response.decode::<R>(())?;
+                        let decoded = response.decode::<V>(())?;
                         return Ok(decoded.into_native());
                     }
                     Err(err) => return Err(err),
@@ -221,6 +233,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::next::coop::executors::TokioExecutor;
     use crate::next::mem::{IOPool, IOPoolSegment, IOSegment};
     use crate::next::transport::stream::uds::{UnixLink, UnixLinkServer};
     use crate::next::transport::traits::{TransportInitiator, TransportServer};
@@ -233,7 +246,9 @@ mod tests {
         let _ = std::fs::remove_file(path);
 
         let capacity = 2;
-        let pool = IOPool::new(3, 1024);
+        let pool = IOPool::new(3, 32);
+        let executor = TokioExecutor;
+        let reporter = ();
 
         let server = UnixLinkServer::<IOPoolSegment, IOPoolSegment>::create(&path)
             .await
@@ -263,13 +278,13 @@ mod tests {
             link.send(&mut segment).await.unwrap();
         });
 
+        // Connect.
         let transport = UnixLink::connect(&path).await.unwrap();
-
-        let client = CoreClient::start(capacity, transport, pool, ())
+        let client = CoreClient::start(capacity, transport, &executor, pool, reporter)
             .await
             .unwrap();
 
-        // Send two-way.
+        // Send.
         let response: u64 = client
             .send::<TypeU64, TypeU64, TypeU64>(10, &TypeU64(100))
             .await

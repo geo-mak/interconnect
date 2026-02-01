@@ -62,6 +62,7 @@ where
     }
 }
 
+#[derive(Clone)]
 pub struct TokioExecutor;
 
 impl Executor for TokioExecutor {

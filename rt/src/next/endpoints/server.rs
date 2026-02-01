@@ -18,7 +18,9 @@ use pin_project_lite::pin_project;
 use crate::next::codec::decoder::Decoder;
 use crate::next::codec::encode::Encode;
 use crate::next::codec::encoder::Encoder;
+use crate::next::coop::executors;
 use crate::next::coop::sync::{DynamicLatch, IList, INode, NOOP_WAKER};
+use crate::next::coop::traits::{ControlHandle, Executor, Timer};
 use crate::next::endpoints::application::{Application, CallContext};
 use crate::next::error::{ErrKind, ProtocolError, ProtocolResult};
 use crate::next::mem::MemoryProvider;
@@ -287,45 +289,52 @@ where
     }
 }
 
-struct ServerState<P, H, E> {
+struct ServerState<E, P, H, R> {
     provider: P,
     tasks: Tasks,
     application: H,
-    reporter: E,
+    reporter: R,
     timeout: Duration,
+    executor: E,
 }
 
-impl<P, H, E> ServerState<P, H, E> {
+impl<E, P, H, R> ServerState<E, P, H, R> {
     #[inline]
     fn new(
+        executor: E,
         provider: P,
         application: H,
-        reporter: E,
+        reporter: R,
         shards: usize,
         timeout: Duration,
-    ) -> ServerState<P, H, E> {
+    ) -> ServerState<E, P, H, R> {
         ServerState {
             provider,
             tasks: Tasks::new(shards),
             application,
             reporter,
             timeout,
+            executor,
         }
     }
 }
 
 /// A multi-client server implementation.
-pub struct MultiClientServer<S, P, H, E> {
-    state: Arc<ServerState<P, H, E>>,
-    listener: JoinHandle<()>,
+pub struct MultiClientServer<S, E, P, H, R>
+where
+    E: Executor,
+{
+    state: Arc<ServerState<E, P, H, R>>,
+    listener: E::ControlHandle<()>,
     _s: PhantomData<S>,
 }
 
-impl<S, P, H, E> MultiClientServer<S, P, H, E>
+impl<S, E, P, H, R> MultiClientServer<S, E, P, H, R>
 where
     S: TransportServer + Send + 'static,
     S::Initiator: Send,
     S::Transport: Send,
+    E: Executor + Send + Sync + 'static + Clone,
     P: MemoryProvider<SendSegment = <S::Transport as Transport>::SendSegment>
         + Send
         + Sync
@@ -335,17 +344,19 @@ where
     P::ReceiveSegment: Decoder + Send,
     S::ID: Debug + Send + Sync,
     H: Application + Send + Sync + Clone + 'static,
-    E: Reporter + Send + Sync + 'static,
+    R: Reporter + Send + Sync + 'static,
 {
     pub async fn start(
         transport_server: S,
+        executor: E,
         application: H,
         provider: P,
-        reporter: E,
+        reporter: R,
         shards: usize,
         connection_timeout: Duration,
     ) -> ProtocolResult<Self> {
         let state = Arc::new(ServerState::new(
+            executor,
             provider,
             application,
             reporter,
@@ -354,14 +365,12 @@ where
         ));
 
         let server_state = state.clone();
-        // TODO: Make it implementation-agnostic.
-        let listener = tokio::spawn(async move {
+        let listener = state.executor.spawn(async move {
             loop {
                 match transport_server.accept().await {
                     Ok((initiator, peer_id)) => {
                         let state = server_state.clone();
-                        // TODO: Make it implementation-agnostic.
-                        tokio::spawn(async move {
+                        server_state.executor.spawn(async move {
                             // Safety:
                             // - The task and its control state are stored on the future and valid only as long
                             //   the future is still alive.
@@ -374,7 +383,7 @@ where
                             // Detached on drop with release effect.
                             if let Some(attached) = state.tasks.attach(&mut pinned_task) {
                                 // TODO: Make it implementation-agnostic.
-                                match timeout(state.timeout, initiator.initiate()).await {
+                                match E::Timer::timeout(state.timeout, initiator.initiate()).await {
                                     Ok(init_result) => match init_result {
                                         Ok(mut transport) => {
                                             Self::session(
@@ -424,7 +433,7 @@ where
 
     async fn session(
         task: &AttachedTask<'_>,
-        state: &ServerState<P, H, E>,
+        state: &ServerState<E, P, H, R>,
         peer_id: &S::ID,
         transport: &mut S::Transport,
     ) {
@@ -503,6 +512,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::next::coop::executors::TokioExecutor;
     use crate::next::mem::{IOPool, IOSegment};
     use crate::next::transport::stream::uds::{UnixLink, UnixLinkServer};
     use crate::next::transport::traits::Transport;
@@ -549,14 +559,16 @@ mod tests {
 
         let pool = IOPool::new(2, 32);
         let application = TestApplication;
+        let executor = TokioExecutor;
         let reporter = ();
 
         let transport_server = UnixLinkServer::create(&path).await.unwrap();
-
+        let server_provider = pool.clone();
         let mut server = MultiClientServer::start(
             transport_server,
+            executor,
             application,
-            pool.clone(),
+            server_provider,
             reporter,
             1,
             Duration::from_secs(1),
@@ -567,13 +579,13 @@ mod tests {
         // Connect client.
         let mut client_transport = UnixLink::connect(&path).await.unwrap();
 
-        // Send message.
+        // Send.
         let mut segment = pool.acquire().unwrap();
         TypeMessageHeader::encode_header(123, 1, &mut segment).unwrap();
         segment.encode_next(&TypeU64(100), ()).unwrap();
         client_transport.send(&mut segment).await.unwrap();
 
-        // Receive response.
+        // Receive.
         segment.clear();
         client_transport.receive(&mut segment).await.unwrap();
 

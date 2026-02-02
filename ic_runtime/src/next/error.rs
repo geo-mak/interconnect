@@ -64,6 +64,8 @@ pub enum ErrKind {
     NotEnoughData = 23,
 
     InvalidPadding = 24,
+
+    InvalidPtrTag = 25,
 }
 
 impl ErrKind {
@@ -96,6 +98,7 @@ impl ErrKind {
             22 => Validation,
             23 => NotEnoughData,
             24 => InvalidPadding,
+            25 => InvalidPtrTag,
             _ => return None,
         })
     }

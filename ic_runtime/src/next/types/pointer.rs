@@ -11,11 +11,11 @@ use crate::next::types::core::TypeU64;
 pub const PTR_TAG_NULL: u64 = 0;
 pub const PTR_TAG_SET: u64 = u64::MAX;
 
-/// The canonical pointer-type of Interconnect.
+/// The canonical tagged-pointer of Interconnect.
+///
+/// The pointer can be tagged as either `null` or `set`.
 ///
 /// This type is used in fields to reference out-of-line data-structures.
-///
-/// The pointer is tagged and can be either `null` or `set`.
 ///
 /// This type is implemented as union with two members:
 /// - The pointer-tag: Either "PTR_TAG_NULL" or "PTR_TAG_SET".
@@ -29,16 +29,16 @@ pub const PTR_TAG_SET: u64 = u64::MAX;
 /// Dereferencing the pointer in wrong union-state will return either `null` pointer or an invalid pointer `u64::MAX`.
 /// Either way this should lead to `segmentation/access violation`, but it is `UB` at the compiler-level.
 #[repr(C, align(8))]
-pub union TypePointer<'de, T> {
+pub union TypeTaggedPtr<'de, T> {
     ptr_tag: TypeU64,
     ptr: *mut T,
     _seg_lf: PhantomData<&'de mut [BasicBlock]>,
 }
 
-unsafe impl<T: Send> Send for TypePointer<'_, T> {}
-unsafe impl<T: Sync> Sync for TypePointer<'_, T> {}
+unsafe impl<T: Send> Send for TypeTaggedPtr<'_, T> {}
+unsafe impl<T: Sync> Sync for TypeTaggedPtr<'_, T> {}
 
-impl<T> TypePointer<'_, T> {
+impl<T> TypeTaggedPtr<'_, T> {
     pub fn is_null(storage: TypeRef<'_, Self>) -> Result<bool, ProtocolError> {
         unsafe {
             munge!(let Self { ptr_tag } = storage);
@@ -81,7 +81,7 @@ impl<T> TypePointer<'_, T> {
 }
 
 #[cfg(test)]
-mod tests {
+mod tests_tagged_ptr {
     use super::*;
 
     #[test]
@@ -89,7 +89,7 @@ mod tests {
         let mut value = 100u32;
         let value_ptr: *mut u32 = &mut value;
 
-        let mut pointer_union = TypePointer { ptr: value_ptr };
+        let mut pointer_union = TypeTaggedPtr { ptr: value_ptr };
 
         assert_eq!(pointer_union.as_ptr(), value_ptr);
         assert_eq!(pointer_union.as_ptr_mut(), value_ptr);
@@ -97,8 +97,8 @@ mod tests {
 
     #[test]
     fn test_encode_set() {
-        let mut storage = MaybeUninit::<TypePointer<u32>>::uninit();
-        TypePointer::encode_as_set(&mut storage);
+        let mut storage = MaybeUninit::<TypeTaggedPtr<u32>>::uninit();
+        TypeTaggedPtr::encode_as_set(&mut storage);
 
         unsafe {
             let ptr = storage.as_ptr();
@@ -108,8 +108,8 @@ mod tests {
 
     #[test]
     fn test_encode_null() {
-        let mut storage = MaybeUninit::<TypePointer<u32>>::uninit();
-        TypePointer::encode_as_null(&mut storage);
+        let mut storage = MaybeUninit::<TypeTaggedPtr<u32>>::uninit();
+        TypeTaggedPtr::encode_as_null(&mut storage);
 
         unsafe {
             let ptr = storage.as_ptr();
@@ -122,11 +122,11 @@ mod tests {
         let mut value = 100u32;
         let resolved_ptr: *mut u32 = &mut value;
 
-        let mut storage = MaybeUninit::<TypePointer<u32>>::uninit();
-        TypePointer::encode_as_null(&mut storage);
+        let mut storage = MaybeUninit::<TypeTaggedPtr<u32>>::uninit();
+        TypeTaggedPtr::encode_as_null(&mut storage);
 
         let type_ref = unsafe { TypeRef::new_assume_init(&mut storage) };
-        TypePointer::set_pointer(type_ref, resolved_ptr);
+        TypeTaggedPtr::set_pointer(type_ref, resolved_ptr);
 
         unsafe {
             let ptr = storage.as_ptr();
@@ -136,24 +136,24 @@ mod tests {
 
     #[test]
     fn test_is_null() {
-        let mut storage_set = MaybeUninit::<TypePointer<u32>>::uninit();
-        TypePointer::encode_as_set(&mut storage_set);
+        let mut storage_set = MaybeUninit::<TypeTaggedPtr<u32>>::uninit();
+        TypeTaggedPtr::encode_as_set(&mut storage_set);
 
         let type_ref_set = unsafe { TypeRef::new_assume_init(&mut storage_set) };
-        assert_eq!(TypePointer::is_null(type_ref_set), Ok(false));
+        assert_eq!(TypeTaggedPtr::is_null(type_ref_set), Ok(false));
 
-        let mut storage_null = MaybeUninit::<TypePointer<u32>>::uninit();
-        TypePointer::encode_as_null(&mut storage_null);
+        let mut storage_null = MaybeUninit::<TypeTaggedPtr<u32>>::uninit();
+        TypeTaggedPtr::encode_as_null(&mut storage_null);
         let type_ref_null = unsafe { TypeRef::new_assume_init(&mut storage_null) };
-        assert_eq!(TypePointer::is_null(type_ref_null), Ok(true));
+        assert_eq!(TypeTaggedPtr::is_null(type_ref_null), Ok(true));
 
-        let mut storage_invalid = MaybeUninit::<TypePointer<u32>>::uninit();
+        let mut storage_invalid = MaybeUninit::<TypeTaggedPtr<u32>>::uninit();
         unsafe {
             (*storage_invalid.as_mut_ptr()).ptr_tag = TypeU64(12345);
         }
         let type_ref_invalid = unsafe { TypeRef::new_assume_init(&mut storage_invalid) };
         assert!(matches!(
-            TypePointer::is_null(type_ref_invalid),
+            TypeTaggedPtr::is_null(type_ref_invalid),
             Err(ProtocolError {
                 kind: ErrKind::InvalidPtrTag,
                 ..

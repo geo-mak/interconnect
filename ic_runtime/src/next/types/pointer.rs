@@ -15,7 +15,12 @@ pub const PTR_TAG_SET: u64 = u64::MAX;
 ///
 /// The pointer can be tagged as either `null` or `set`.
 ///
-/// This type is used in fields to reference out-of-line data-structures.
+/// This type is used in fields to reference out-of-line data-structures that can be optional.
+///
+/// The optionality of types and their rules are still in the design-phase, but the key idea is that types can be
+/// declared as optional, and the way to achieve this with minimum storage-cost, is to transform
+/// any optional type into inlined tagged-pointer, and the actual data/payload shall be stored out-of-line.
+/// This means that an optional field has a fixed "small" cost, in addition to variable cost when the pointer is `set`.
 ///
 /// This type is implemented as union with two members:
 /// - The pointer-tag: Either "PTR_TAG_NULL" or "PTR_TAG_SET".

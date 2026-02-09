@@ -398,7 +398,7 @@ where
                                             &format_args!("{err}. Peer: {peer_id:?}"),
                                         ),
                                     },
-                                    Err(_) => state.reporter.error(
+                                    Err(_) => state.reporter.info(
                                         "Connection timeout",
                                         &format_args!("Peer: {peer_id:?}"),
                                     ),

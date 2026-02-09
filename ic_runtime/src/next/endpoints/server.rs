@@ -382,7 +382,6 @@ where
 
                             // Detached on drop with release effect.
                             if let Some(attached) = state.tasks.attach(&mut pinned_task) {
-                                // TODO: Make it implementation-agnostic.
                                 match E::Timer::timeout(state.timeout, initiator.initiate()).await {
                                     Ok(init_result) => match init_result {
                                         Ok(mut transport) => {

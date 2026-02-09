@@ -6,23 +6,24 @@ use sha2::Sha256;
 use crate::next::error::ProtocolResult;
 use crate::next::error::{ErrKind, ProtocolError};
 use crate::next::opt::branch_hints::unlikely;
+
 const SPECS_FRAME_LEN: usize = 8;
 
 /// Protocol flags.
-/// `ICS0` = Interconnect Specification Version 0.
+/// `ICS0` = Interconnect Connection Specification Version 0.
 const SPECS_PROTO: &[u8; 4] = b"ICS0";
 
 #[derive(Debug, Clone, Copy)]
 pub struct ConnectionSpecs {
     /// Announced ABI version.
     pub abi: u8,
-    pub encryption: bool,
+    pub encrypted: bool,
 }
 
 impl ConnectionSpecs {
     #[inline(always)]
-    pub const fn new(abi: u8, encryption: bool) -> Self {
-        Self { abi, encryption }
+    pub const fn new(abi: u8, encrypted: bool) -> Self {
+        Self { abi, encrypted }
     }
 }
 
@@ -152,9 +153,9 @@ pub mod negotiation {
 
         let abi = destination[4];
         let flags = destination[5];
-        let encryption = (flags & 0x01) != 0;
+        let encrypted = (flags & 0x01) != 0;
 
-        Ok(ConnectionSpecs { abi, encryption })
+        Ok(ConnectionSpecs { abi, encrypted })
     }
 
     pub async fn write_frame<T>(transport: &mut T, specs: &ConnectionSpecs) -> ProtocolResult<()>
@@ -164,7 +165,7 @@ pub mod negotiation {
         let mut source = [0u8; SPECS_FRAME_LEN];
         source[0..4].copy_from_slice(SPECS_PROTO);
         source[4] = specs.abi;
-        source[5] = specs.encryption as u8;
+        source[5] = specs.encrypted as u8;
         source[6..8].copy_from_slice(&0u16.to_le_bytes());
         transport.send_bytes(&source).await
     }
@@ -300,7 +301,7 @@ mod test {
                 .await
                 .expect("Failed to send confirmation");
 
-            let (_s_state, mut recv_state) = if proposed.encryption {
+            let (_s_state, mut recv_state) = if proposed.encrypted {
                 negotiation::accept_key_exchange(&mut transport)
                     .await
                     .expect("server encryption failed")
@@ -336,7 +337,7 @@ mod test {
 
         let capability = ConnectionSpecs {
             abi: 1,
-            encryption: true,
+            encrypted: true,
         };
 
         negotiation::initiate(&mut transport, capability)

@@ -290,7 +290,7 @@ where
         let specs = negotiation::read_frame(&mut self.stream).await?;
 
         // TODO: Hardcoded because config are not accepted currently.
-        if specs.abi == 1 && specs.encryption == false {
+        if specs.abi == 1 && specs.encrypted == false {
             negotiation::confirm(&mut self.stream).await?;
 
             return Ok(IPLink::from(self.stream));
@@ -375,7 +375,7 @@ where
         let specs = negotiation::read_frame(&mut self.stream).await?;
 
         // TODO: Hardcoded because config are not accepted currently.
-        if specs.abi == 1 && specs.encryption == true {
+        if specs.abi == 1 && specs.encrypted == true {
             negotiation::confirm(&mut self.stream).await?;
 
             let (send_state, recv_state) =

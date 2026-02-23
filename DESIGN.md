@@ -135,13 +135,13 @@ impressed for what has been achieved and skeptical of what it could be done with
 
 To make this section short and straightforward, I have used this technology in the context of software development exclusively for:
 
-- Prototyping of designs where code quality and accuracy doesn't matter compared to effort of evaluating a strategy in general.
+- Prototyping of designs where code quality or strict correctness doesn't matter compared to the effort of evaluating a strategy in general.
 
 - Prototyping of unit-tests according to a pre-exiting pattern, which I end up later refactoring and polishing manually.
 
 - Codebase "research" for building a picture of a particular solution implemented in other codebases that forms a multi-file, multi-package puzzle in large codebases with the intent of narrowing the search-scope with various accuracy instead of getting lost in details of that codebase for days.
 
-- Review of code I wrote when I am tired and where any review could be better than nothing, even if the suggestions are too "conservative" or even nonsensical.
+- Review of code I wrote when I were tired, and where any review could be better than nothing, even if the suggestions are too "conservative" or even nonsensical.
 
 I presume that this technology is here to stay as part of what could be called "smart" IDE, but I don't think it is important in the making of any serious software that people could rely on for these "main" reasons:
 

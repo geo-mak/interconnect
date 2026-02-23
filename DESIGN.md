@@ -141,14 +141,14 @@ To make this section short and straightforward, I have used this technology in t
 
 - Codebase "research" for building a picture of a particular solution implemented in other codebases that forms a multi-file, multi-package puzzle in large codebases with the intent of narrowing the search-scope with various accuracy instead of getting lost in details of that codebase for days.
 
-- Review of code I wrote when I were tired, and where any review could be better than nothing, even if the suggestions are too "conservative" or even nonsensical.
+- Review of code I wrote when I were tired, and where any review could be better than nothing, even if the suggestions would be too "conservative" or even nonsensical.
 
 I presume that this technology is here to stay as part of what could be called "smart" IDE, but I don't think it is important in the making of any serious software that people could rely on for these "main" reasons:
 
 - It is inherently faulty in a domain where a trivial mistake could mean disasters or deaths.
 - Writing code is not a challenge (at least in my case), most of my time is spent in design and finding optimization's tricks.
 - Maintaining a codebase requires understanding its inner working in its entirety.
-- Generating a pile in the hope "someone" will "polish" it later is a naïve and misguided approach. Refactoring a foreign codebase is more time-consuming than writing from scratch.
+- Generating a pile in the hope that "someone" will "polish" it later is a naïve and misguided approach. Refactoring a foreign codebase is more time-consuming than writing from scratch.
 
 So the reality is not black or white, it is actually very colorful, but the overhype and the unreasonable "bullying" in the last years made me think that this industry consists mainly of idiots who think that "software-engineering" is about generating some pile of HTML/CSS with some JS/TS or some crappy-entrainment app.
 

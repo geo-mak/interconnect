@@ -108,11 +108,11 @@ Interconnect's unit of exchange is "message".
 
 Messages are exchanged in binary format with **untagged** data representation.
 
-Interconnects defines its own data model that describes the byte-patterns of exchange-types and the layout of messages.
+Interconnect defines its own data model that describes the byte-patterns of exchange-types and the layout of messages.
 
 Interoperability is achieved by adhering to the ABI (Application Binary Interface).
 
-Interconnects requires native implementation of its type-system and its associated components like encoders and decoders 
+Interconnect requires native implementation of its type-system and its associated components like encoders and decoders 
 in order to send and receive messages that conform to its data model.
 
 The native implementation of the type-system and other support components like the transport components and the endpoints' 
@@ -128,3 +128,40 @@ generating integrated endpoints that conform to the user-defined interface.
 The IDL and its toolchain are an **usability and safety** option for making use of Interconnect in an automated manner.
 
 The architecture of the compiler and other details related to the toolchain are not published yet.
+
+## AI usage and policy
+Since I started tinkering with the so-called "AI", namely "LLMs", I were both impressed and skeptical, 
+impressed for what has been achieved and skeptical of what it could be done with it compared to the "hype" surrounding this technology.
+
+To make this section short and straightforward, I have used this technology in the context of software development exclusively for:
+
+- Prototyping of designs where code quality and accuracy doesn't matter compared to effort of evaluating a strategy in general.
+
+- Prototyping of unit-tests according to a pre-exiting pattern, which I end up later refactoring and polishing manually.
+
+- Codebase "research" for building a picture of a particular solution implemented in other codebases that forms a multi-file, multi-package puzzle in large codebases with the intent of narrowing the search-scope with various accuracy instead of getting lost in details of that codebase for days.
+
+- Review of code I wrote when I am tired and where any review could be better than nothing, even if the suggestions are too "conservative" or even nonsensical.
+
+I presume that this technology is here to stay as part of what could be called "smart" IDE, but I don't think it is important in the making of any serious software that people could rely on for these "main" reasons:
+
+- It is inherently faulty in a domain where a trivial mistake could mean disasters or deaths.
+- Writing code is not an challenge (at least in my case), most of my time is spent in design and finding optimization's tricks.
+- Maintaining a codebase requires understanding its inner working in its entirety.
+- Generating a pile in the hope "someone" will "polish" it later is a naïve and misguided approach. Refactoring a foreign codebase is more time-consuming than writing from scratch.
+
+So the reality is not black or white, it is actually very colorful, but the overhype and the unreasonable "bullying" in the last years made me think that this industry consists mainly of idiots who think that "software-engineering" is about generating some pile of HTML/CSS with some JS/TS or some crappy-entrainment app.
+
+I promise that all the future code, which will make it into the codebase is fully human-crafted and audited, regardless of its
+perceived quality or the bugs it may contain. I don't have "productivity" concerns, because I have realized that most of the industry in the last decades was very "productive" in piling up utter garbage!
+
+Feedbacks and suggestions are welcomed, but this project will not have open code-contribution model.
+All the code that gets merged into the codebase will be authored by the project's members and approved persons only, 
+hence there is no public policy of disclosure.
+
+I am very happy to know that more and more people are leaving this "bubble" and starting to realize the limitation of this technology, basically seeing it for what it is, at least in this domain, and go back to do "serious" things in the hope that they could be impactful in one way or another.
+
+Btw, I am already a "prompt engineer", I prompt with "semantic" language using Rust's syntax, and let the marvelous "semantic" agent, the Rust's compiler generate the machine-code for me! and I hope this marvelous "semantic" agent gets even better, especially the ability to define value-constraints on const-generic values, and gets compile-time reflection as a remedy for the clunkiness of the "proc-macro", an approach pioneered by the "sister" language Zig (Btw, sorry for being "rude" to Zig in the past!).
+
+As a final note, ML is an incredibly useful technology, overhyping it and promoting it as "intelligence" and promising what can't be done with it is what harms it the most, and will eventually have a negative impact on the overall research in this area.
+So "bullshitting" will fill some pockets with money for a while, but it will eventually damage the entire industry.

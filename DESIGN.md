@@ -130,7 +130,7 @@ The IDL and its toolchain are an **usability and safety** option for making use 
 The architecture of the compiler and other details related to the toolchain are not published yet.
 
 ## AI usage and policy
-Since I started tinkering with the so-called "AI", namely "LLMs", I were both impressed and skeptical, 
+Since I started tinkering with the so-called "AI", namely "LLMs", I was both impressed and skeptical, 
 impressed for what has been achieved and skeptical of what it could be done with it compared to the "hype" surrounding this technology.
 
 To make this section short and straightforward, I have used this technology in the context of software development exclusively for:
@@ -141,7 +141,7 @@ To make this section short and straightforward, I have used this technology in t
 
 - Codebase "research" for building a picture of a particular solution implemented in other codebases that forms a multi-file, multi-package puzzle in large codebases with the intent of narrowing the search-scope with various accuracy instead of getting lost in details of that codebase for days.
 
-- Review of code I wrote when I were tired, and where any review could be better than nothing, even if the suggestions would be too "conservative" or even nonsensical.
+- Review of code I wrote when I was tired, and where any review could be better than nothing, even if the suggestions would be too "conservative" or even nonsensical.
 
 I presume that this technology is here to stay as part of what could be called "smart" IDE, but I don't think it is important in the making of any serious software that people could rely on for these "main" reasons:
 

@@ -12,7 +12,7 @@ use crate::types::limits::TypeLimits;
 const fn assert_alloc_mem_aligned<T>() {
     assert!(
         align_of::<T>() <= BASIC_BLOCK_SIZE,
-        "Type has higher alignment than `ALLOC_MEM_ALIGN`",
+        "Type has higher alignment than the alignment of the basic block",
     );
 }
 
@@ -29,7 +29,7 @@ pub unsafe trait Decoder {
     /// Safety:
     /// - The returned pointer must point to `count` initialized blocks.
     /// - The returned pointer must be valid for reads and writes.
-    /// - The returned pointer must remain valid until the decoder is dropped.
+    /// - The returned pointer must not outlive the decoder.
     fn get_blocks_pointer(&mut self, count: usize) -> ProtocolResult<NonNull<BasicBlock>>;
 
     fn get_blocks<'de>(

@@ -438,7 +438,7 @@ where
         let provider = &state.provider;
 
         loop {
-            // TODO: Refine the allocation strategy server-wide and the scope of leasing decoding-segments.
+            // TODO: Refine the allocation strategy server-wide.
             let Some(mut recv_segment) = provider.acquire_receive() else {
                 reporter.error(
                     "Failed to get memory for receiving",
@@ -455,7 +455,7 @@ where
             }
 
             match TypeMessageHeader::decode_header(&mut recv_segment) {
-                // TODO: Matching according to id and directive-rules.
+                // TODO: Matching according to the rules of both the id and the directive.
                 Ok((id, directive)) => {
                     let mut context = ServerContext::new(provider, transport, id);
 
@@ -575,8 +575,9 @@ mod tests {
         // Connect client.
         let mut client_transport = UnixLink::connect(&path).await.unwrap();
 
-        // Send.
         let mut segment = pool.acquire().unwrap();
+
+        // Send.
         TypeMessageHeader::encode_header(123, 1, &mut segment).unwrap();
         segment.encode_next(&TypeU64(100), ()).unwrap();
         client_transport.send(&mut segment).await.unwrap();

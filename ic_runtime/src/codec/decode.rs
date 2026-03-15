@@ -135,15 +135,6 @@ impl<T: ?Sized, D> Decoded<T, D> {
         fn_return
     }
 
-    /// Transforms the value into native type and consumes the current instance.
-    pub fn into_native(self) -> T::NativeType
-    where
-        T: ProtocolType + IntoNativeType,
-        T::NativeType: for<'de> FromProtocolType<T::Type<'de>>,
-    {
-        self.into_native_as::<T::NativeType>()
-    }
-
     /// Transforms the value into type that can be converted to native type and consumes the current instance.
     pub fn into_native_as<U>(self) -> U
     where
@@ -151,6 +142,15 @@ impl<T: ?Sized, D> Decoded<T, D> {
         U: for<'de> FromProtocolType<T::Type<'de>>,
     {
         self.map_into(|protocol_type| U::from_protocol_type(protocol_type))
+    }
+
+    /// Transforms the value into native type and consumes the current instance.
+    pub fn into_native(self) -> T::NativeType
+    where
+        T: ProtocolType + IntoNativeType,
+        T::NativeType: for<'de> FromProtocolType<T::Type<'de>>,
+    {
+        self.into_native_as::<T::NativeType>()
     }
 }
 

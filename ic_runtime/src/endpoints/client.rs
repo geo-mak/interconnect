@@ -223,7 +223,7 @@ where
     /// Any attempts to send messages after this call will return `Broken pipe` I/O error.
     async fn terminate(&mut self) -> ProtocolResult<()> {
         // TODO:
-        // Task can be canceled blindly because it is currently doesn't delegate to external processors.
+        // Task can be canceled blindly because it doesn't currently delegate to external processors.
         // This will not be the case later.
         self.recv_task.abort();
         self.state.sender.lock().await.terminate().await

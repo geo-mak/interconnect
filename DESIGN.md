@@ -4,7 +4,7 @@ Interconnect's design aims at providing OS-level framework for bridging the inte
 
 ## Architectural model and implementation highlights
 
-Interconnect has dataflow oriented architecture where data availability drives computation.
+Interconnect has a dataflow-oriented architecture where data availability drives computation.
 
 Interconnect's design is layered with modular components and makes heavy use of static parametric polymorphism.
 
@@ -13,27 +13,23 @@ The main layers are:
 **Transport Layer**:
 Transport components implement the actual mechanics of delivering data from I/O devices to decoders, and from encoders to I/O devices.
 
-Each transport components is viewed **and** implemented as a fully-fledged transport-protocol, with its own transport-model, and its own
-specifications and semantics for establishing connections.
+Transport components are viewed **and** implemented as transport protocols in their own right, where each implementation has its own specifications and semantics for establishing connections.
 
 From design perspective, the underlying device, technology or networking stack used by the transport model is considered implementation detail, because it doesn't play role in its identity as a transport type.
 
-Transport models will not be identified as TCP, UDS or something else, because these are just internals, even if they are mentions in the documentation. 
+Transport models will not be identified as IP, UDS or something else, because these are just internals, even if they are mentions in the documentation. For instance two transport models may utilize IP, but they might have very different features and with different protocol for establishing connections.
 
-For instance two transport models may utilize TCP, but they might have very different features and with different protocol for establishing
-connections, so saying that the transport is "TCP" would say "too little" about it.
+Moreover, I/O abstractions are somehow "clunky" and a major source of bugs and inefficiency, because they tell too little about the underlying mechanics with a lot of redundant buffering and data-copying in the chain.
 
-Moreover, I/O abstractions are somehow "clunky" and a major source of bugs and inefficiency, because they tell too little about the underlying mechanics with a lot of redundant buffering and copying in the chain.
-
-The implementation of transport components aim at providing **tight integration** with the underlying I/O device with high level of transparency about the allocation details and buffering strategy.
+The implementation of transport components aims at abstracting the underlying I/O mechanisms with high level of transparency about the allocation details and buffering strategy.
 
 Each transport model offers optimizations and tradeoffs for particular use-case.
 
-Designing and implementing transport models is an essential part of the project, where new transport components may get
+Designing and implementing transport models is an **essential** part of the project, where new transport components may get
 added.
 
 **Session Layer**: 
-Session layer provides the components that store the session-state and perform dispatch according to that state.
+Session layer provides components that manage the session's state and perform dispatch according to that state.
 
 The provided components are role-based like server and client.
 
@@ -59,11 +55,36 @@ Application layer serves typing and runtime-configurations where the user-code c
 
 Interconnect uses this layer also to model various use-cases for better understandability and for providing more support types and options where needed.
 
+## Data exchange
+Interconnect's unit of exchange is "message".
+
+Messages are exchanged in binary format with **untagged** data representation.
+
+Interconnect defines its own data model that describes the byte-patterns of exchange-types and the layout of messages.
+
+Interoperability is achieved by adhering to the ABI (Application Binary Interface).
+
+Interconnect requires native implementation of its type-system and its associated components like encoders and decoders 
+in order to send and receive messages that conform to its data model.
+
+The native implementation of the type-system and other support components like the transport components and the endpoints' 
+implementations are referred to as the "runtime library".
+
+The runtime-library provides components to construct a compliant implementation of Interconnect.
+
+The specifications and the details of the data model are described in-depth in "SPECS" file and updated regularly.
+
+Moreover, Interconnect defines its own IDL (IPC Definition Language) and provides toolchain like compiler and code-generation backends for generating integrated endpoints that conform to the user-defined interface.
+
+The IDL and its toolchain are an **usability and safety** option for making use of Interconnect in an automated manner.
+
+The architecture of the compiler and other details related to the toolchain are not published yet.
+
 ## Async, concurrency and parallelism
 
 Within the context of this project, these terms are understood as defined:
 
-- Async: An event-based execution model, where the control flow of the thread can switch to a notification broker,
+- Async: An event-based execution model, where the control flow can switch to a notification broker,
   instead of entering a loop for continuously checking the availability of a resource.
   This term could be viewed as a "language-abuse" to describe a non-blocking, "cooperative" execution model,
   but it is commonly used out there, so this project assigns the above definition to it only.
@@ -88,10 +109,12 @@ From design perspective (many implementations are still more or less "prototypes
 
 - Everything that is not expected to fail at runtime should crash the process when it does.
 
-The panic-policy is to abort. The reasons for adopting abort instead of unwind are: 
-- "unwinding" has a very high overhead (if not carefully/manually optimized).
+The panic-policy is to abort. The reasons for adopting abort instead of unwinding are: 
+- Unwinding has a very high overhead (if not carefully/manually optimized).
 - Maintaining the conceptual clarity of the control-flow.
 - Designing for "unexpected" failure is an oxymoron.
+
+Theoretically, unwinding can be used for implementing a very efficient error handling strategy, by means of reducing error checks in each call-frame and carefully designed "catch-points" in the call chain, but this model is less flexible and very tricky to setup and maintain properly, especially across refactorings.
 
 Interconnect's design differentiates between control-flow errors and error-reporting with two separate types:
 - Constrained error-type.
@@ -102,32 +125,6 @@ with enough information to serve as **branching flags**.
 
 Error-reporting is performed via the reporting sub-system, that produces reports with certain structure and format, 
 for machines and/or humans.
-
-## Data exchange
-Interconnect's unit of exchange is "message".
-
-Messages are exchanged in binary format with **untagged** data representation.
-
-Interconnect defines its own data model that describes the byte-patterns of exchange-types and the layout of messages.
-
-Interoperability is achieved by adhering to the ABI (Application Binary Interface).
-
-Interconnect requires native implementation of its type-system and its associated components like encoders and decoders 
-in order to send and receive messages that conform to its data model.
-
-The native implementation of the type-system and other support components like the transport components and the endpoints' 
-implementations are referred to as the "runtime library".
-
-The runtime-library provides components to construct a compliant implementation of Interconnect.
-
-The specifications and the details of the data model are described in-depth in "SPECS" file and updated regularly.
-
-Moreover, Interconnect defines its own IDL (IPC Definition Language) and provides toolchain like compiler and code-generation backends for
-generating integrated endpoints that conform to the user-defined interface.
-
-The IDL and its toolchain are an **usability and safety** option for making use of Interconnect in an automated manner.
-
-The architecture of the compiler and other details related to the toolchain are not published yet.
 
 ## AI usage and policy
 Since I started tinkering with the so-called "AI", namely "LLMs", I was both impressed and skeptical, 
@@ -141,27 +138,26 @@ To make this section short and straightforward, I have used this technology in t
 
 - Codebase "research" for building a picture of a particular solution implemented in other codebases that forms a multi-file, multi-package puzzle in large codebases with the intent of narrowing the search-scope with various accuracy instead of getting lost in details of that codebase for days.
 
-- Review of code I wrote when I was tired, and where any review could be better than nothing, even if the suggestions would be too "conservative" or even nonsensical.
+- Review of code I wrote when I was tired, and where any review could be better than nothing, even if the suggestions would be inaccurate or flat out nonsense.
 
-I presume that this technology is here to stay as part of what could be called "smart" IDE, but I don't think it is important in the making of any serious software that people could rely on for these "main" reasons:
+I presume that this technology is here to stay as part of what could be called "smart" IDE, but I don't think it is important in the making of any serious software that people could rely on for these **main** reasons:
 
 - It is inherently faulty in a domain where a trivial mistake could mean disasters or deaths.
-- Writing code is not a challenge (at least in my case), most of my time is spent in design and finding optimization's tricks.
+- Writing code is not the challenge (at least in my case), most of my time is spent in design and finding optimization's tricks.
 - Maintaining a codebase requires understanding its inner working in its entirety.
-- Generating a pile in the hope that "someone" will "polish" it later is a naïve and misguided approach. Refactoring a foreign codebase is more time-consuming than writing from scratch.
+- Generating a pile to get it "polished" later is a naïve and misguided approach. Refactoring a foreign codebase is more time-consuming than writing from scratch.
+- Distractive to crisp thinking, where a vivid attention must be given.
+- Induces overconfidence and false sense of achievement.
 
-So the reality is not black or white, it is actually very colorful, but the overhype and the unreasonable "bullying" in the last years made me think that this industry consists mainly of idiots who think that "software-engineering" is about generating some pile of HTML/CSS with some JS/TS or some crappy-entrainment app.
+So the reality is not black or white, it is actually very colorful, but the overhype and the unreasonable "bullying" in the last years indicate that the software industry in general is still in its infancy and not up to the task of understanding the effect of the increasing role of software systems in managing the modern world, from digital services to critical infrastructure, and taking it seriously.
 
-I promise that all the future code, which will make it into the codebase is fully human-crafted and audited, regardless of its
-perceived quality or the bugs it may contain. I don't have "productivity" concerns, because I have realized that most of the industry in the last decades was very "productive" in piling up utter garbage!
+I promise that all of the future code which will make it into the codebase is fully human-crafted and audited. 
+I don't have "productivity" concerns, because I have realized that most of the industry in the last decades was very "productive" at piling up utter garbage!
 
-Feedbacks and suggestions are welcomed, but this project will not have open code-contribution model.
-All the code that gets merged into the codebase will be authored by the project's members and approved persons only, 
+Feedbacks and suggestions are welcomed, but this project will not have an open code-contribution model.
+All the code that gets merged into the codebase will be authored by the project's members and delegated persons **only**, 
 hence there is no public policy of disclosure.
 
 I am very happy to know that more and more people are leaving this "bubble" and starting to realize the limitation of this technology, basically seeing it for what it is, at least in this domain, and go back to do "serious" things in the hope that they could be impactful in one way or another.
 
-Btw, I am already a "prompt engineer", I prompt with "semantic" language using Rust's syntax, and let the marvelous "semantic" agent, the Rust's compiler generate the machine-code for me! and I hope this marvelous "semantic" agent gets even better, especially the ability to define value-constraints on const-generic values (e.g. where X > 0 && X < 10, this where-clause can do a lot more!), and gets compile-time reflection as an ergonomic solution to meta-programming without resorting to "proc-macro" and parsing raw tokens where it is not strictly necessary, an approach pioneered by the "sister" language Zig (Btw, sorry for being "rude" to Zig in the past!).
-
-As a final note, ML is an incredibly useful technology, overhyping it and promoting it as "intelligence" and promising what can't be done with it is what harms it the most, and will eventually have a negative impact on the overall research in this area.
-So "bullshitting" will fill some pockets with money for a while, but it will eventually damage the entire industry.
+Btw, I am already a "prompt engineer", I prompt with **semantic"** language using Rust's syntax, and let the marvelous **semantic** agent, the Rust's compiler generate the machine-code for me! and I hope this marvelous "semantic" agent gets even better, especially the ability to define value-constraints on const-generic values (e.g. where X > 0 && X < 10, this where-clause can do a lot more!), and gets compile-time reflection as an ergonomic solution to meta-programming without resorting to "proc-macro" and parsing raw tokens where it is not strictly necessary, an approach pioneered by the "sister" language Zig (Btw, sorry for being "rude" to Zig in the past!).

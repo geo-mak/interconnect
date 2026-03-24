@@ -4,7 +4,7 @@ This document defines the specification of interconnect's data model and how it 
 
 The following details have implementation version, but its current purpose is to aid design.
 
-**All information in this document are subject to change without prior notice.**
+> **⚠️ Specification's design is subject to change without prior notice.**
 
 ## 1. Primitives
 
@@ -173,7 +173,7 @@ Interconnect's structs are identical to C-structs in terms of memory-layout.
     }
   ```
 
-  Struct's fields allow assignment of default values, but like optionality-rules their rules are not well-defined.
+  Struct's fields allow assignment of default values, but like optionality-rules their rules are still not well-defined.
 
   ```rust
     struct StructB {
@@ -240,7 +240,7 @@ Both regions are aligned to **8-bytes**, this implies that the allocated encodin
       }
   ```
 
-**Constraints**: Interfaces defines functions that can take `message` types as arguments and returns `message` types **only**.
+**Constraints**: Interfaces defines functions that can take `message` types as arguments and return `message` types **only**.
 
 Interfaces guarantee the semantics of the IPC in terms of sent and received messages, but their concrete implementation
 can vary. The exact implementation depends on the `linked` runtime-libraries used by the code generator.

@@ -118,13 +118,12 @@ Theoretically, unwinding can be used for implementing a very efficient error han
 
 Interconnect's design differentiates between control-flow errors and error-reporting with two separate types:
 - Constrained error-type.
-- Reporter instance providing access to the reporting sub-system.
+- Reporter instance providing access to the reporting subsystem.
 
 Returned errors serve **informing** the calling context which path to take after an error has been encountered, 
 with enough information to serve as **branching flags**.
 
-Error-reporting is performed via the reporting sub-system, that produces reports with certain structure and format, 
-for machines and/or humans.
+Error-reporting is performed via a reporting subsystem exposed via a reporting-component, that produces reports with certain structure and format. Depending on the reporting-component used, reporting can add a non-trivial overhead to the system if utilized without careful consideration, therefore reporting is considered a privileged capability that shall be given transparently.
 
 ## AI usage and policy
 Since I started tinkering with the so-called "AI", namely "LLMs", I was both impressed and skeptical, 

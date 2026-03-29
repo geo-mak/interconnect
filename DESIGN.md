@@ -125,6 +125,26 @@ with enough information to serve as **branching flags**.
 
 Error-reporting is performed via a reporting subsystem exposed via a reporting-component, that produces reports with certain structure and format. Depending on the reporting-component used, reporting can add a non-trivial overhead to the system if utilized without careful consideration, therefore reporting is considered a privileged capability that shall be given transparently.
 
+## Memory allocation
+
+Memory management is a difficult thing to implement without compromises and where design choices are accompanied with tradeoffs.
+
+The common approach is to let components allocate memory unconstrained on-demand at multiple places via the global general-purpose allocator, and to deallocate that memory when the work with it ends. This common approach approach is:
+- Inefficient in terms of performance.
+- Non-Deterministic in terms of failure points.
+- Non-Transparent in terms of allocation points.
+- Leads to high memory fragmentation.
+
+Memory management is a major performance and stability factor, therefore Interconnect's design embraces determinism and transparency regarding dynamic memory-allocation to a larger degree while allowing exceptions to take place. 
+
+From design perspective, memory is considered a **service**, provisioned via **memory servers**.
+
+Components ask for memory from an explicitly passed memory server that may provide a block of memory which can be accessed, shared and managed as **protocoled service**. Each component or layer can define its own requirements in terms of protocols required to access that memory.
+
+The core idea is to enable sharing and reusability of the same acquired memory across components and layers as much as possible.
+
+Interconnect's design is **centered** around memory subsystems and their implementation for various cases is an **essential** part of the project.
+
 ## AI usage and policy
 Since I started tinkering with the so-called "AI", namely "LLMs", I was both impressed and skeptical, 
 impressed for what has been achieved and skeptical of what it could be done with it compared to the "hype" surrounding this technology.

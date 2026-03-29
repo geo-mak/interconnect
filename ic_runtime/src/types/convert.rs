@@ -60,14 +60,14 @@ impl<T: ?Sized> CopyConversion<T, T> {
     }
 }
 
-macro_rules! impl_copy_conversion_for {
+macro_rules! impl_copy_conversion_between {
     ($ty:ty) => {
         impl CopyConversion<$ty, $ty> {
             pub const PRIMITIVE: Self = Self::identical();
         }
     };
-    (native = $native:ty, protocol = $protocol:ty) => {
-        impl_copy_conversion_for!($protocol);
+    ($native:ty, $protocol:ty) => {
+        impl_copy_conversion_between!($protocol);
 
         impl CopyConversion<$native, $protocol> {
             pub const PRIMITIVE: Self = unsafe {
@@ -87,22 +87,18 @@ macro_rules! impl_copy_conversion_for {
     };
 }
 
-impl_copy_conversion_for! {()}
-
-impl_copy_conversion_for! {bool}
-
-impl_copy_conversion_for! { native = i8, protocol = TypeI8 }
-impl_copy_conversion_for! { native = i16, protocol = TypeI16 }
-impl_copy_conversion_for! { native = i32, protocol = TypeI32 }
-impl_copy_conversion_for! { native = i64, protocol = TypeI64 }
-
-impl_copy_conversion_for! { native = u8, protocol = TypeU8 }
-impl_copy_conversion_for! { native = u16, protocol = TypeU16 }
-impl_copy_conversion_for! { native = u32, protocol = TypeU32 }
-impl_copy_conversion_for! { native = u64, protocol = TypeU64 }
-
-impl_copy_conversion_for! { native = f32, protocol = TypeF32 }
-impl_copy_conversion_for! { native = f64, protocol = TypeF64 }
+impl_copy_conversion_between! {()}
+impl_copy_conversion_between! {bool}
+impl_copy_conversion_between! { i8, TypeI8 }
+impl_copy_conversion_between! { i16, TypeI16 }
+impl_copy_conversion_between! { i32, TypeI32 }
+impl_copy_conversion_between! { i64, TypeI64 }
+impl_copy_conversion_between! { u8, TypeU8 }
+impl_copy_conversion_between! { u16, TypeU16 }
+impl_copy_conversion_between! { u32, TypeU32 }
+impl_copy_conversion_between! { u64, TypeU64 }
+impl_copy_conversion_between! { f32, TypeF32 }
+impl_copy_conversion_between! { f64, TypeF64 }
 
 /// A type which is convertible from a protocol type.
 pub trait FromProtocolType<P>: Sized {
@@ -133,9 +129,9 @@ pub trait FromOptionProtocolTypeRef<P>: FromOptionProtocolType<P> {
 
 macro_rules! impl_from_protocol_type_for {
     ($ty:ty) => {
-        impl_from_protocol_type_for!(native = $ty, protocol = $ty);
+        impl_from_protocol_type_for!($ty, from $ty);
     };
-    (native = $native:ty, protocol = $protocol:ty) => {
+    ($native:ty, from $protocol:ty) => {
         impl FromProtocolType<$protocol> for $native {
             const COPY_CONVERSION: CopyConversion<$protocol, $native> =
                 CopyConversion::<$protocol, $native>::PRIMITIVE;
@@ -157,19 +153,16 @@ macro_rules! impl_from_protocol_type_for {
 
 impl_from_protocol_type_for! {()}
 impl_from_protocol_type_for! {bool}
-
-impl_from_protocol_type_for! { native = i8, protocol = TypeI8 }
-impl_from_protocol_type_for! { native = i16, protocol = TypeI16 }
-impl_from_protocol_type_for! { native = i32, protocol = TypeI32 }
-impl_from_protocol_type_for! { native = i64, protocol = TypeI64 }
-
-impl_from_protocol_type_for! { native = u8, protocol = TypeU8 }
-impl_from_protocol_type_for! { native = u16, protocol = TypeU16 }
-impl_from_protocol_type_for! { native = u32, protocol = TypeU32 }
-impl_from_protocol_type_for! { native = u64, protocol = TypeU64 }
-
-impl_from_protocol_type_for! { native = f32, protocol = TypeF32 }
-impl_from_protocol_type_for! { native = f64, protocol = TypeF64 }
+impl_from_protocol_type_for! { i8, from TypeI8 }
+impl_from_protocol_type_for! { i16, from TypeI16 }
+impl_from_protocol_type_for! { i32, from TypeI32 }
+impl_from_protocol_type_for! { i64, from TypeI64 }
+impl_from_protocol_type_for! { u8, from TypeU8 }
+impl_from_protocol_type_for! { u16, from TypeU16 }
+impl_from_protocol_type_for! { u32, from TypeU32 }
+impl_from_protocol_type_for! { u64, from TypeU64 }
+impl_from_protocol_type_for! { f32, from TypeF32 }
+impl_from_protocol_type_for! { f64, from TypeF64 }
 
 impl<T: FromProtocolType<P>, P, const N: usize> FromProtocolType<[P; N]> for [T; N] {
     fn from_protocol_type(protocol_type: [P; N]) -> Self {
@@ -252,9 +245,9 @@ pub trait IntoNativeType: Sized {
 
 macro_rules! impl_into_native_for {
     ($ty:ty) => {
-        impl_into_native_for!(native = $ty, protocol = $ty);
+        impl_into_native_for!($ty, into $ty);
     };
-    (native = $native:ty, protocol = $protocol:ty) => {
+    ($protocol:ty, into $native:ty) => {
         impl IntoNativeType for $protocol {
             type NativeType = $native;
         }
@@ -263,19 +256,16 @@ macro_rules! impl_into_native_for {
 
 impl_into_native_for! {()}
 impl_into_native_for! {bool}
-
-impl_into_native_for! { native = i8, protocol = TypeI8 }
-impl_into_native_for! { native = i16, protocol = TypeI16 }
-impl_into_native_for! { native = i32, protocol = TypeI32 }
-impl_into_native_for! { native = i64, protocol = TypeI64 }
-
-impl_into_native_for! { native = u8, protocol = TypeU8 }
-impl_into_native_for! { native = u16, protocol = TypeU16 }
-impl_into_native_for! { native = u32, protocol = TypeU32 }
-impl_into_native_for! { native = u64, protocol = TypeU64 }
-
-impl_into_native_for! { native = f32, protocol = TypeF32 }
-impl_into_native_for! { native = f64, protocol = TypeF64 }
+impl_into_native_for! { TypeI8, into i8 }
+impl_into_native_for! { TypeI16, into i16 }
+impl_into_native_for! { TypeI32, into i32 }
+impl_into_native_for! { TypeI64, into i64 }
+impl_into_native_for! { TypeU8, into u8 }
+impl_into_native_for! { TypeU16, into u16 }
+impl_into_native_for! { TypeU32, into u32 }
+impl_into_native_for! { TypeU64, into u64 }
+impl_into_native_for! { TypeF32, into f32 }
+impl_into_native_for! { TypeF64, into f64 }
 
 impl<P: IntoNativeType, const N: usize> IntoNativeType for [P; N] {
     type NativeType = [P::NativeType; N];

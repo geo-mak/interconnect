@@ -4,7 +4,7 @@ compile_error!("only little-endian targets are supported by Interconnect");
 use core::mem::MaybeUninit;
 
 macro_rules! impl_core_op_unary {
-    (trait = $trait:ident, fn = $fn:ident, for $name:ident : $inner:ty) => {
+    ($trait:ident::$fn:ident, $name:ident : $inner:ty) => {
         impl core::ops::$trait for $name {
             type Output = <$inner as core::ops::$trait>::Output;
             #[inline]
@@ -16,7 +16,7 @@ macro_rules! impl_core_op_unary {
 }
 
 macro_rules! impl_core_op_binary {
-    (trait = $trait:ident, fn = $fn:ident, for $name:ident : $inner:ty) => {
+    ($trait:ident::$fn:ident, $name:ident : $inner:ty) => {
         impl core::ops::$trait<$inner> for $name {
             type Output = $inner;
             #[inline]
@@ -84,7 +84,7 @@ macro_rules! impl_core_op_binary {
 }
 
 macro_rules! impl_core_op_assign {
-    (trait = $trait:ident, fn = $fn:ident, for $name:ident : $inner:ty) => {
+    ($trait:ident::$fn:ident, $name:ident : $inner:ty) => {
         impl core::ops::$trait<$inner> for $name {
             #[inline]
             fn $fn(&mut self, rhs: $inner) {
@@ -116,7 +116,7 @@ macro_rules! impl_core_op_assign {
 }
 
 macro_rules! impl_clone_copy {
-    (for $name:ident) => {
+    ($name:ident) => {
         impl Copy for $name {}
         impl Clone for $name {
             #[inline]
@@ -128,7 +128,7 @@ macro_rules! impl_clone_copy {
 }
 
 macro_rules! impl_default {
-    (for $name:ident : $inner:ty) => {
+    ($name:ident : $inner:ty) => {
         impl Default for $name {
             #[inline]
             fn default() -> Self {
@@ -139,7 +139,7 @@ macro_rules! impl_default {
 }
 
 macro_rules! impl_fmt {
-    ($trait:ident for $name:ident) => {
+    ($trait:ident, $name:ident) => {
         impl core::fmt::$trait for $name {
             #[inline]
             fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -150,7 +150,7 @@ macro_rules! impl_fmt {
 }
 
 macro_rules! impl_from {
-    (for $name:ident : $inner:ty) => {
+    ($name:ident : $inner:ty) => {
         impl From<$inner> for $name {
             fn from(value: $inner) -> Self {
                 Self(value)
@@ -178,7 +178,7 @@ macro_rules! impl_from {
 }
 
 macro_rules! impl_hash {
-    (for $name:ident) => {
+    ($name:ident) => {
         impl core::hash::Hash for $name {
             fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
                 self.0.hash(state);
@@ -188,7 +188,7 @@ macro_rules! impl_hash {
 }
 
 macro_rules! impl_partial_ord_and_ord {
-    (for $name:ident : $inner:ty) => {
+    ($name:ident : $inner:ty) => {
         impl PartialOrd for $name {
             #[inline]
             fn partial_cmp(&self, other: &Self) -> Option<::core::cmp::Ordering> {
@@ -213,7 +213,7 @@ macro_rules! impl_partial_ord_and_ord {
 }
 
 macro_rules! impl_partial_eq_and_eq {
-    (for $name:ident : $inner:ty) => {
+    ($name:ident : $inner:ty) => {
         impl PartialEq for $name {
             #[inline]
             fn eq(&self, other: &Self) -> bool {
@@ -235,7 +235,7 @@ macro_rules! impl_partial_eq_and_eq {
 }
 
 macro_rules! impl_partial_ord {
-    (for $name:ident : $inner:ty) => {
+    ($name:ident : $inner:ty) => {
         impl PartialOrd for $name {
             #[inline]
             fn partial_cmp(&self, other: &Self) -> Option<::core::cmp::Ordering> {
@@ -253,7 +253,7 @@ macro_rules! impl_partial_ord {
 }
 
 macro_rules! impl_product_and_sum {
-    (for $name:ident) => {
+    ($name:ident) => {
         impl core::iter::Product for $name {
             #[inline]
             fn product<I: Iterator<Item = Self>>(iter: I) -> Self {
@@ -272,127 +272,139 @@ macro_rules! impl_product_and_sum {
 
 macro_rules! impl_int_traits {
     ($name:ident: $inner:ident) => {
-        impl_core_op_unary!(trait = Neg, fn = neg, for $name: $inner);
-        impl_core_op_unary!(trait = Not, fn = not, for $name: $inner);
+        impl_core_op_unary!(Neg::neg, $name: $inner);
+        impl_core_op_unary!(Not::not, $name: $inner);
 
-        impl_core_op_binary!(trait = Add, fn = add, for $name: $inner);
-        impl_core_op_binary!(trait = Div, fn = div, for $name: $inner);
-        impl_core_op_binary!(trait = BitAnd, fn = bitand, for $name: $inner);
-        impl_core_op_binary!(trait = BitOr, fn = bitor, for $name: $inner);
-        impl_core_op_binary!(trait = BitXor, fn = bitxor, for $name: $inner);
-        impl_core_op_binary!(trait = Mul, fn = mul, for $name: $inner);
-        impl_core_op_binary!(trait = Rem, fn = rem, for $name: $inner);
-        impl_core_op_binary!(trait = Shl, fn = shl, for $name: $inner);
-        impl_core_op_binary!(trait = Shr, fn = shr, for $name: $inner);
-        impl_core_op_binary!(trait = Sub, fn = sub, for $name: $inner);
+        impl_core_op_binary!(Add::add, $name: $inner);
+        impl_core_op_binary!(Div::div, $name: $inner);
+        impl_core_op_binary!(BitAnd::bitand, $name: $inner);
+        impl_core_op_binary!(BitOr::bitor, $name: $inner);
+        impl_core_op_binary!(BitXor::bitxor, $name: $inner);
+        impl_core_op_binary!(Mul::mul, $name: $inner);
+        impl_core_op_binary!(Rem::rem, $name: $inner);
+        impl_core_op_binary!(Shl::shl, $name: $inner);
+        impl_core_op_binary!(Shr::shr, $name: $inner);
+        impl_core_op_binary!(Sub::sub, $name: $inner);
 
-        impl_core_op_assign!(trait = AddAssign, fn = add_assign, for $name: $inner);
-        impl_core_op_assign!(trait = BitXorAssign, fn = bitxor_assign, for $name: $inner);
-        impl_core_op_assign!(trait = BitOrAssign, fn = bitor_assign, for $name: $inner);
-        impl_core_op_assign!(trait = BitAndAssign, fn = bitand_assign, for $name: $inner);
-        impl_core_op_assign!(trait = DivAssign, fn = div_assign, for $name: $inner);
-        impl_core_op_assign!(trait = RemAssign, fn = rem_assign, for $name: $inner);
-        impl_core_op_assign!(trait = ShlAssign, fn = shl_assign, for $name: $inner);
-        impl_core_op_assign!(trait = ShrAssign, fn = shr_assign, for $name: $inner);
-        impl_core_op_assign!(trait = SubAssign, fn = sub_assign, for $name: $inner);
-        impl_core_op_assign!(trait = MulAssign, fn = mul_assign, for $name: $inner);
+        impl_core_op_assign!(AddAssign::add_assign, $name: $inner);
+        impl_core_op_assign!(BitXorAssign::bitxor_assign, $name: $inner);
+        impl_core_op_assign!(BitOrAssign::bitor_assign, $name: $inner);
+        impl_core_op_assign!(BitAndAssign::bitand_assign, $name: $inner);
+        impl_core_op_assign!(DivAssign::div_assign, $name: $inner);
+        impl_core_op_assign!(RemAssign::rem_assign, $name: $inner);
+        impl_core_op_assign!(ShlAssign::shl_assign, $name: $inner);
+        impl_core_op_assign!(ShrAssign::shr_assign, $name: $inner);
+        impl_core_op_assign!(SubAssign::sub_assign, $name: $inner);
+        impl_core_op_assign!(MulAssign::mul_assign, $name: $inner);
 
-        impl_partial_eq_and_eq!(for $name: $inner);
-        impl_partial_ord_and_ord!(for $name: $inner);
-        impl_product_and_sum!(for $name);
+        impl_partial_eq_and_eq!($name: $inner);
 
-        impl_fmt!(LowerExp for $name);
-        impl_fmt!(LowerHex for $name);
-        impl_fmt!(UpperExp for $name);
-        impl_fmt!(UpperHex for $name);
-        impl_fmt!(Octal for $name);
-        impl_fmt!(Display for $name);
-        impl_fmt!(Binary for $name);
-        impl_fmt!(Debug for $name);
+        impl_partial_ord_and_ord!($name: $inner);
 
-        impl_clone_copy!(for $name);
-        impl_default!(for $name: $inner);
-        impl_hash!(for $name);
-        impl_from!(for $name: $inner);
+        impl_product_and_sum!($name);
+
+        impl_fmt!(Debug, $name);
+        impl_fmt!(Display, $name);
+        impl_fmt!(LowerExp, $name);
+        impl_fmt!(LowerHex, $name);
+        impl_fmt!(UpperExp, $name);
+        impl_fmt!(UpperHex, $name);
+        impl_fmt!(Binary, $name);
+        impl_fmt!(Octal, $name);
+
+        impl_clone_copy!($name);
+
+        impl_default!($name: $inner);
+
+        impl_from!($name: $inner);
+
+        impl_hash!($name);
     };
 }
 
 macro_rules! impl_uint_traits {
     ($name:ident: $inner:ident) => {
-        impl_core_op_unary!(trait = Not, fn = not, for $name: $inner);
+        impl_core_op_unary!(Not::not, $name: $inner);
 
-        impl_core_op_binary!(trait = Add, fn = add, for $name: $inner);
-        impl_core_op_binary!(trait = Div, fn = div, for $name: $inner);
-        impl_core_op_binary!(trait = BitAnd, fn = bitand, for $name: $inner);
-        impl_core_op_binary!(trait = BitOr, fn = bitor, for $name: $inner);
-        impl_core_op_binary!(trait = BitXor, fn = bitxor, for $name: $inner);
-        impl_core_op_binary!(trait = Mul, fn = mul, for $name: $inner);
-        impl_core_op_binary!(trait = Rem, fn = rem, for $name: $inner);
-        impl_core_op_binary!(trait = Shl, fn = shl, for $name: $inner);
-        impl_core_op_binary!(trait = Shr, fn = shr, for $name: $inner);
-        impl_core_op_binary!(trait = Sub, fn = sub, for $name: $inner);
+        impl_core_op_binary!(Add::add, $name: $inner);
+        impl_core_op_binary!(Div::div, $name: $inner);
+        impl_core_op_binary!(BitAnd::bitand, $name: $inner);
+        impl_core_op_binary!(BitOr::bitor, $name: $inner);
+        impl_core_op_binary!(BitXor::bitxor, $name: $inner);
+        impl_core_op_binary!(Mul::mul, $name: $inner);
+        impl_core_op_binary!(Rem::rem, $name: $inner);
+        impl_core_op_binary!(Shl::shl, $name: $inner);
+        impl_core_op_binary!(Shr::shr, $name: $inner);
+        impl_core_op_binary!(Sub::sub, $name: $inner);
 
-        impl_core_op_assign!(trait = AddAssign, fn = add_assign, for $name: $inner);
-        impl_core_op_assign!(trait = BitXorAssign, fn = bitxor_assign, for $name: $inner);
-        impl_core_op_assign!(trait = BitOrAssign, fn = bitor_assign, for $name: $inner);
-        impl_core_op_assign!(trait = BitAndAssign, fn = bitand_assign, for $name: $inner);
-        impl_core_op_assign!(trait = DivAssign, fn = div_assign, for $name: $inner);
-        impl_core_op_assign!(trait = RemAssign, fn = rem_assign, for $name: $inner);
-        impl_core_op_assign!(trait = ShlAssign, fn = shl_assign, for $name: $inner);
-        impl_core_op_assign!(trait = ShrAssign, fn = shr_assign, for $name: $inner);
-        impl_core_op_assign!(trait = SubAssign, fn = sub_assign, for $name: $inner);
-        impl_core_op_assign!(trait = MulAssign, fn = mul_assign, for $name: $inner);
+        impl_core_op_assign!(AddAssign::add_assign, $name: $inner);
+        impl_core_op_assign!(BitXorAssign::bitxor_assign, $name: $inner);
+        impl_core_op_assign!(BitOrAssign::bitor_assign, $name: $inner);
+        impl_core_op_assign!(BitAndAssign::bitand_assign, $name: $inner);
+        impl_core_op_assign!(DivAssign::div_assign, $name: $inner);
+        impl_core_op_assign!(RemAssign::rem_assign, $name: $inner);
+        impl_core_op_assign!(ShlAssign::shl_assign, $name: $inner);
+        impl_core_op_assign!(ShrAssign::shr_assign, $name: $inner);
+        impl_core_op_assign!(SubAssign::sub_assign, $name: $inner);
+        impl_core_op_assign!(MulAssign::mul_assign, $name: $inner);
 
-        impl_partial_eq_and_eq!(for $name: $inner);
-        impl_partial_ord_and_ord!(for $name: $inner);
+        impl_partial_eq_and_eq!($name: $inner);
 
-        impl_product_and_sum!(for $name);
+        impl_partial_ord_and_ord!($name: $inner);
 
-        impl_fmt!(LowerExp for $name);
-        impl_fmt!(LowerHex for $name);
-        impl_fmt!(UpperExp for $name);
-        impl_fmt!(UpperHex for $name);
-        impl_fmt!(Octal for $name);
-        impl_fmt!(Display for $name);
-        impl_fmt!(Binary for $name);
-        impl_fmt!(Debug for $name);
+        impl_product_and_sum!($name);
 
-        impl_clone_copy!(for $name);
-        impl_default!(for $name: $inner);
-        impl_hash!(for $name);
-        impl_from!(for $name: $inner);
+        impl_fmt!(Debug, $name);
+        impl_fmt!(Display, $name);
+        impl_fmt!(LowerExp, $name);
+        impl_fmt!(LowerHex, $name);
+        impl_fmt!(UpperExp, $name);
+        impl_fmt!(UpperHex, $name);
+        impl_fmt!(Binary, $name);
+        impl_fmt!(Octal, $name);
+
+        impl_clone_copy!($name);
+
+        impl_default!($name: $inner);
+
+        impl_from!($name: $inner);
+
+        impl_hash!($name);
     };
 }
 
 macro_rules! impl_float_traits {
     ($name:ident: $inner:ty) => {
-        impl_core_op_unary!(trait = Neg, fn = neg, for $name: $inner);
+        impl_core_op_unary!(Neg::neg, $name: $inner);
 
-        impl_core_op_binary!(trait = Add, fn = add, for $name: $inner);
-        impl_core_op_binary!(trait = Div, fn = div, for $name: $inner);
-        impl_core_op_binary!(trait = Mul, fn = mul, for $name: $inner);
-        impl_core_op_binary!(trait = Rem, fn = rem, for $name: $inner);
-        impl_core_op_binary!(trait = Sub, fn = sub, for $name: $inner);
+        impl_core_op_binary!(Add::add, $name: $inner);
+        impl_core_op_binary!(Div::div, $name: $inner);
+        impl_core_op_binary!(Mul::mul, $name: $inner);
+        impl_core_op_binary!(Rem::rem, $name: $inner);
+        impl_core_op_binary!(Sub::sub, $name: $inner);
 
-        impl_core_op_assign!(trait = AddAssign, fn = add_assign, for $name: $inner);
-        impl_core_op_assign!(trait = DivAssign, fn = div_assign, for $name: $inner);
-        impl_core_op_assign!(trait = MulAssign, fn = mul_assign, for $name: $inner);
-        impl_core_op_assign!(trait = RemAssign, fn = rem_assign, for $name: $inner);
-        impl_core_op_assign!(trait = SubAssign, fn = sub_assign, for $name: $inner);
+        impl_core_op_assign!(AddAssign::add_assign, $name: $inner);
+        impl_core_op_assign!(DivAssign::div_assign, $name: $inner);
+        impl_core_op_assign!(MulAssign::mul_assign, $name: $inner);
+        impl_core_op_assign!(RemAssign::rem_assign, $name: $inner);
+        impl_core_op_assign!(SubAssign::sub_assign, $name: $inner);
 
-        impl_partial_eq_and_eq!(for $name: $inner);
-        impl_partial_ord!(for $name: $inner);
+        impl_partial_eq_and_eq!($name: $inner);
 
-        impl_product_and_sum!(for $name);
+        impl_partial_ord!($name: $inner);
 
-        impl_fmt!(LowerExp for $name);
-        impl_fmt!(UpperExp for $name);
-        impl_fmt!(Display for $name);
-        impl_fmt!(Debug for $name);
+        impl_product_and_sum!($name);
 
-        impl_clone_copy!(for $name);
-        impl_default!(for $name: $inner);
-        impl_from!(for $name: $inner);
+        impl_fmt!(Debug, $name);
+        impl_fmt!(Display, $name);
+        impl_fmt!(LowerExp, $name);
+        impl_fmt!(UpperExp, $name);
+
+        impl_clone_copy!($name);
+
+        impl_default!($name: $inner);
+
+        impl_from!($name: $inner);
     };
 }
 
@@ -443,12 +455,10 @@ define_int!(TypeI8: i8, 1);
 define_int!(TypeI16: i16, 2);
 define_int!(TypeI32: i32, 4);
 define_int!(TypeI64: i64, 8);
-
 define_uint!(TypeU8: u8, 1);
 define_uint!(TypeU16: u16, 2);
 define_uint!(TypeU32: u32, 4);
 define_uint!(TypeU64: u64, 8);
-
 define_float!(TypeF32: f32, 4);
 define_float!(TypeF64: f64, 8);
 

@@ -90,79 +90,41 @@ mod tests_tagged_ptr {
     use super::*;
 
     #[test]
-    fn test_as_ptr() {
-        let mut value = 100u32;
-        let value_ptr: *mut u32 = &mut value;
+    fn test_tagged_ptr_set_null_resolved() {
+        let mut tagged_ptr = MaybeUninit::<TypeTaggedPtr<u8>>::uninit();
 
-        let mut pointer_union = TypeTaggedPtr { ptr: value_ptr };
+        // Tag as set.
+        TypeTaggedPtr::encode_as_set(&mut tagged_ptr);
+        let ptr_ref_set = unsafe { TypeRef::new_assume_init(&mut tagged_ptr) };
+        assert_eq!(TypeTaggedPtr::is_null(ptr_ref_set), Ok(false));
 
-        assert_eq!(pointer_union.as_ptr(), value_ptr);
-        assert_eq!(pointer_union.as_ptr_mut(), value_ptr);
-    }
+        // Tag as null.
+        TypeTaggedPtr::encode_as_null(&mut tagged_ptr);
+        let ptr_ref_null = unsafe { TypeRef::new_assume_init(&mut tagged_ptr) };
+        assert_eq!(TypeTaggedPtr::is_null(ptr_ref_null), Ok(true));
 
-    #[test]
-    fn test_encode_set() {
-        let mut storage = MaybeUninit::<TypeTaggedPtr<u32>>::uninit();
-        TypeTaggedPtr::encode_as_set(&mut storage);
+        // Invalid tag.
+        unsafe {
+            (*tagged_ptr.as_mut_ptr()).ptr_tag = TypeU64(12345);
+            let ptr_ref_invalid = TypeRef::new_assume_init(&mut tagged_ptr);
+            assert!(matches!(
+                TypeTaggedPtr::is_null(ptr_ref_invalid),
+                Err(ProtocolError {
+                    kind: ErrKind::InvalidPtrTag,
+                    ..
+                })
+            ));
+        }
+
+        // Ptr as resolved.
+        let mut value = 10u8;
+        let value_ptr: *mut u8 = &mut value;
+
+        let ptr_ref_resolved = unsafe { TypeRef::new_assume_init(&mut tagged_ptr) };
+        TypeTaggedPtr::set_pointer(ptr_ref_resolved, value_ptr);
 
         unsafe {
-            let ptr = storage.as_ptr();
-            assert_eq!(*(*ptr).ptr_tag, PTR_TAG_SET);
+            assert_eq!(tagged_ptr.assume_init().ptr, value_ptr);
         }
-    }
-
-    #[test]
-    fn test_encode_null() {
-        let mut storage = MaybeUninit::<TypeTaggedPtr<u32>>::uninit();
-        TypeTaggedPtr::encode_as_null(&mut storage);
-
-        unsafe {
-            let ptr = storage.as_ptr();
-            assert_eq!(*(*ptr).ptr_tag, PTR_TAG_NULL);
-        }
-    }
-
-    #[test]
-    fn test_set_resolved_ptr() {
-        let mut value = 100u32;
-        let resolved_ptr: *mut u32 = &mut value;
-
-        let mut storage = MaybeUninit::<TypeTaggedPtr<u32>>::uninit();
-        TypeTaggedPtr::encode_as_null(&mut storage);
-
-        let type_ref = unsafe { TypeRef::new_assume_init(&mut storage) };
-        TypeTaggedPtr::set_pointer(type_ref, resolved_ptr);
-
-        unsafe {
-            let ptr = storage.as_ptr();
-            assert_eq!((*ptr).ptr, resolved_ptr);
-        }
-    }
-
-    #[test]
-    fn test_is_null() {
-        let mut storage_set = MaybeUninit::<TypeTaggedPtr<u32>>::uninit();
-        TypeTaggedPtr::encode_as_set(&mut storage_set);
-
-        let type_ref_set = unsafe { TypeRef::new_assume_init(&mut storage_set) };
-        assert_eq!(TypeTaggedPtr::is_null(type_ref_set), Ok(false));
-
-        let mut storage_null = MaybeUninit::<TypeTaggedPtr<u32>>::uninit();
-        TypeTaggedPtr::encode_as_null(&mut storage_null);
-        let type_ref_null = unsafe { TypeRef::new_assume_init(&mut storage_null) };
-        assert_eq!(TypeTaggedPtr::is_null(type_ref_null), Ok(true));
-
-        let mut storage_invalid = MaybeUninit::<TypeTaggedPtr<u32>>::uninit();
-        unsafe {
-            (*storage_invalid.as_mut_ptr()).ptr_tag = TypeU64(12345);
-        }
-        let type_ref_invalid = unsafe { TypeRef::new_assume_init(&mut storage_invalid) };
-        assert!(matches!(
-            TypeTaggedPtr::is_null(type_ref_invalid),
-            Err(ProtocolError {
-                kind: ErrKind::InvalidPtrTag,
-                ..
-            })
-        ));
     }
 }

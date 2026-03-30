@@ -9,7 +9,7 @@ use crate::mem::{BASIC_BLOCK_SIZE, BasicBlock};
 use crate::types::limits::TypeLimits;
 
 #[inline]
-const fn assert_alloc_mem_aligned<T>() {
+const fn assert_conform_to_alignment<T>() {
     assert!(
         align_of::<T>() <= BASIC_BLOCK_SIZE,
         "Type has higher alignment than the alignment of the basic block",
@@ -42,7 +42,7 @@ pub unsafe trait Decoder {
     }
 
     fn ref_as<'de, T>(self: &mut &'de mut Self) -> ProtocolResult<TypeRef<'de, T>> {
-        assert_alloc_mem_aligned::<T>();
+        assert_conform_to_alignment::<T>();
 
         let count = size_of::<T>().div_ceil(BASIC_BLOCK_SIZE);
 
@@ -51,29 +51,29 @@ pub unsafe trait Decoder {
         unsafe { Ok(TypeRef::from_ptr_assume_init(blocks.as_mut_ptr().cast())) }
     }
 
-    fn slice_ref_as<'de, T>(
+    fn slice_of_ref_as<'de, T>(
         self: &mut &'de mut Self,
         len: usize,
     ) -> ProtocolResult<TypeRef<'de, [T]>> {
-        assert_alloc_mem_aligned::<T>();
+        assert_conform_to_alignment::<T>();
 
-        let total_bytes = size_of::<T>() * len;
+        let items_bytes = size_of::<T>() * len;
 
-        let count = total_bytes.div_ceil(BASIC_BLOCK_SIZE);
+        let blocks_count = items_bytes.div_ceil(BASIC_BLOCK_SIZE);
 
-        let blocks_len = BASIC_BLOCK_SIZE * count;
+        let blocks_bytes = BASIC_BLOCK_SIZE * blocks_count;
 
-        let padding_len = blocks_len - total_bytes;
+        let padding_len = blocks_bytes - items_bytes;
 
-        let blocks_ptr = self.get_blocks(count)?.as_mut_ptr();
+        let blocks_ptr = self.get_blocks(blocks_count)?.as_mut_ptr();
 
-        let padding: &[u8] = unsafe {
-            core::slice::from_raw_parts(blocks_ptr.cast::<u8>().add(total_bytes), padding_len)
+        let padding_bytes: &[u8] = unsafe {
+            core::slice::from_raw_parts(blocks_ptr.cast::<u8>().add(items_bytes), padding_len)
         };
 
         // RT_ASSERT.
-        // Padding bytes must all be zeros.
-        if padding.iter().any(|byte| *byte != 0) {
+        // Padding bytes must be zeros.
+        if padding_bytes.iter().any(|byte| *byte != 0) {
             return Err(ProtocolError::error(ErrKind::InvalidPadding));
         }
 

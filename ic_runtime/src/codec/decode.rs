@@ -42,10 +42,9 @@ unsafe impl<D: ?Sized> Decode<D> for bool {
     fn decode(value: TypeRef<'_, Self>, _: &mut D, _: ()) -> ProtocolResult<()> {
         let value = unsafe { value.as_ptr().cast::<u8>().read() };
         match value {
-            0 | 1 => (),
-            _ => return Err(ProtocolError::error(ErrKind::Decoding)),
+            0 | 1 => Ok(()),
+            _ => Err(ProtocolError::error(ErrKind::Decoding)),
         }
-        Ok(())
     }
 }
 

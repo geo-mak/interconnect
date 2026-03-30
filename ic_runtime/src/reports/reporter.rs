@@ -77,7 +77,7 @@ impl Reporter for STDIOReporter {
     fn trace<C: ReportContent>(&self, description: &str, content: &C) {
         REPORT_LOCAL_CACHE.with_borrow_mut(|cache| {
             let _ = cache.write_fmt(format_args!(
-                "{}TRACE: {description}. {content}{}\n",
+                "{}Trace: {description}. {content}{}\n",
                 colors::BLUE,
                 colors::RESET
             ));
@@ -90,7 +90,7 @@ impl Reporter for STDIOReporter {
     fn info<C: ReportContent>(&self, description: &str, content: &C) {
         REPORT_LOCAL_CACHE.with_borrow_mut(|cache| {
             let _ = cache.write_fmt(format_args!(
-                "{}INFO: {description}. {content}{}\n",
+                "{}Info: {description}. {content}{}\n",
                 colors::GREEN,
                 colors::RESET
             ));
@@ -103,7 +103,7 @@ impl Reporter for STDIOReporter {
     fn alert<C: ReportContent>(&self, description: &str, content: &C) {
         REPORT_LOCAL_CACHE.with_borrow_mut(|cache| {
             let _ = cache.write_fmt(format_args!(
-                "{}ALERT: {description}. {content}{}\n",
+                "{}Alert: {description}. {content}{}\n",
                 colors::ORANGE,
                 colors::RESET
             ));
@@ -116,7 +116,7 @@ impl Reporter for STDIOReporter {
     fn error<C: ReportContent>(&self, description: &str, content: &C) {
         REPORT_LOCAL_CACHE.with_borrow_mut(|cache| {
             let _ = cache.write_fmt(format_args!(
-                "{}ERROR: {description}. {content}{}\n",
+                "{}Error: {description}. {content}{}\n",
                 colors::BRIGHT_RED,
                 colors::RESET
             ));

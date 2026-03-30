@@ -96,6 +96,8 @@ Compound types aggregate multiple fields or variants.
   - Enums can't be empty.
   - Tag's value is explicit.
 
+**Modification**: Modifying the tags of the variants is a breaking change.
+
 **Example**:
   ```rust
     enum EnumA: u8 {
@@ -129,6 +131,8 @@ Compound types aggregate multiple fields or variants.
   - Tags can't be negative.
   - Tags can't be sparse.
 
+**Modification**: Modifying members or their tags is a breaking change.
+
 **Example**:
   ```rust
     // 16-bytes inline size aligned to 8 bytes.
@@ -156,6 +160,8 @@ Compound types aggregate multiple fields or variants.
   ```
 
 **Constraints**: Structs can't be empty.
+
+**Modification**: Modifying fields is a breaking change.
 
 Interconnect's structs are identical to C-structs in terms of memory-layout.
 
@@ -204,6 +210,8 @@ Interconnect's structs are identical to C-structs in terms of memory-layout.
   - Messages can't be fields of anything, including other messages.
   - Messages are the only types that can cross the API-boundary, all other types are fragments of their data.
 
+**Modification**: Modifying fields is a breaking change.
+
 User-defined messages are sent and received with additional **control** metadata. 
 
 The layout of user-defined messages consists of two main regions:
@@ -240,7 +248,14 @@ Both regions are aligned to **8-bytes**, this implies that the allocated encodin
       }
   ```
 
-**Constraints**: Interfaces defines functions that can take `message` types as arguments and return `message` types **only**.
+**Constraints**: 
+  - Interfaces defines functions that can take `message` types as arguments and return `message` types **only**.
+  - Modifying a function of exiting interface is a breaking change.
+
+**Modification**:
+ - Modifying an existing function is breaking change.
+ - New functions can be **added**.
+ - Existing functions can be **deprecated**.
 
 Interfaces guarantee the semantics of the IPC in terms of sent and received messages, but their concrete implementation
 can vary. The exact implementation depends on runtime-libraries used for the implementation.
@@ -251,6 +266,14 @@ not part of the exchange-semantics between the two sides of an IPC-boundary.
 
 The IPC-definition is concerned mainly with the data-model and its correct expression in terms of exchange layouts, regardless 
 of the runtime-config.
+
+Interfaces are the **only** means of managing the evolution of the service. 
+
+In order to change/update a message or any of its members, a new message is required with a **new function** that takes that message as parameter or returns that message as a response. The old message and its function must be kept **unchanged** and the old function shall be annotated as `deprecated`. This will prevent the function from being called from the client-side in newer systems, while allowing the service provider to handle older systems gracefully.
+
+Dynamic messages and other types that allow non-breaking modifications like deprecation and addition of fields have been implemented and removed, because they add complexity and they have mediocre performance. 
+
+Centralizing change-management around interfaces is a simpler and more performant approach.
 
 ## 5. Attributes
 

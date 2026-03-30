@@ -64,17 +64,17 @@ unsafe impl ProtocolType for TypeMessageHeader {
     type Type<'de> = Self;
 
     #[inline]
-    fn write_zero_padding(_to: &mut MaybeUninit<Self>) {}
+    fn write_zero_padding(_: &mut MaybeUninit<Self>) {}
 }
 
 unsafe impl<E: ?Sized> Encode<TypeMessageHeader, E> for TypeMessageHeader {
     fn encode(
         self,
-        _encoder: &mut E,
-        inline_value: &mut MaybeUninit<TypeMessageHeader>,
-        _limits: <TypeMessageHeader as TypeLimits>::Limits,
+        _: &mut E,
+        storage: &mut MaybeUninit<TypeMessageHeader>,
+        _: <TypeMessageHeader as TypeLimits>::Limits,
     ) -> ProtocolResult<()> {
-        inline_value.write(self);
+        storage.write(self);
         Ok(())
     }
 }
@@ -83,19 +83,15 @@ unsafe impl<E: ?Sized> Encode<TypeMessageHeader, E> for &TypeMessageHeader {
     fn encode(
         self,
         encoder: &mut E,
-        inline_value: &mut MaybeUninit<TypeMessageHeader>,
+        storage: &mut MaybeUninit<TypeMessageHeader>,
         limits: <TypeMessageHeader as TypeLimits>::Limits,
     ) -> ProtocolResult<()> {
-        Encode::encode(*self, encoder, inline_value, limits)
+        Encode::encode(*self, encoder, storage, limits)
     }
 }
 
 unsafe impl<D: ?Sized> Decode<D> for TypeMessageHeader {
-    fn decode(
-        _value: TypeRef<'_, Self>,
-        _decoder: &mut D,
-        _limits: Self::Limits,
-    ) -> ProtocolResult<()> {
+    fn decode(_: TypeRef<'_, Self>, _: &mut D, _: Self::Limits) -> ProtocolResult<()> {
         Ok(())
     }
 }

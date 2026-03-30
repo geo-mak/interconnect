@@ -8,7 +8,7 @@ use crate::codec::reference::TypeRef;
 use crate::codec::{decode::Decode, encode::Encode};
 use crate::error::ProtocolResult;
 use crate::types::core::{ProtocolType, TypeU64};
-use crate::types::limits::{TypeLimits, Unlimited};
+use crate::types::limits::TypeLimits;
 
 pub type MessageID = TypeU64;
 pub type MessageDirective = TypeU64;
@@ -51,14 +51,21 @@ impl TypeMessageHeader {
     }
 }
 
+impl TypeLimits for TypeMessageHeader {
+    type Limits = ();
+
+    #[inline]
+    fn check_limits(_: TypeRef<'_, Self>, _: ()) -> ProtocolResult<()> {
+        Ok(())
+    }
+}
+
 unsafe impl ProtocolType for TypeMessageHeader {
     type Type<'de> = Self;
 
     #[inline]
     fn write_zero_padding(_to: &mut MaybeUninit<Self>) {}
 }
-
-impl Unlimited for TypeMessageHeader {}
 
 unsafe impl<E: ?Sized> Encode<TypeMessageHeader, E> for TypeMessageHeader {
     fn encode(

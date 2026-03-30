@@ -4,43 +4,6 @@ use crate::types::core::{
     TypeF32, TypeF64, TypeI8, TypeI16, TypeI32, TypeI64, TypeU8, TypeU16, TypeU32, TypeU64,
 };
 
-/// Type that doesn't have limits.
-pub trait Unlimited {}
-
-macro_rules! impl_unlimited_for {
-    ($ty:ty) => {
-        impl Unlimited for $ty {}
-    };
-}
-
-impl_unlimited_for!(());
-impl_unlimited_for!(bool);
-
-impl_unlimited_for!(TypeI8);
-impl_unlimited_for!(TypeI16);
-impl_unlimited_for!(TypeI32);
-impl_unlimited_for!(TypeI64);
-
-impl_unlimited_for!(TypeU8);
-impl_unlimited_for!(TypeU16);
-impl_unlimited_for!(TypeU32);
-impl_unlimited_for!(TypeU64);
-
-impl_unlimited_for!(TypeF32);
-impl_unlimited_for!(TypeF64);
-
-impl<T> TypeLimits for T
-where
-    T: Unlimited,
-{
-    type Limits = ();
-
-    #[inline]
-    fn check_limits(_: TypeRef<'_, Self>, _: ()) -> ProtocolResult<()> {
-        Ok(())
-    }
-}
-
 /// Types implementing this trait can be checked against satisfying their limits.
 ///
 /// This trait adds extra checking to the type, but it doesn't influence the verification of its representation.
@@ -70,3 +33,32 @@ where
         Ok(())
     }
 }
+
+macro_rules! impl_unlimited_for {
+    ($ty:ty) => {
+        impl TypeLimits for $ty {
+            type Limits = ();
+
+            #[inline]
+            fn check_limits(_: TypeRef<'_, Self>, _: ()) -> ProtocolResult<()> {
+                Ok(())
+            }
+        }
+    };
+}
+
+impl_unlimited_for!(());
+impl_unlimited_for!(bool);
+
+impl_unlimited_for!(TypeI8);
+impl_unlimited_for!(TypeI16);
+impl_unlimited_for!(TypeI32);
+impl_unlimited_for!(TypeI64);
+
+impl_unlimited_for!(TypeU8);
+impl_unlimited_for!(TypeU16);
+impl_unlimited_for!(TypeU32);
+impl_unlimited_for!(TypeU64);
+
+impl_unlimited_for!(TypeF32);
+impl_unlimited_for!(TypeF64);

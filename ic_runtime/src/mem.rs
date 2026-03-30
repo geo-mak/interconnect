@@ -26,7 +26,7 @@ pub unsafe trait IOSegment {
     /// Returns the number of the **initialized** bytes in the segment.
     fn len(&self) -> usize;
 
-    /// Returns the current max capacity of the segment in bytes.
+    /// Returns the current **total** capacity of the segment in **bytes**.
     fn capacity(&self) -> usize;
 
     /// Checks the current capacity if it is sufficient enough for the `required` capacity in total.

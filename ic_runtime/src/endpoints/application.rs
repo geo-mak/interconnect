@@ -7,7 +7,7 @@ use crate::error::ProtocolResult;
 use crate::types::core::ProtocolType;
 use crate::types::limits::TypeLimits;
 
-// TODO: Support unsolicited errors?
+// TODO: Support unsolicited server events?
 pub trait CallContext<E: Encoder> {
     type CallID: Copy;
 

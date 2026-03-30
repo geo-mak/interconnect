@@ -72,7 +72,7 @@ macro_rules! impl_encode_for {
                 self,
                 _: &mut E,
                 storage: &mut MaybeUninit<$p_type>,
-                _limits: <$p_type as TypeLimits>::Limits,
+                _: <$p_type as TypeLimits>::Limits,
             ) -> ProtocolResult<()> {
                 storage.write(<$p_type>::from(*self));
                 Ok(())

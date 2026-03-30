@@ -3,6 +3,8 @@ compile_error!("only little-endian targets are supported by Interconnect");
 
 use core::mem::MaybeUninit;
 
+use crate::types::limits::TypeLimits;
+
 macro_rules! impl_core_op_unary {
     ($trait:ident::$fn:ident, $name:ident : $inner:ty) => {
         impl core::ops::$trait for $name {
@@ -462,12 +464,12 @@ define_uint!(TypeU64: u64, 8);
 define_float!(TypeF32: f32, 4);
 define_float!(TypeF64: f64, 8);
 
-/// Interconnect type.
-pub unsafe trait ProtocolType: 'static + Sized {
+/// Interconnect's protocol type.
+pub unsafe trait ProtocolType: 'static + Sized + TypeLimits {
     /// The referenced inner type.
-    type Type<'de>: 'de;
+    type Type<'de>: TypeLimits<Limits = Self::Limits>;
 
-    /// Writes zeroes to the padding for this type, if any.
+    /// Writes zeroes to the padding for this type if applicable.
     fn write_zero_padding(to: &mut MaybeUninit<Self>);
 }
 

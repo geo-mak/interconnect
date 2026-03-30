@@ -48,7 +48,7 @@ where
         }
     }
 
-    /// Creates an a copy by borrowing `self` mutably.
+    /// Creates a copy by borrowing `self` mutably.
     pub const fn borrow_mut(&mut self) -> TypeRef<'_, T> {
         Self {
             ptr: self.ptr,

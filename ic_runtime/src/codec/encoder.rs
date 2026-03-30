@@ -88,7 +88,7 @@ pub trait Encoder {
         })
     }
 
-    /// Encodes a group of iterable elements.
+    /// Encodes a group of iterable elements into the encoder.
     fn encode_next_group<P, T, I>(&mut self, values: I, limits: P::Limits) -> ProtocolResult<()>
     where
         P: ProtocolType + TypeLimits,
@@ -118,7 +118,7 @@ pub trait Encoder {
         Err(ProtocolError::error(ErrKind::MemoryAllocation))
     }
 
-    /// Encodes a compound value.
+    /// Encodes a single value into the encoder.
     fn encode_next<P, T>(&mut self, value: T, limits: P::Limits) -> ProtocolResult<()>
     where
         P: ProtocolType + TypeLimits,

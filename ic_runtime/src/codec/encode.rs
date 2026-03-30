@@ -11,28 +11,22 @@ use crate::types::limits::TypeLimits;
 pub unsafe trait Encode<P: TypeLimits, E: ?Sized>: Sized {
     /// Hint for encoders that enables fast conversion if the type can be copied bitwise.
     const COPY_CONVERSION: CopyConversion<Self, P> = CopyConversion::disable();
-    /// Encodes the value in two stages.
-    ///
-    /// Inlined values are stored on the stack as `MaybeUninit<P>`
-    /// and written back after the out-of-line payload, if any.
+
+    /// Encodes the value into the provided encoder and storage.
     fn encode(
         self,
         encoder: &mut E,
-        inline_value: &mut MaybeUninit<P>,
+        storage: &mut MaybeUninit<P>,
         limits: P::Limits,
     ) -> ProtocolResult<()>;
 }
 
-/// Encodes an optional value.
 pub unsafe trait EncodeOption<P: TypeLimits, E: ?Sized>: Sized {
-    /// Encodes this optional in two stages.
-    ///
-    /// Inlined values are stored on the stack as `MaybeUninit<P>`
-    /// and written back after the out-of-line payload, if any.
+    /// Encodes the optional value into the provided encoder and storage.
     fn encode_option(
         instance: Option<Self>,
         encoder: &mut E,
-        inline_value: &mut MaybeUninit<P>,
+        storage: &mut MaybeUninit<P>,
         limits: P::Limits,
     ) -> ProtocolResult<()>;
 }
@@ -41,10 +35,10 @@ unsafe impl<P: TypeLimits, E: ?Sized, T: Encode<P, E>> Encode<P, E> for Box<T> {
     fn encode(
         self,
         encoder: &mut E,
-        inline_value: &mut MaybeUninit<P>,
+        storage: &mut MaybeUninit<P>,
         limits: P::Limits,
     ) -> ProtocolResult<()> {
-        T::encode(*self, encoder, inline_value, limits)
+        T::encode(*self, encoder, storage, limits)
     }
 }
 
@@ -57,10 +51,10 @@ where
     fn encode(
         self,
         encoder: &mut E,
-        inline_value: &mut MaybeUninit<P>,
+        storage: &mut MaybeUninit<P>,
         limits: P::Limits,
     ) -> ProtocolResult<()> {
-        <&'a T>::encode(self, encoder, inline_value, limits)
+        <&'a T>::encode(self, encoder, storage, limits)
     }
 }
 
@@ -73,10 +67,10 @@ where
     fn encode_option(
         instance: Option<Self>,
         encoder: &mut E,
-        inline_value: &mut MaybeUninit<P>,
+        storage: &mut MaybeUninit<P>,
         limits: P::Limits,
     ) -> ProtocolResult<()> {
-        T::encode_option(instance.map(|value| *value), encoder, inline_value, limits)
+        T::encode_option(instance.map(|value| *value), encoder, storage, limits)
     }
 }
 
@@ -89,15 +83,10 @@ where
     fn encode_option(
         instance: Option<Self>,
         encoder: &mut E,
-        inline_value: &mut MaybeUninit<P>,
+        storage: &mut MaybeUninit<P>,
         limits: P::Limits,
     ) -> ProtocolResult<()> {
-        <&'a T>::encode_option(
-            instance.map(|value| &**value),
-            encoder,
-            inline_value,
-            limits,
-        )
+        <&'a T>::encode_option(instance.map(|value| &**value), encoder, storage, limits)
     }
 }
 
@@ -149,7 +138,7 @@ impl_encode_for!(TypeF64);
 fn encode_to_array<V, P, E, T, const N: usize>(
     value: V,
     encoder: &mut E,
-    inline_value: &mut MaybeUninit<[P; N]>,
+    storage: &mut MaybeUninit<[P; N]>,
     limits: P::Limits,
 ) -> ProtocolResult<()>
 where
@@ -161,12 +150,11 @@ where
 {
     if T::COPY_CONVERSION.is_enabled() {
         unsafe {
-            copy_nonoverlapping(value.as_ref().as_ptr().cast(), inline_value.as_mut_ptr(), 1);
+            copy_nonoverlapping(value.as_ref().as_ptr().cast(), storage.as_mut_ptr(), 1);
         }
     } else {
         for (i, item) in value.into_iter().enumerate() {
-            let value_i =
-                unsafe { &mut *inline_value.as_mut_ptr().cast::<MaybeUninit<P>>().add(i) };
+            let value_i = unsafe { &mut *storage.as_mut_ptr().cast::<MaybeUninit<P>>().add(i) };
             item.encode(encoder, value_i, limits)?;
         }
     }
@@ -182,10 +170,10 @@ where
     fn encode(
         self,
         encoder: &mut E,
-        inline_value: &mut MaybeUninit<[P; N]>,
+        storage: &mut MaybeUninit<[P; N]>,
         limits: P::Limits,
     ) -> ProtocolResult<()> {
-        encode_to_array(self, encoder, inline_value, limits)
+        encode_to_array(self, encoder, storage, limits)
     }
 }
 
@@ -199,10 +187,10 @@ where
     fn encode(
         self,
         encoder: &mut E,
-        inline_value: &mut MaybeUninit<[P; N]>,
+        storage: &mut MaybeUninit<[P; N]>,
         limits: P::Limits,
     ) -> ProtocolResult<()> {
-        encode_to_array(self, encoder, inline_value, limits)
+        encode_to_array(self, encoder, storage, limits)
     }
 }
 
@@ -215,10 +203,10 @@ where
     fn encode(
         self,
         encoder: &mut E,
-        inline_value: &mut MaybeUninit<P>,
+        storage: &mut MaybeUninit<P>,
         limits: P::Limits,
     ) -> ProtocolResult<()> {
-        T::encode_option(self, encoder, inline_value, limits)
+        T::encode_option(self, encoder, storage, limits)
     }
 }
 
@@ -231,9 +219,9 @@ where
     fn encode(
         self,
         encoder: &mut E,
-        inline_value: &mut MaybeUninit<P>,
+        storage: &mut MaybeUninit<P>,
         limits: P::Limits,
     ) -> ProtocolResult<()> {
-        self.as_ref().encode(encoder, inline_value, limits)
+        self.as_ref().encode(encoder, storage, limits)
     }
 }

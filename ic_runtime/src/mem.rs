@@ -248,8 +248,8 @@ impl Encoder for IOPoolSegment {
     }
 
     #[inline]
-    fn write_zero(&mut self, zeroing_len: usize) -> bool {
-        let zeroing_len_aligned = (zeroing_len + BASIC_BLOCK_MASK) & !BASIC_BLOCK_MASK;
+    fn write_zero_bytes(&mut self, count: usize) -> bool {
+        let zeroing_len_aligned = (count + BASIC_BLOCK_MASK) & !BASIC_BLOCK_MASK;
 
         let segment_len = self.len;
 
@@ -827,7 +827,7 @@ mod tests_io_pool {
         let mut segment = pool.acquire().expect("must get a segment");
 
         {
-            segment.write_zero(5);
+            segment.write_zero_bytes(5);
             // Aligned to BasicBlock.
             assert_eq!(segment.len_bytes(), 8);
 

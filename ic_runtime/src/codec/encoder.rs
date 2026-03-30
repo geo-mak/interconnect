@@ -31,9 +31,9 @@ where
             self.remaining -= 1;
         }
 
-        let as_bytes_ptr = (value as *const T).cast::<u8>();
-        let bytes_slice = unsafe { from_raw_parts(as_bytes_ptr, size_of::<T>()) };
-        self.encoder.write_encoded_at(self.offset, bytes_slice);
+        let bytes_ptr = (value as *const T).cast::<u8>();
+        let value_bytes = unsafe { from_raw_parts(bytes_ptr, size_of::<T>()) };
+        self.encoder.write_encoded_at(self.offset, value_bytes);
         self.offset += size_of::<T>();
     }
 }
@@ -49,7 +49,7 @@ pub trait Encoder {
     /// Returns `false` in case of lack of memory or failure to allocate more.
     ///
     /// The length of the encoder is advanced to include the zeroed bytes and the padding bytes.
-    fn write_zero(&mut self, zeroing_len: usize) -> bool;
+    fn write_zero_bytes(&mut self, count: usize) -> bool;
 
     /// Appends the provided bytes to the encoder.
     ///
@@ -69,10 +69,12 @@ pub trait Encoder {
     /// a type that stores the value at its original offset.
     ///
     /// The skipped bytes will be **zeroed** before returning.
-    fn skip<T>(&mut self, len: usize) -> Option<Skip<'_, Self, T>> {
+    fn skip<T>(&mut self, count: usize) -> Option<Skip<'_, Self, T>> {
         let current_offset = self.len_bytes();
 
-        if !self.write_zero(len * size_of::<T>()) {
+        let items_bytes = size_of::<T>() * count;
+
+        if !self.write_zero_bytes(items_bytes) {
             return None;
         };
 
@@ -80,8 +82,9 @@ pub trait Encoder {
             encoder: self,
             offset: current_offset,
             _t: PhantomData,
+
             #[cfg(debug_assertions)]
-            remaining: len,
+            remaining: count,
         })
     }
 
@@ -93,19 +96,19 @@ pub trait Encoder {
         I: ExactSizeIterator<Item = T>,
     {
         if let Some(mut outputs) = self.skip::<P>(values.len()) {
-            let mut inlined = MaybeUninit::<P>::uninit();
+            let mut value_store = MaybeUninit::<P>::uninit();
 
-            P::write_zero_padding(&mut inlined);
+            P::write_zero_padding(&mut value_store);
 
             for value in values {
-                value.encode(outputs.encoder, &mut inlined, limits)?;
+                value.encode(outputs.encoder, &mut value_store, limits)?;
 
-                let inline_value = unsafe { TypeRef::new_assume_init(&mut inlined) };
+                let value_ref = unsafe { TypeRef::new_assume_init(&mut value_store) };
 
-                P::check_limits(inline_value, limits)?;
+                P::check_limits(value_ref, limits)?;
 
                 unsafe {
-                    outputs.write_next(inlined.assume_init_ref());
+                    outputs.write_next(value_store.assume_init_ref());
                 }
             }
 

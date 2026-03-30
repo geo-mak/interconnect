@@ -248,9 +248,7 @@ Both regions are aligned to **8-bytes**, this implies that the allocated encodin
       }
   ```
 
-**Constraints**: 
-  - Interfaces defines functions that can take `message` types as arguments and return `message` types **only**.
-  - Modifying a function of exiting interface is a breaking change.
+**Constraints**: Interfaces defines functions that can take `message` types as arguments and return `message` types **only**.
 
 **Modification**:
  - Modifying an existing function is breaking change.

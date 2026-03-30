@@ -4,7 +4,7 @@ This document defines the specification of interconnect's data model and how it 
 
 The following details have implementation version, but its current purpose is to aid design.
 
-> **⚠️ Specification's design is subject to change without prior notice.**
+> **⚠️ Specifications are subject to change without prior notice.**
 
 ## 1. Primitives
 
@@ -243,11 +243,11 @@ Both regions are aligned to **8-bytes**, this implies that the allocated encodin
 **Constraints**: Interfaces defines functions that can take `message` types as arguments and return `message` types **only**.
 
 Interfaces guarantee the semantics of the IPC in terms of sent and received messages, but their concrete implementation
-can vary. The exact implementation depends on the `linked` runtime-libraries used by the code generator.
+can vary. The exact implementation depends on runtime-libraries used for the implementation.
 For example, a generated function may return a union of the defined message and an error-type specific to the runtime.
 
 Moreover, there is no dedicated syntax for annotating `async`, because it is considered an implementation detail and it is 
-not part of the "exchange" semantics between the two sides of an IPC-boundary.
+not part of the exchange-semantics between the two sides of an IPC-boundary.
 
 The IPC-definition is concerned mainly with the data-model and its correct expression in terms of exchange layouts, regardless 
 of the runtime-config.
@@ -260,7 +260,7 @@ of the runtime-config.
 
 **Constraints**: Each definition accepts specific set of attributes only.
 
-## 6. Name Spaces
+## 6. Namespaces
 
 **Definition**: A grouping namespace for the generated code.
 

@@ -3,14 +3,15 @@ use core::mem::ManuallyDrop;
 use core::ops::Deref;
 use core::ptr::NonNull;
 
+use crate::codec::convert::from::FromProtocolType;
+use crate::codec::convert::into::IntoNativeType;
 use crate::codec::reference::TypeRef;
-use crate::error::{ErrKind, ProtocolError, ProtocolResult};
-use crate::types::convert::{FromProtocolType, IntoNativeType};
-use crate::types::core::{
+use crate::codec::types::core::{
     ProtocolType, TypeF32, TypeF64, TypeI8, TypeI16, TypeI32, TypeI64, TypeU8, TypeU16, TypeU32,
     TypeU64,
 };
-use crate::types::limits::TypeLimits;
+use crate::codec::types::limits::TypeLimits;
+use crate::error::{ErrKind, ProtocolError, ProtocolResult};
 
 /// A type that can construct itself as protocol type from bytes.
 pub unsafe trait Decode<D: ?Sized>: ProtocolType + TypeLimits {

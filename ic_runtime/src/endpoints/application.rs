@@ -3,9 +3,9 @@ use core::future::Future;
 use crate::codec::decoder::Decoder;
 use crate::codec::encode::Encode;
 use crate::codec::encoder::Encoder;
+use crate::codec::types::core::ProtocolType;
+use crate::codec::types::limits::TypeLimits;
 use crate::error::ProtocolResult;
-use crate::types::core::ProtocolType;
-use crate::types::limits::TypeLimits;
 
 // TODO: Support unsolicited server events?
 pub trait CallContext<E: Encoder> {

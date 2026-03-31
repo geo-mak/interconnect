@@ -5,20 +5,21 @@ use std::sync::Arc;
 
 use tokio::sync::Mutex;
 
+use crate::codec::convert::from::FromProtocolType;
+use crate::codec::convert::into::IntoNativeType;
 use crate::codec::decode::Decode;
 use crate::codec::decoder::Decoder;
 use crate::codec::encode::Encode;
 use crate::codec::encoder::Encoder;
+use crate::codec::types::core::ProtocolType;
+use crate::codec::types::limits::TypeLimits;
+use crate::codec::types::message::TypeMessageHeader;
 use crate::coop::traits::{ControlHandle, Executor, Timer};
 use crate::endpoints::publishers::Publishers;
 use crate::error::{ErrKind, ProtocolError, ProtocolResult};
 use crate::mem::MemoryProvider;
 use crate::reports::traits::{NoContent, Reporter};
 use crate::transport::traits::{Transport, TransportReceiver, TransportSender};
-use crate::types::convert::{FromProtocolType, IntoNativeType};
-use crate::types::core::ProtocolType;
-use crate::types::limits::TypeLimits;
-use crate::types::message::TypeMessageHeader;
 
 struct ClientState<S, E, P, R>
 where
@@ -233,12 +234,12 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::codec::types::core::TypeU64;
+    use crate::codec::types::message::TypeMessageHeader;
     use crate::coop::executors::TokioExecutor;
     use crate::mem::{IOPool, IOPoolSegment, IOSegment};
     use crate::transport::stream::uds::{UnixLink, UnixLinkServer};
     use crate::transport::traits::{TransportInitiator, TransportServer};
-    use crate::types::core::TypeU64;
-    use crate::types::message::TypeMessageHeader;
 
     #[tokio::test]
     async fn test_core_client_send_receive() {

@@ -16,6 +16,9 @@ use crate::codec::decoder::Decoder;
 use crate::codec::encode::Encode;
 use crate::codec::encoder::Encoder;
 
+use crate::codec::types::core::ProtocolType;
+use crate::codec::types::limits::TypeLimits;
+use crate::codec::types::message::TypeMessageHeader;
 use crate::coop::sync::{DynamicLatch, IList, INode, NOOP_WAKER};
 use crate::coop::traits::{ControlHandle, Executor, Timer};
 use crate::endpoints::application::{Application, CallContext};
@@ -23,9 +26,6 @@ use crate::error::{ErrKind, ProtocolError, ProtocolResult};
 use crate::mem::MemoryProvider;
 use crate::reports::traits::Reporter;
 use crate::transport::traits::{Transport, TransportInitiator, TransportServer};
-use crate::types::core::ProtocolType;
-use crate::types::limits::TypeLimits;
-use crate::types::message::TypeMessageHeader;
 
 thread_local! {
     // Must be non-zero.
@@ -508,11 +508,11 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::codec::types::core::TypeU64;
     use crate::coop::executors::TokioExecutor;
     use crate::mem::{IOPool, IOSegment};
     use crate::transport::stream::uds::{UnixLink, UnixLinkServer};
     use crate::transport::traits::Transport;
-    use crate::types::core::TypeU64;
 
     #[derive(Clone)]
     struct TestApplication;

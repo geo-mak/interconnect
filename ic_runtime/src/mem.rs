@@ -12,8 +12,8 @@ use std::sync::Arc;
 
 use crate::codec::decoder::Decoder;
 use crate::codec::encoder::Encoder;
+use crate::codec::types::core::TypeU64;
 use crate::error::{ErrKind, ProtocolError, ProtocolResult};
-use crate::types::core::TypeU64;
 
 /// Slice of eight bytes aligned to an 8-byte boundary.
 pub type BasicBlock = TypeU64;

@@ -1,13 +1,13 @@
 use core::mem::MaybeUninit;
 use core::ptr::copy_nonoverlapping;
 
-use crate::codec::opt::CopyConversion;
-use crate::error::ProtocolResult;
-use crate::types::core::{
+use crate::codec::convert::opt::CopyConversion;
+use crate::codec::types::core::{
     ProtocolType, TypeF32, TypeF64, TypeI8, TypeI16, TypeI32, TypeI64, TypeU8, TypeU16, TypeU32,
     TypeU64,
 };
-use crate::types::limits::TypeLimits;
+use crate::codec::types::limits::TypeLimits;
+use crate::error::ProtocolResult;
 
 pub unsafe trait Encode<P: ProtocolType, E: ?Sized>: Sized {
     /// Hint for encoders that enables fast conversion if the type can be copied bitwise.

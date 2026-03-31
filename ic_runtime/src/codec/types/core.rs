@@ -3,7 +3,7 @@ compile_error!("only little-endian targets are supported by Interconnect");
 
 use core::mem::MaybeUninit;
 
-use crate::types::limits::TypeLimits;
+use crate::codec::types::limits::TypeLimits;
 
 macro_rules! impl_core_op_unary {
     ($trait:ident::$fn:ident, $name:ident : $inner:ty) => {

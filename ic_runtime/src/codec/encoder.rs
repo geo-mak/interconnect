@@ -4,9 +4,9 @@ use core::slice::from_raw_parts;
 
 use crate::codec::encode::Encode;
 use crate::codec::reference::TypeRef;
+use crate::codec::types::core::ProtocolType;
+use crate::codec::types::limits::TypeLimits;
 use crate::error::{ErrKind, ProtocolError, ProtocolResult};
-use crate::types::core::ProtocolType;
-use crate::types::limits::TypeLimits;
 
 pub struct Skip<'a, E: ?Sized, T> {
     pub encoder: &'a mut E,

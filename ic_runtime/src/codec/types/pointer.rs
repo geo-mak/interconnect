@@ -4,9 +4,9 @@ use core::mem::MaybeUninit;
 use munge::munge;
 
 use crate::codec::reference::TypeRef;
+use crate::codec::types::core::TypeU64;
 use crate::error::{ErrKind, ProtocolError};
 use crate::mem::BasicBlock;
-use crate::types::core::TypeU64;
 
 pub const PTR_TAG_NULL: u64 = 0;
 pub const PTR_TAG_SET: u64 = u64::MAX;

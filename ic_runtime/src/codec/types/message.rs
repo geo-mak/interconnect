@@ -5,10 +5,10 @@ use zerocopy::IntoBytes;
 use crate::codec::decoder::Decoder;
 use crate::codec::encoder::Encoder;
 use crate::codec::reference::TypeRef;
+use crate::codec::types::core::{ProtocolType, TypeU64};
+use crate::codec::types::limits::TypeLimits;
 use crate::codec::{decode::Decode, encode::Encode};
 use crate::error::ProtocolResult;
-use crate::types::core::{ProtocolType, TypeU64};
-use crate::types::limits::TypeLimits;
 
 pub type MessageID = TypeU64;
 pub type MessageDirective = TypeU64;

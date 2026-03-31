@@ -4,9 +4,9 @@ use core::slice;
 
 use crate::codec::decode::{Decode, Decoded};
 use crate::codec::reference::TypeRef;
+use crate::codec::types::limits::TypeLimits;
 use crate::error::{ErrKind, ProtocolError, ProtocolResult};
 use crate::mem::{BASIC_BLOCK_SIZE, BasicBlock};
-use crate::types::limits::TypeLimits;
 
 #[inline]
 const fn assert_conform_to_alignment<T>() {

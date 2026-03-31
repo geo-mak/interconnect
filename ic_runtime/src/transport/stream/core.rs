@@ -75,11 +75,11 @@ where
     }
 
     fn as_slice(&self) -> &[u8] {
-        unsafe { self.seg.slice_of(self.len) }
+        unsafe { self.seg.as_slice_of(self.len) }
     }
 
     fn as_slice_mut(&mut self) -> &mut [u8] {
-        unsafe { self.seg.slice_mut_of(self.len) }
+        unsafe { self.seg.as_slice_mut_of(self.len) }
     }
 }
 
@@ -153,7 +153,7 @@ pub async fn receive<T: BytesReceiver, D: IOSegment>(
     if destination.ensure_capacity(len) {
         debug_assert!(destination.capacity() >= len);
 
-        let recv_segment = unsafe { destination.slice_mut_of(len) };
+        let recv_segment = unsafe { destination.as_slice_mut_of(len) };
 
         // Safety: This call must initialize the provided segment or it must fail and return.
         transport.receive_bytes(recv_segment).await?;
@@ -207,7 +207,7 @@ pub async fn receive_encrypted<T: BytesReceiver, D: IOSegment>(
     if destination.ensure_capacity(len) {
         debug_assert!(destination.capacity() >= len);
 
-        let recv_segment = unsafe { destination.slice_mut_of(len) };
+        let recv_segment = unsafe { destination.as_slice_mut_of(len) };
 
         // Safety: This call must initialize the provided segment or it must fail and return.
         transport.receive_bytes(recv_segment).await?;

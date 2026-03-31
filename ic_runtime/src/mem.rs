@@ -60,12 +60,6 @@ pub unsafe trait IOSegment {
         unsafe { from_raw_parts(self.as_ptr(), self.len()) }
     }
 
-    /// Returns a mutable view to the **initialized** data.
-    #[inline]
-    fn as_slice_mut(&mut self) -> &mut [u8] {
-        unsafe { from_raw_parts_mut(self.as_ptr_mut(), self.len()) }
-    }
-
     /// Constructs a slice of `count` bytes from offset `0` to offset `count - 1`.
     ///
     /// Safety:
@@ -79,9 +73,15 @@ pub unsafe trait IOSegment {
     /// "Maybeuninit<u8>" in arrays and slices will dramatically increase the code complexity
     /// and transforms the codebase into "spaghetti" of casting and transmuting.
     #[inline]
-    unsafe fn slice_of(&self, count: usize) -> &[u8] {
+    unsafe fn as_slice_of(&self, count: usize) -> &[u8] {
         debug_assert!(count <= self.capacity());
-        unsafe { core::slice::from_raw_parts(self.as_ptr(), count) }
+        unsafe { from_raw_parts(self.as_ptr(), count) }
+    }
+
+    /// Returns a mutable view to the **initialized** data.
+    #[inline]
+    fn as_slice_mut(&mut self) -> &mut [u8] {
+        unsafe { from_raw_parts_mut(self.as_ptr_mut(), self.len()) }
     }
 
     /// Constructs a mutable slice of `count` bytes from offset `0` to offset `count - 1`.
@@ -97,9 +97,9 @@ pub unsafe trait IOSegment {
     /// "Maybeuninit<u8>" in arrays and slices will dramatically increase the code complexity
     /// and transforms the codebase into "spaghetti" of casting and transmuting.
     #[inline]
-    unsafe fn slice_mut_of(&mut self, count: usize) -> &mut [u8] {
+    unsafe fn as_slice_mut_of(&mut self, count: usize) -> &mut [u8] {
         debug_assert!(count <= self.capacity());
-        unsafe { core::slice::from_raw_parts_mut(self.as_ptr_mut(), count) }
+        unsafe { from_raw_parts_mut(self.as_ptr_mut(), count) }
     }
 
     /// Tries to writes the provided data to the segment in checked-mode.

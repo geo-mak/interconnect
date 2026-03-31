@@ -1,5 +1,3 @@
-//! Next generation memory allocators for sending and receiving.
-
 use core::cell::Cell;
 use core::mem::ManuallyDrop;
 use core::ptr::NonNull;
@@ -45,6 +43,16 @@ pub unsafe trait IOSegment {
 
     /// Returns the base pointer of the allocated segment.
     fn as_ptr_mut(&mut self) -> *mut u8;
+
+    /// Sets the current length to `0`.
+    fn clear(&mut self);
+
+    /// Sets the length of the segment.
+    ///
+    /// Safety:
+    /// - The new length must be within the bound of segment's capacity.
+    /// - No data shall be produced before fully initializing the updated length.
+    unsafe fn set_len(&mut self, new_len: usize);
 
     /// Returns an immutable view to the **initialized** data.
     #[inline]
@@ -94,16 +102,6 @@ pub unsafe trait IOSegment {
         unsafe { core::slice::from_raw_parts_mut(self.as_ptr_mut(), count) }
     }
 
-    /// Sets the current length to `0`.
-    fn clear(&mut self);
-
-    /// Sets the length of the segment.
-    ///
-    /// Safety:
-    /// - The new length must be within the bound of segment's capacity.
-    /// - No data shall be produced before fully initializing the updated length.
-    unsafe fn set_len(&mut self, new_len: usize);
-
     /// Tries to writes the provided data to the segment in checked-mode.
     ///
     /// If the implementation enables dynamic allocation, this call may allocate more capacity if needed.
@@ -115,7 +113,29 @@ pub unsafe trait IOSegment {
     /// Safety:
     /// - The source slice must consist of fully initialized bytes.
     /// - The source slice must be a non-overlapping (disjoint) memory-region.
-    fn write(&mut self, source: &[u8]) -> bool;
+    #[inline]
+    fn write(&mut self, source: &[u8]) -> bool {
+        let segment_len = self.len();
+        let source_len = source.len();
+
+        let new_len = segment_len + source_len;
+
+        if self.ensure_capacity(new_len) {
+            unsafe {
+                copy_nonoverlapping(
+                    source.as_ptr(),
+                    self.as_ptr_mut().add(segment_len),
+                    source_len,
+                );
+
+                self.set_len(new_len);
+            };
+
+            return true;
+        };
+
+        false
+    }
 
     /// Writes data to the segment in unchecked-mode.
     ///
@@ -214,31 +234,6 @@ unsafe impl IOSegment for IOPoolSegment {
         debug_assert!(new_len <= self.pool.seg_size);
         self.len = new_len;
     }
-
-    #[inline]
-    fn write(&mut self, source: &[u8]) -> bool {
-        let capacity = self.pool.seg_size;
-        let current_len = self.len;
-
-        let free = capacity - current_len;
-        let source_len = source.len();
-
-        if free < source_len {
-            return false;
-        }
-
-        unsafe {
-            copy_nonoverlapping(
-                source.as_ptr(),
-                self.segment_ptr.add(current_len),
-                source_len,
-            );
-        }
-
-        self.len += source_len;
-
-        true
-    }
 }
 
 impl Encoder for IOPoolSegment {
@@ -329,11 +324,11 @@ impl Encoder for IOPoolSegment {
 unsafe impl Decoder for IOPoolSegment {
     #[inline]
     fn get_blocks_pointer(&mut self, count: usize) -> ProtocolResult<NonNull<BasicBlock>> {
-        let current_len = self.len;
+        let segment_len = self.len;
         let read_offset = self.read_offset;
 
         // Ensure we have enough data initialized (len) minus what we've already read.
-        let available_bytes = current_len.saturating_sub(read_offset);
+        let available_bytes = segment_len.saturating_sub(read_offset);
         let required_bytes = count << BASIC_BLOCK_SHIFT;
 
         if available_bytes < required_bytes {
@@ -343,7 +338,7 @@ unsafe impl Decoder for IOPoolSegment {
         unsafe {
             let ptr = self.segment_ptr.add(read_offset);
 
-            // Advance the read offset in the segment
+            // Advance the read offset in the segment.
             self.read_offset += required_bytes;
 
             Ok(NonNull::new_unchecked(ptr.cast()))

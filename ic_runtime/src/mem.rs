@@ -533,28 +533,6 @@ unsafe impl<'a> IOSegment for IORingSegment<'a> {
         debug_assert!(new_len <= self.data.len());
         self.metadata.written.set(new_len as u32)
     }
-
-    #[inline]
-    fn write(&mut self, src: &[u8]) -> bool {
-        let current_len = self.metadata.written.get() as usize;
-        let free = self.data.len() - current_len;
-        let src_len = src.len();
-
-        if free < src_len {
-            return false;
-        }
-
-        unsafe {
-            copy_nonoverlapping(
-                src.as_ptr(),
-                self.data.as_mut_ptr().add(current_len),
-                src_len,
-            );
-        }
-
-        self.metadata.written.set((current_len + src_len) as u32);
-        true
-    }
 }
 
 /// A published segment that contains data.

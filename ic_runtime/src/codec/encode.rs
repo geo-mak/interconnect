@@ -94,7 +94,7 @@ impl_encode_for!(TypeU64);
 impl_encode_for!(TypeF32);
 impl_encode_for!(TypeF64);
 
-fn encode_to_array<V, P, E, T, const N: usize>(
+fn encode_into_array<V, P, E, T, const N: usize>(
     value: V,
     encoder: &mut E,
     storage: &mut MaybeUninit<[P; N]>,
@@ -132,7 +132,7 @@ where
         storage: &mut MaybeUninit<[P; N]>,
         limits: P::Limits,
     ) -> ProtocolResult<()> {
-        encode_to_array(self, encoder, storage, limits)
+        encode_into_array(self, encoder, storage, limits)
     }
 }
 
@@ -149,7 +149,7 @@ where
         storage: &mut MaybeUninit<[P; N]>,
         limits: P::Limits,
     ) -> ProtocolResult<()> {
-        encode_to_array(self, encoder, storage, limits)
+        encode_into_array(self, encoder, storage, limits)
     }
 }
 

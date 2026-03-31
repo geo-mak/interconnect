@@ -67,9 +67,8 @@ pub unsafe trait Decoder {
 
         let blocks_ptr = self.get_blocks(blocks_count)?.as_mut_ptr();
 
-        let padding_bytes: &[u8] = unsafe {
-            core::slice::from_raw_parts(blocks_ptr.cast::<u8>().add(items_bytes), padding_len)
-        };
+        let padding_bytes: &[u8] =
+            unsafe { slice::from_raw_parts(blocks_ptr.cast::<u8>().add(items_bytes), padding_len) };
 
         // RT_ASSERT.
         // Padding bytes must be zeros.

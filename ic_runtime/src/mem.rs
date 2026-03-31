@@ -77,7 +77,7 @@ pub unsafe trait IOSegment {
     /// the point of writing is not conforming to the parameter.
     ///
     /// "Maybeuninit<u8>" in arrays and slices will dramatically increase the code complexity
-    /// and transforms the codebase into "spaghetti of casting and transmuting".
+    /// and transforms the codebase into "spaghetti" of casting and transmuting.
     #[inline]
     unsafe fn slice_of(&self, count: usize) -> &[u8] {
         debug_assert!(count <= self.capacity());
@@ -95,7 +95,7 @@ pub unsafe trait IOSegment {
     /// the point of writing is not conforming to the parameter.
     ///
     /// "Maybeuninit<u8>" in arrays and slices will dramatically increase the code complexity
-    /// and transforms the codebase into "spaghetti of casting and transmuting".
+    /// and transforms the codebase into "spaghetti" of casting and transmuting.
     #[inline]
     unsafe fn slice_mut_of(&mut self, count: usize) -> &mut [u8] {
         debug_assert!(count <= self.capacity());
@@ -108,7 +108,7 @@ pub unsafe trait IOSegment {
     ///
     /// Returns `true` on success or `false` in case of not enough capacity or failure to allocate more.
     ///
-    /// Length is advanced after successful writing.
+    /// Length is **advanced** after successful writing.
     ///
     /// Safety:
     /// - The source slice must consist of fully initialized bytes.
@@ -138,6 +138,9 @@ pub unsafe trait IOSegment {
     }
 
     /// Writes data to the segment in unchecked-mode.
+    ///
+    /// This function enables writing data anywhere within the capacity of the segment,
+    /// regardless of segment's length.
     ///
     /// Safety:
     /// - The source slice must consist of fully initialized bytes.

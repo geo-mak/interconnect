@@ -30,9 +30,6 @@ pub const NOOP_WAKER: Waker = {
 /// Inter-thread transitions are tracked with proper memory ordering,
 /// ensuring observability and proper responses within internal methods.
 ///
-/// Consider reading methods' documentation carefully,
-/// as each provides more information about its safety requirements and tradeoffs.
-///
 /// The current implementation doesn't track panic state.
 pub(crate) struct AtomicWaker {
     state: AtomicUsize,
@@ -544,33 +541,33 @@ pub type ThreadNotifyLock<'a> = parking_lot::lock_api::MutexGuard<'a, parking_lo
 ///
 /// This implementation is very lightweight, with user-space synchronization.
 pub struct ThreadNotify {
-    sync: parking_lot::Mutex<()>,
-    parker: parking_lot::Condvar,
+    lock: parking_lot::Mutex<()>,
+    notifier: parking_lot::Condvar,
 }
 
 impl ThreadNotify {
     #[inline]
     pub fn new() -> Self {
         Self {
-            sync: parking_lot::Mutex::new(()),
-            parker: parking_lot::Condvar::new(),
+            lock: parking_lot::Mutex::new(()),
+            notifier: parking_lot::Condvar::new(),
         }
     }
 
     #[inline]
     pub fn lock(&self) -> ThreadNotifyLock<'_> {
-        self.sync.lock()
+        self.lock.lock()
     }
 
     #[inline]
     pub fn is_locked(&self) -> bool {
-        self.sync.is_locked()
+        self.lock.is_locked()
     }
 
     /// Waits with a pre-acquired lock until a notification is received.
     #[inline]
     pub fn wait(&self, lock: &mut ThreadNotifyLock<'_>) {
-        self.parker.wait(lock)
+        self.notifier.wait(lock)
     }
 
     /// Waits with a pre-acquired lock until a notification is received or timeout occurs.
@@ -582,7 +579,7 @@ impl ThreadNotify {
         lock: &mut ThreadNotifyLock<'_>,
         timeout: std::time::Duration,
     ) -> bool {
-        self.parker.wait_for(lock, timeout).timed_out()
+        self.notifier.wait_for(lock, timeout).timed_out()
     }
 
     /// Notifies a **waiting** thread to wake.
@@ -590,7 +587,7 @@ impl ThreadNotify {
     /// If there is no waiter, this call does nothing.
     #[inline]
     pub fn notify_one(&self) {
-        self.parker.notify_one();
+        self.notifier.notify_one();
     }
 
     /// Notifies all **waiting** threads to wake.
@@ -598,7 +595,7 @@ impl ThreadNotify {
     /// If there is no waiter, this call does nothing.
     #[inline]
     pub fn notify_all(&self) {
-        self.parker.notify_all();
+        self.notifier.notify_all();
     }
 }
 

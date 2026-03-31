@@ -267,7 +267,7 @@ of the runtime-config.
 
 Interfaces are the **only** means of managing the evolution of the service. 
 
-In order to change/update a message or any of its members, a new message is required with a **new function** that takes that message as parameter or returns that message as a response. The old message and its function must be kept **unchanged** and the old function shall be annotated as `deprecated`. This will prevent the function from being called from the client-side in newer systems, while allowing the service provider to handle older systems gracefully.
+In order to change/update a message or any of its members, a new message is required with a **new function** that takes that message as parameter or returns that message as a response. The old message and its function must be kept **unchanged** and the old function shall be annotated as `deprecated`. This will prevent the deprecated function from being accessible by the client in newer systems, while allowing the service provider to handle older systems gracefully.
 
 Dynamic messages and other types that allow non-breaking modifications like deprecation and addition of fields have been implemented and removed, because they add complexity and they have mediocre performance. 
 

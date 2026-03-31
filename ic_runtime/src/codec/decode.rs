@@ -10,11 +10,10 @@ use crate::codec::types::core::{
     ProtocolType, TypeF32, TypeF64, TypeI8, TypeI16, TypeI32, TypeI64, TypeU8, TypeU16, TypeU32,
     TypeU64,
 };
-use crate::codec::types::limits::TypeLimits;
 use crate::error::{ErrKind, ProtocolError, ProtocolResult};
 
 /// A type that can construct itself as protocol type from bytes.
-pub unsafe trait Decode<D: ?Sized>: ProtocolType + TypeLimits {
+pub unsafe trait Decode<D: ?Sized>: ProtocolType {
     /// Decodes a the type into the provided value.
     ///
     /// This call checks for valid memory-representation and conformance to the defined limits.

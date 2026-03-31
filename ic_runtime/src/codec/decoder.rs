@@ -4,7 +4,6 @@ use core::slice;
 
 use crate::codec::decode::{Decode, Decoded};
 use crate::codec::reference::TypeRef;
-use crate::codec::types::limits::TypeLimits;
 use crate::error::{ErrKind, ProtocolError, ProtocolResult};
 use crate::mem::{BASIC_BLOCK_SIZE, BasicBlock};
 
@@ -81,7 +80,7 @@ pub unsafe trait Decoder {
 
     fn decode<T>(mut self, limits: T::Limits) -> ProtocolResult<Decoded<T, Self>>
     where
-        T: Decode<Self> + TypeLimits,
+        T: Decode<Self>,
         Self: Sized,
     {
         let mut decoder = &mut self;
@@ -98,7 +97,7 @@ pub unsafe trait Decoder {
         limits: T::Limits,
     ) -> Result<T::Type<'de>, ProtocolError>
     where
-        T: Decode<Self> + TypeLimits,
+        T: Decode<Self>,
     {
         let mut view = self.ref_as::<T>()?;
 

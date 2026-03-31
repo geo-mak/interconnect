@@ -5,6 +5,26 @@ use core::mem::MaybeUninit;
 
 use crate::codec::types::limits::TypeLimits;
 
+/// Interconnect's protocol type.
+pub unsafe trait ProtocolType: 'static + Sized + TypeLimits {
+    /// The referenced inner type.
+    type Type<'de>: TypeLimits<Limits = Self::Limits>;
+
+    /// Writes zeroes to the padding for this type if applicable.
+    fn write_zero_padding(to: &mut MaybeUninit<Self>);
+}
+
+macro_rules! impl_protocol_type_for {
+    ($ty:ty) => {
+        unsafe impl ProtocolType for $ty {
+            type Type<'de> = Self;
+
+            #[inline]
+            fn write_zero_padding(_: &mut MaybeUninit<Self>) {}
+        }
+    };
+}
+
 macro_rules! impl_core_op_unary {
     ($trait:ident::$fn:ident, $name:ident : $inner:ty) => {
         impl core::ops::$trait for $name {
@@ -463,26 +483,6 @@ define_uint!(TypeU32: u32, 4);
 define_uint!(TypeU64: u64, 8);
 define_float!(TypeF32: f32, 4);
 define_float!(TypeF64: f64, 8);
-
-/// Interconnect's protocol type.
-pub unsafe trait ProtocolType: 'static + Sized + TypeLimits {
-    /// The referenced inner type.
-    type Type<'de>: TypeLimits<Limits = Self::Limits>;
-
-    /// Writes zeroes to the padding for this type if applicable.
-    fn write_zero_padding(to: &mut MaybeUninit<Self>);
-}
-
-macro_rules! impl_protocol_type_for {
-    ($ty:ty) => {
-        unsafe impl ProtocolType for $ty {
-            type Type<'de> = Self;
-
-            #[inline]
-            fn write_zero_padding(_: &mut MaybeUninit<Self>) {}
-        }
-    };
-}
 
 impl_protocol_type_for!(());
 impl_protocol_type_for!(bool);

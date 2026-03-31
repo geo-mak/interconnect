@@ -6,9 +6,9 @@ use crate::codec::types::core::{
     TypeF32, TypeF64, TypeI8, TypeI16, TypeI32, TypeI64, TypeU8, TypeU16, TypeU32, TypeU64,
 };
 
-/// A type which is convertible from a protocol type.
+/// A type which can be constructed from a protocol type.
 pub trait FromProtocolType<P>: Sized {
-    /// Checks if conversion by bitwise-copying is enabled.
+    /// Checks if conversion by direct copying is enabled.
     const COPY_CONVERSION: CopyConversion<P, Self> = CopyConversion::disable();
 
     /// Converts the given `protocol_type` to this type.

@@ -332,21 +332,21 @@ unsafe impl Decoder for IOPoolSegment {
         let segment_len = self.len;
         let read_offset = self.read_offset;
 
-        // Ensure we have enough data initialized (len) minus what we've already read.
-        let available_bytes = segment_len.saturating_sub(read_offset);
+        let remaining_bytes = segment_len.saturating_sub(read_offset);
+
         let required_bytes = count << BASIC_BLOCK_SHIFT;
 
-        if available_bytes < required_bytes {
+        if remaining_bytes < required_bytes {
             return Err(ProtocolError::error(ErrKind::NotEnoughData));
         }
 
         unsafe {
-            let ptr = self.segment_ptr.add(read_offset);
+            let blocks_ptr = self.segment_ptr.add(read_offset);
 
-            // Advance the read offset in the segment.
+            // Advance the read offset.
             self.read_offset += required_bytes;
 
-            Ok(NonNull::new_unchecked(ptr.cast()))
+            Ok(NonNull::new_unchecked(blocks_ptr.cast()))
         }
     }
 }

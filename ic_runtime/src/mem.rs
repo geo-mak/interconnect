@@ -44,7 +44,9 @@ pub unsafe trait IOSegment {
     /// Returns the base pointer of the allocated segment.
     fn as_ptr_mut(&mut self) -> *mut u8;
 
-    /// Sets the current length to `0`.
+    /// Makes the segment reuseable as new segment with it's length set to `0`.
+    ///
+    /// The concrete operations performed to make the segment reuseable are implementation-dependent.
     fn clear(&mut self);
 
     /// Sets the length of the segment.

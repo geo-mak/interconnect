@@ -147,7 +147,7 @@ pub unsafe trait IOSegment {
     /// - The source slice must be a non-overlapping (disjoint) memory-region.
     /// - The segment must have enough capacity to accommodate the the source data.
     /// - The segment is valid for writing/overwriting withing the range [`offset`: source length - 1].
-    /// - Length is **not** advanced after writing.
+    /// - The current length remains **unchanged** after writing.
     #[inline]
     unsafe fn write_at(&mut self, offset: usize, source: &[u8]) {
         let count = source.len();

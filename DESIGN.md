@@ -45,15 +45,12 @@ Message layer implements the machinery to safely and correctly encode and decode
 
 By default, messages are passed to the interface carrying borrowed data, and get returned after receiving carrying borrowed data.
 
-Thanks to the custom-layout and strict alignment rules, all types in a message can be accessed borrowed without conversion to owned types and with the lifetime-bound as the only restriction applied, something that would be very limited, not possible or recklessly unsafe in the "naïve" common 
-world of encoding and decoding out there.
+Thanks to the custom-layout and strict alignment rules, all types in a message can be accessed borrowed without conversion to owned types and with the lifetime-bound as the only restriction applied, something that would be very limited, not possible or recklessly unsafe in the "naïve" common world of encoding and decoding out there.
 
 However, received messages allow conversion to owned types when borrowing can be restrictive.
 
 **Application Layer**:
 Application layer serves typing and runtime-configurations where the user-code constructs messages, and makes use of the received messages using the defined types and the implementation of the application's interfaces as a "thin" layer on top of the other layers.
-
-Interconnect uses this layer also to model various use-cases for better understandability and for providing more support types and options where needed.
 
 ## Data exchange
 Interconnect's unit of exchange is "message".
@@ -90,7 +87,7 @@ Within the context of this project, these terms are understood as defined:
   but it is commonly used out there, so this project assigns the above definition to it only.
 
 - Concurrency: An execution model, where multiple instructions' streams **may** take place at the same time.
-  Concurrency can be "truly" parallel by running multiple processing elements, or partial by means of sharing
+  Concurrency can be truly parallel by utilizing multiple processing elements at the same time, or partial by means of sharing
   a processing element in time-slices (context switching).
 
 - Parallelism: The ability of a particular system to operate multiple instances of its processing elements at the same time.

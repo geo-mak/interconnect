@@ -15,9 +15,7 @@ use pin_project_lite::pin_project;
 use crate::codec::decoder::Decoder;
 use crate::codec::encode::Encode;
 use crate::codec::encoder::Encoder;
-
 use crate::codec::types::core::ProtocolType;
-use crate::codec::types::limits::TypeLimits;
 use crate::codec::types::message::TypeMessageHeader;
 use crate::coop::sync::{DynamicLatch, IList, INode, NOOP_WAKER};
 use crate::coop::traits::{ControlHandle, Executor, Timer};
@@ -272,7 +270,7 @@ where
 
     async fn respond_with<'c, I, R>(&mut self, op: u64, response: &'c R) -> ProtocolResult<()>
     where
-        I: ProtocolType + TypeLimits<Limits = ()>,
+        I: ProtocolType<Limits = ()>,
         R: Sync,
         &'c R: Encode<I, P::SendSegment>,
     {
@@ -282,6 +280,7 @@ where
 
         TypeMessageHeader::encode_header(self.id, op, &mut send_segment)?;
         send_segment.encode_next(response, ())?;
+
         self.transport.send(&mut send_segment).await
     }
 }
@@ -521,14 +520,12 @@ mod tests {
             M: Decoder + Send,
             C: CallContext<E> + Send,
         {
-            if op == 1 {
-                let value = message.decode::<TypeU64>(())?.0;
-                context
-                    .respond_with::<TypeU64, TypeU64>(1, &TypeU64(value + 1))
-                    .await?;
-                Ok(())
-            } else {
-                Err(ProtocolError::error(ErrKind::Unimplemented))
+            match op {
+                1 => {
+                    let value = message.decode::<TypeU64>(())?.0;
+                    context.respond_with(1, &TypeU64(value + 1)).await
+                }
+                _ => Err(ProtocolError::error(ErrKind::Unimplemented)),
             }
         }
 
@@ -554,9 +551,9 @@ mod tests {
         let service = TestService;
         let executor = TokioExecutor;
         let reporter = ();
-
         let transport_server = UnixLinkServer::create(&path).await.unwrap();
         let server_provider = pool.clone();
+
         let mut server = MultiClientServer::start(
             transport_server,
             executor,
@@ -569,23 +566,21 @@ mod tests {
         .await
         .unwrap();
 
-        // Connect client.
         let mut client_transport = UnixLink::connect(&path).await.unwrap();
 
         let mut segment = pool.acquire().unwrap();
 
-        // Send.
         TypeMessageHeader::encode_header(123, 1, &mut segment).unwrap();
         segment.encode_next(&TypeU64(100), ()).unwrap();
         client_transport.send(&mut segment).await.unwrap();
 
-        // Receive.
         segment.clear();
         client_transport.receive(&mut segment).await.unwrap();
 
         let (id, op) = TypeMessageHeader::decode_header(&mut segment).unwrap();
         assert_eq!(id, 123);
         assert_eq!(op, 1);
+
         let response = segment.decode::<TypeU64>(()).unwrap();
         assert_eq!(response.0, 101);
 

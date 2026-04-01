@@ -4,7 +4,6 @@ use crate::codec::decoder::Decoder;
 use crate::codec::encode::Encode;
 use crate::codec::encoder::Encoder;
 use crate::codec::types::core::ProtocolType;
-use crate::codec::types::limits::TypeLimits;
 use crate::error::ProtocolResult;
 
 // TODO: Support unsolicited server events?
@@ -13,15 +12,15 @@ pub trait CallContext<E: Encoder> {
 
     fn call_id(&self) -> &Self::CallID;
 
-    fn respond_with<'c, I, M>(
+    fn respond_with<'c, P, M>(
         &mut self,
         op: u64,
         message: &'c M,
     ) -> impl Future<Output = ProtocolResult<()>> + Send
     where
-        I: ProtocolType + TypeLimits<Limits = ()>,
+        P: ProtocolType<Limits = ()>,
         M: Sync,
-        &'c M: Encode<I, E>;
+        &'c M: Encode<P, E>;
 }
 
 pub trait Service {

@@ -5,14 +5,11 @@ use std::sync::Arc;
 
 use tokio::sync::Mutex;
 
-use crate::codec::convert::from::FromProtocolType;
-use crate::codec::convert::into::IntoNativeType;
-use crate::codec::decode::Decode;
+use crate::codec::decode::{Decode, Decoded};
 use crate::codec::decoder::Decoder;
 use crate::codec::encode::Encode;
 use crate::codec::encoder::Encoder;
 use crate::codec::types::core::ProtocolType;
-use crate::codec::types::limits::TypeLimits;
 use crate::codec::types::message::TypeMessageHeader;
 use crate::coop::traits::{ControlHandle, Executor, Timer};
 use crate::endpoints::publishers::Publishers;
@@ -121,17 +118,15 @@ where
         Ok(())
     }
 
-    async fn send<'a, A, M, V>(
+    async fn send<'a, I, M, O>(
         &self,
         op: u64,
         message: &'a M,
-    ) -> ProtocolResult<<A as IntoNativeType>::NativeType>
+    ) -> ProtocolResult<Decoded<O, P::ReceiveSegment>>
     where
-        A: ProtocolType + TypeLimits<Limits = ()>,
-        &'a M: Encode<A, P::SendSegment>,
-        A: Decode<P::ReceiveSegment> + TypeLimits<Limits = ()> + IntoNativeType,
-        <A as IntoNativeType>::NativeType:
-            for<'de> FromProtocolType<<A as ProtocolType>::Type<'de>>,
+        I: ProtocolType<Limits = ()>,
+        &'a M: Encode<I, P::SendSegment>,
+        O: ProtocolType<Limits = ()> + Decode<P::ReceiveSegment>,
     {
         // TODO: Generate ID according to id-rules.
         if let Some(publisher) = &self.state.publishers.acquire() {
@@ -148,8 +143,8 @@ where
                 // RT_ASSERT.
                 match result.await?.unwrap() {
                     Ok(response) => {
-                        let decoded = response.decode::<A>(())?;
-                        return Ok(decoded.into_native());
+                        let output = response.decode::<O>(())?;
+                        return Ok(output);
                     }
                     Err(err) => return Err(err),
                 }
@@ -159,10 +154,10 @@ where
         Err(ProtocolError::error(ErrKind::CapacityLimit))
     }
 
-    async fn send_one_way<'a, A, M>(&self, op: u64, message: &'a M) -> ProtocolResult<()>
+    async fn send_one_way<'a, I, M>(&self, op: u64, message: &'a M) -> ProtocolResult<()>
     where
-        A: ProtocolType + TypeLimits<Limits = ()>,
-        &'a M: Encode<A, P::SendSegment>,
+        I: ProtocolType<Limits = ()>,
+        &'a M: Encode<I, P::SendSegment>,
     {
         let Some(mut segment) = self.state.provider.acquire_send() else {
             return Err(ProtocolError::error(ErrKind::CapacityLimit));
@@ -173,11 +168,9 @@ where
         self.state.sender.lock().await.send(&mut segment).await
     }
 
-    async fn send_nullary<V>(&self, op: u64) -> ProtocolResult<<V as IntoNativeType>::NativeType>
+    async fn send_nullary<O>(&self, op: u64) -> ProtocolResult<Decoded<O, P::ReceiveSegment>>
     where
-        V: Decode<P::ReceiveSegment> + TypeLimits<Limits = ()> + IntoNativeType,
-        <V as IntoNativeType>::NativeType:
-            for<'de> FromProtocolType<<V as ProtocolType>::Type<'de>>,
+        O: ProtocolType<Limits = ()> + Decode<P::ReceiveSegment>,
     {
         if let Some(publisher) = &self.state.publishers.acquire() {
             if let Some(mut segment) = self.state.provider.acquire_send() {
@@ -190,8 +183,8 @@ where
                 // RT_ASSERT.
                 match result.await?.unwrap() {
                     Ok(response) => {
-                        let decoded = response.decode::<V>(())?;
-                        return Ok(decoded.into_native());
+                        let decoded = response.decode::<O>(())?;
+                        return Ok(decoded);
                     }
                     Err(err) => return Err(err),
                 }
@@ -259,36 +252,28 @@ mod tests {
 
             let mut segment = server_pool.acquire().unwrap();
 
-            // Receive.
             link.receive(&mut segment).await.unwrap();
 
-            // Decode.
             let (id, op) = TypeMessageHeader::decode_header(&mut segment).unwrap();
             assert_eq!(op, 10);
 
-            // Encode.
             segment.clear();
             TypeMessageHeader::encode_header(id, op, &mut segment).unwrap();
 
             segment.encode_next(&TypeU64(200), ()).unwrap();
 
-            // Resend.
             link.send(&mut segment).await.unwrap();
         });
 
-        // Connect.
         let transport = UnixLink::connect(&path).await.unwrap();
         let client = CoreClient::start(capacity, transport, &executor, pool, reporter)
             .await
             .unwrap();
 
-        // Send.
-        let response: u64 = client
-            .send::<TypeU64, TypeU64, TypeU64>(10, &TypeU64(100))
-            .await
-            .unwrap();
+        let decoded: Decoded<TypeU64, IOPoolSegment> =
+            client.send(10, &TypeU64(100)).await.unwrap();
 
-        assert_eq!(response, 200);
+        assert_eq!(*decoded, 200);
 
         server_handle.await.unwrap();
         let _ = std::fs::remove_file(path);

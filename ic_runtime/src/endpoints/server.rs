@@ -21,7 +21,7 @@ use crate::codec::types::limits::TypeLimits;
 use crate::codec::types::message::TypeMessageHeader;
 use crate::coop::sync::{DynamicLatch, IList, INode, NOOP_WAKER};
 use crate::coop::traits::{ControlHandle, Executor, Timer};
-use crate::endpoints::application::{Application, CallContext};
+use crate::endpoints::service::{CallContext, Service};
 use crate::error::{ErrKind, ProtocolError, ProtocolResult};
 use crate::mem::MemoryProvider;
 use crate::reports::traits::Reporter;
@@ -289,7 +289,7 @@ where
 struct ServerState<E, P, H, R> {
     provider: P,
     tasks: Tasks,
-    application: H,
+    service: H,
     reporter: R,
     timeout: Duration,
     executor: E,
@@ -300,7 +300,7 @@ impl<E, P, H, R> ServerState<E, P, H, R> {
     fn new(
         executor: E,
         provider: P,
-        application: H,
+        service: H,
         reporter: R,
         shards: usize,
         timeout: Duration,
@@ -308,7 +308,7 @@ impl<E, P, H, R> ServerState<E, P, H, R> {
         ServerState {
             provider,
             tasks: Tasks::new(shards),
-            application,
+            service,
             reporter,
             timeout,
             executor,
@@ -340,13 +340,13 @@ where
     P::SendSegment: Encoder + Send,
     P::ReceiveSegment: Decoder + Send,
     S::ID: Debug + Send + Sync,
-    H: Application + Send + Sync + Clone + 'static,
+    H: Service + Send + Sync + Clone + 'static,
     R: Reporter + Send + Sync + 'static,
 {
     pub async fn start(
         transport_server: S,
         executor: E,
-        application: H,
+        service: H,
         provider: P,
         reporter: R,
         shards: usize,
@@ -355,7 +355,7 @@ where
         let state = Arc::new(ServerState::new(
             executor,
             provider,
-            application,
+            service,
             reporter,
             shards,
             connection_timeout,
@@ -434,7 +434,7 @@ where
         transport: &mut S::Transport,
     ) {
         let reporter = &state.reporter;
-        let application = state.application.clone();
+        let service = state.service.clone();
         let provider = &state.provider;
 
         loop {
@@ -459,10 +459,7 @@ where
                 Ok((id, directive)) => {
                     let mut context = ServerContext::new(provider, transport, id);
 
-                    if let Err(err) = application
-                        .call(directive, recv_segment, &mut context)
-                        .await
-                    {
+                    if let Err(err) = service.call(directive, recv_segment, &mut context).await {
                         reporter.error(
                             "Application failed to process the message",
                             &format_args!("{err}. Peer: {peer_id:?}"),
@@ -487,7 +484,7 @@ where
         self.state.tasks.observer.count()
     }
 
-    /// Shutdowns the server and the application in planned mode.
+    /// Shutdowns the server and the service in planned mode.
     ///
     /// This call doesn't have immediate effect and may take longer time,
     /// because it allows active sessions to complete processing the current received message.
@@ -501,7 +498,7 @@ where
 
         self.state.tasks.observer.wait().await;
 
-        self.state.application.terminate().await
+        self.state.service.terminate().await
     }
 }
 
@@ -515,9 +512,9 @@ mod tests {
     use crate::transport::traits::Transport;
 
     #[derive(Clone)]
-    struct TestApplication;
+    struct TestService;
 
-    impl Application for TestApplication {
+    impl Service for TestService {
         async fn call<E, M, C>(&self, op: u64, message: M, context: &mut C) -> ProtocolResult<()>
         where
             E: Encoder,
@@ -554,7 +551,7 @@ mod tests {
         let _ = std::fs::remove_file(path);
 
         let pool = IOPool::new(2, 32);
-        let application = TestApplication;
+        let service = TestService;
         let executor = TokioExecutor;
         let reporter = ();
 
@@ -563,7 +560,7 @@ mod tests {
         let mut server = MultiClientServer::start(
             transport_server,
             executor,
-            application,
+            service,
             server_provider,
             reporter,
             1,

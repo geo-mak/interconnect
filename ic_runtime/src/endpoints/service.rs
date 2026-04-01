@@ -24,7 +24,7 @@ pub trait CallContext<E: Encoder> {
         &'c M: Encode<I, E>;
 }
 
-pub trait Application {
+pub trait Service {
     fn call<E, M, C>(
         &self,
         op: u64,
@@ -45,6 +45,6 @@ pub trait Application {
         E: Encoder,
         C: CallContext<E> + Send;
 
-    /// Informs the application to terminate its state machines and waits for completion.
+    /// Informs the service to terminate its state machines and waits for completion.
     fn terminate(&self) -> impl Future<Output = ProtocolResult<()>> + Send;
 }

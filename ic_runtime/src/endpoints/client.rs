@@ -216,9 +216,6 @@ where
 
     /// Closes its sender and shutdowns the receiving task in graceful manner.
     ///
-    /// This call doesn't have immediate effect and may take longer time,
-    /// because it allows critical regions to fully complete their execution.
-    ///
     /// Buffered data will be sent followed by "FIN" message.
     ///
     /// Any attempts to send messages after this call will return `Broken pipe` I/O error.

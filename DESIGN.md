@@ -49,8 +49,8 @@ Thanks to the custom-layout and strict alignment rules, all types in a message c
 
 However, received messages allow conversion to owned types when borrowing can be restrictive.
 
-**Application Layer**:
-Application layer serves typing and runtime-configurations where the user-code constructs messages, and makes use of the received messages using the defined types and the implementation of the application's interfaces as a "thin" layer on top of the other layers.
+**Service Layer**:
+Service layer serves typing and runtime-configurations where the user-code constructs messages, and makes use of the received messages using the defined types and the implementation of the service's interfaces as a "thin" layer on top of the other layers.
 
 ## Data exchange
 Interconnect's unit of exchange is "message".

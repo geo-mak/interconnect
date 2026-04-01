@@ -241,18 +241,19 @@ mod tests {
         let executor = TokioExecutor;
         let reporter = ();
 
-        let server = UnixLinkServer::<IOPoolSegment, IOPoolSegment>::create(&path)
+        let server = UnixLinkServer::create(&path)
             .await
             .unwrap();
-
+        
         let server_pool = pool.clone();
+
         let server_handle = tokio::spawn(async move {
             let (initiator, _) = server.accept().await.unwrap();
-            let mut link = initiator.initiate().await.unwrap();
+            let mut transport = initiator.initiate().await.unwrap();
 
             let mut segment = server_pool.acquire().unwrap();
 
-            link.receive(&mut segment).await.unwrap();
+            transport.receive(&mut segment).await.unwrap();
 
             let (id, op) = TypeMessageHeader::decode_header(&mut segment).unwrap();
             assert_eq!(op, 10);
@@ -262,10 +263,11 @@ mod tests {
 
             segment.encode_next(&TypeU64(200), ()).unwrap();
 
-            link.send(&mut segment).await.unwrap();
+            transport.send(&mut segment).await.unwrap();
         });
 
         let transport = UnixLink::connect(&path).await.unwrap();
+
         let client = CoreClient::start(capacity, transport, &executor, pool, reporter)
             .await
             .unwrap();

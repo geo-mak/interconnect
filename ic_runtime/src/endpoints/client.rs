@@ -241,10 +241,8 @@ mod tests {
         let executor = TokioExecutor;
         let reporter = ();
 
-        let server = UnixLinkServer::create(&path)
-            .await
-            .unwrap();
-        
+        let server = UnixLinkServer::create(&path).await.unwrap();
+
         let server_pool = pool.clone();
 
         let server_handle = tokio::spawn(async move {

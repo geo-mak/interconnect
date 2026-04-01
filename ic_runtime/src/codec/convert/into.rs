@@ -4,12 +4,12 @@ use crate::codec::types::core::{
 };
 
 /// Type that is convertible to native type.
-pub trait IntoNativeType: Sized {
-    type NativeType: FromProtocolType<Self>;
+pub trait IntoNative: Sized {
+    type Native: FromProtocolType<Self>;
 
     /// Converts this type into its native equivalent.
-    fn into_native_type(self) -> Self::NativeType {
-        Self::NativeType::from_protocol_type(self)
+    fn into_native(self) -> Self::Native {
+        Self::Native::from_protocol_type(self)
     }
 }
 
@@ -18,8 +18,8 @@ macro_rules! impl_into_native_for {
         impl_into_native_for!($ty, into $ty);
     };
     ($protocol:ty, into $native:ty) => {
-        impl IntoNativeType for $protocol {
-            type NativeType = $native;
+        impl IntoNative for $protocol {
+            type Native = $native;
         }
     };
 }
@@ -37,6 +37,6 @@ impl_into_native_for! { TypeU64, into u64 }
 impl_into_native_for! { TypeF32, into f32 }
 impl_into_native_for! { TypeF64, into f64 }
 
-impl<P: IntoNativeType, const N: usize> IntoNativeType for [P; N] {
-    type NativeType = [P::NativeType; N];
+impl<P: IntoNative, const N: usize> IntoNative for [P; N] {
+    type Native = [P::Native; N];
 }

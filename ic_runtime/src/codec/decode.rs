@@ -4,7 +4,7 @@ use core::ops::Deref;
 use core::ptr::NonNull;
 
 use crate::codec::convert::from::FromProtocolType;
-use crate::codec::convert::into::IntoNativeType;
+use crate::codec::convert::into::IntoNative;
 use crate::codec::reference::TypeRef;
 use crate::codec::types::core::{
     ProtocolType, TypeF32, TypeF64, TypeI8, TypeI16, TypeI32, TypeI64, TypeU8, TypeU16, TypeU32,
@@ -144,12 +144,12 @@ impl<T: ?Sized, D> Decoded<T, D> {
     }
 
     /// Transforms the value into native type and consumes the current instance.
-    pub fn into_native(self) -> T::NativeType
+    pub fn into_native(self) -> T::Native
     where
-        T: ProtocolType + IntoNativeType,
-        T::NativeType: for<'de> FromProtocolType<T::Type<'de>>,
+        T: ProtocolType + IntoNative,
+        T::Native: for<'de> FromProtocolType<T::Type<'de>>,
     {
-        self.into_native_as::<T::NativeType>()
+        self.into_native_as::<T::Native>()
     }
 }
 

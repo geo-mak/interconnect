@@ -141,39 +141,3 @@ Components ask for memory from an explicitly passed memory server that may provi
 The core idea is to enable sharing and reusability of the same acquired memory across components and layers as much as possible.
 
 Interconnect's design is **centered** around memory subsystems and their implementation for various cases is an **essential** part of the project.
-
-## AI usage and policy
-Since I started tinkering with the so-called "AI", namely "LLMs", I was both impressed and skeptical, 
-impressed for what has been achieved and skeptical of what it could be done with it compared to the "hype" surrounding this technology.
-
-To make this section short and straightforward, I have used this technology in the context of software development exclusively for:
-
-- Prototyping of designs where code quality or strict correctness doesn't matter compared to the effort of evaluating a strategy in general.
-
-- Prototyping of unit-tests according to a pre-exiting pattern, which I end up later refactoring and polishing manually.
-
-- Codebase "research" for building a picture of a particular solution implemented in other codebases that forms a multi-file, multi-package puzzle in large codebases with the intent of narrowing the search-scope with various accuracy instead of getting lost in details of that codebase for days.
-
-- Review of code I wrote when I was tired, and where any review could be better than nothing, even if the suggestions would be inaccurate or flat out nonsense.
-
-I presume that this technology is here to stay as part of what could be called "smart" IDE, but I don't think it is important in the making of any serious software that people could rely on for these **main** reasons:
-
-- It is inherently faulty in a domain where a trivial mistake could mean disasters or deaths.
-- Writing code is not the challenge (at least in my case), most of my time is spent in design and finding optimization's tricks.
-- Maintaining a codebase requires understanding its inner working in its entirety.
-- Generating a pile to get it "polished" later is a naïve and misguided approach. Refactoring a foreign codebase is more time-consuming than writing from scratch.
-- Distractive to crisp thinking, where a vivid attention must be given.
-- Induces overconfidence and false sense of achievement.
-
-So the reality is not black or white, it is actually very colorful, but the overhype and the unreasonable "bullying" in the last years indicate that the software industry in general is still in its infancy and not up to the task of understanding the effect of the increasing role of software systems in managing the modern world, from digital services to critical infrastructure, and taking it seriously.
-
-I promise that all of the future code which will make it into the codebase is fully human-crafted and audited. 
-I don't have "productivity" concerns, because I have realized that most of the industry in the last decades was very "productive" at piling up utter garbage!
-
-Feedbacks and suggestions are welcomed, but this project will not have an open code-contribution model.
-All the code that gets merged into the codebase will be authored by the project's members and delegated persons **only**, 
-hence there is no public policy of disclosure.
-
-I am very happy to know that more and more people are leaving this "bubble" and starting to realize the limitation of this technology, basically seeing it for what it is, at least in this domain, and go back to do "serious" things in the hope that they could be impactful in one way or another.
-
-Btw, I am already a "prompt engineer", I prompt with **semantic"** language using Rust's syntax, and let the marvelous **semantic** agent, the Rust's compiler, generate the machine-code for me! and I hope this marvelous **semantic** agent gets even better.

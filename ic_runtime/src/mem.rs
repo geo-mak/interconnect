@@ -804,40 +804,36 @@ mod tests_io_pool {
         let pool = IOPool::new(1, 64);
         let mut segment = pool.acquire().expect("must get a segment");
 
-        {
-            segment.write_zero_bytes(5);
-            // Aligned to BasicBlock.
-            assert_eq!(segment.len_bytes(), 8);
+        segment.write_zero_bytes(5);
+        assert_eq!(segment.len_bytes(), 8);
 
-            segment.write_encoded(b"there!");
-            // 8 (previous) + 8 (aligned "there!").
-            assert_eq!(segment.len_bytes(), 16);
+        segment.write_encoded(b"there!");
+        assert_eq!(segment.len_bytes(), 16);
 
-            // Patch the first block.
-            segment.write_encoded_at(0, b"hi");
+        segment.write_encoded_at(0, b"hi");
+
+        assert_eq!(segment.remaining_blocks(), 2);
+
+        let block_0 = segment.get_blocks_pointer(1).expect("must get blocks");
+        assert_eq!(segment.remaining_blocks(), 1);
+
+        let block_1 = segment.get_blocks_pointer(1).expect("must get blocks");
+        assert_eq!(segment.remaining_blocks(), 0);
+
+        assert!(segment.get_blocks_pointer(1).is_err());
+
+        unsafe {
+            let block_0_slice = from_raw_parts(block_0.as_ptr().cast::<u8>(), 2);
+            assert_eq!(block_0_slice, b"hi");
+
+            let block_1_slice = from_raw_parts(block_1.as_ptr().cast::<u8>(), 6);
+            assert_eq!(block_1_slice, b"there!");
         }
 
-        {
-            assert_eq!(segment.remaining_blocks(), 2);
+        let data = segment.as_slice();
 
-            let block_0 = segment.get_blocks_pointer(1).expect("must get blocks");
-            assert_eq!(segment.remaining_blocks(), 1);
-
-            let block_1 = segment.get_blocks_pointer(1).expect("must get blocks");
-            assert_eq!(segment.remaining_blocks(), 0);
-
-            assert!(segment.get_blocks_pointer(1).is_err());
-
-            unsafe {
-                assert_eq!(from_raw_parts(block_0.as_ptr().cast::<u8>(), 2), b"hi");
-                assert_eq!(from_raw_parts(block_1.as_ptr().cast::<u8>(), 6), b"there!");
-            }
-
-            let data = segment.as_slice();
-            // Zeroed padding of the last block.
-            assert_eq!(data[14], 0);
-            assert_eq!(data[15], 0);
-        }
+        assert_eq!(data[14], 0);
+        assert_eq!(data[15], 0);
     }
 }
 

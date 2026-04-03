@@ -42,7 +42,7 @@ There are social aspects to automation that need addressing in a proper way that
 
 The main concerns are the technology deployed for automation and the authenticity and trust regarding human communication.
 
-ML is fundamentally a recognition technology suitable for domains that can't be easily translated to semantic rules. Using this technology as natural language interface wired to semantic components or for translation on-the-fly (think tourists) is one thing, and using it for high-precision creative tasks are totally different things.
+ML is fundamentally a recognition technology suitable for domains that can't be easily translated to semantic rules. Using this technology for making a natural language interface wired to semantic components or for translation on-the-fly (think tourists) is one thing, and using it for high-precision creative tasks are totally different things.
 
 Automation is fundamentally a **design-problem** not a **data-problem**. The trend of using LLMs as agents is a primitive and lazy approach, because it tries to glue a pile on top of an existing pile of outdated and bad designs. 
 
@@ -60,6 +60,6 @@ So the better approach could be trying to reduce the need to know and maintain a
 
 - Redesigning for **effective** simplicity (e.g. Reducing noise and condensing the design).
 
-The main point here is to **design** for the problem instead of **throwing data** on the problem, which would render a trustworthy and **efficient** solution to it.
+The main point here is to **design/redesign** for the problem instead of throwing **data and statistical engines** on the problem, which would render a **trustworthy** and **efficient** solution to it.
 
 I respect other's choices, but I think the current trend is fundamentally wrong, because it induces piling up complexity, without rethinking the foundations.

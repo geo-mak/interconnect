@@ -36,3 +36,30 @@ The project's internal policy in this regard specifies the following:
 - All documentations and publications made available by this project **must** be **fully** written and audited by humans.
 
 Using of LLMs for anything else remains a personal choice, as long the internal policy remains respected.
+
+This project is not against automation, in fact it is **designed** to empower digital transformation and automation. 
+There are social aspects to automation that need addressing in a proper way that maintains the social order and human dignity, but I think that we as humanity are capable of doing this if we talk to each other in an organized and transparent manner instead of being reactive and mean to each other.
+
+The main concerns are the technology deployed for automation and the authenticity and trust regarding human communication.
+
+ML is fundamentally a recognition technology suitable for domains that can't be easily translated to semantic rules. Using this technology as natural language interface wired to semantic components or for translation on-the-fly (think tourists) is one thing, and using it for high-precision creative tasks are totally different things.
+
+Automation is fundamentally a **design-problem** not a **data-problem**. The trend of using LLMs as agents is a primitive and lazy approach, because it tries to glue a pile on top of an existing pile of outdated and bad designs. 
+
+Moreover, people who are enthusiastic about the trend of of using LLMs as one-stop-shop agents fail to realize that the "false" sense of empowerment they might feel is caused by sheer complexity of the current systems and tools, which is in part a by-product of bad accumulated designs of the last decades, and an outcome to a trend of startups to pile up whatever in order to make some **noise/news**.
+
+So the better approach could be trying to reduce the need to know and maintain a lot of arcane noisy things by means of:
+
+- Better understanding of the current designs, and their history (It is not, it has been made as such, so why).
+
+- Making programming languages as **integrated programming systems** with various components and tools to aid development.
+
+- Better consistency and standardization.
+
+- Proper and better **documentations** that are easily accessible and searchable.
+
+- Redesigning for **effective** simplicity (e.g. Reducing noise and condensing the design).
+
+The main point here is to **design** for the problem instead of **throwing data** on the problem, which would render a trustworthy and **efficient** solution to it.
+
+I respect other's choices, but I think the current trend is fundamentally wrong, because it induces piling up complexity, without rethinking the foundations.

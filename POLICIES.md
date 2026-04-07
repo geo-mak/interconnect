@@ -48,6 +48,14 @@ Automation is fundamentally a **design-problem** not a **data-problem**. The tre
 
 Moreover, people who are enthusiastic about the trend of using LLMs as one-stop-shop agents fail to realize that the "false" sense of empowerment they might feel is caused by sheer complexity of the current systems and tools, which is in part a by-product of accumulated outdated and bad designs of the last decades, and an outcome to a trend of startups to pile up whatever in order to make some **noise/news**.
 
+As a little piece of ancient history related to this, I have proposed a project for integrating LLMs as automating agents at a university I was affiliated with back in **2023**, less than one year after releasing ChatGPT, where I was treated like a crackpot proposing a cracked idea, and my project ended up being rejected. This was part of my long-time quest to make organizations software-first (software defined) with a very high level of automation, where the human role lies in process design, policies, engineering, maintenance and support.
+
+During that time I was continuously experimenting with the idea and writing prototypes in my free time using Python, until I reaching a point where I have decided that this language is dead end and switching now is better than reimplementing later, and this was where I decided to roll up my sleeves, or more accurately, to take off my clothes and swim into the deep water of Rust and its libraries in a very serious and dedicated way. Other language like C/C++ were too old and messy to my taste, other newer languages were too unstable and less satisfying in terms of taste.
+
+In that spirit, I have started several projects using Rust exclusively for exploring the data, connectivity and concurrency landscape of Rust and its sharp edges and limits, and to dig into the "unsafe" world of Rust and its internals in order make mistakes and learn things as early as possible. Many projects ended up being abandoned, as they have reached their limits of delivering viable lessons.
+
+The point of mentioning this little piece of ancient history is that probably most of the current enthusiasts and preachers are **"too little, too late"** to the party, where they might think they are the "frontier thinkers" lecturing others how to adapt to the "new world order".
+
 So the better approach could be trying to reduce the need to know and maintain a lot of arcane noisy things by means of:
 
 - Better understanding of the current designs, and their history (It is not, it has been made as such, so why).

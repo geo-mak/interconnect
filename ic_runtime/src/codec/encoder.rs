@@ -5,7 +5,6 @@ use core::slice::from_raw_parts;
 use crate::codec::encode::Encode;
 use crate::codec::reference::TypeRef;
 use crate::codec::types::core::ProtocolType;
-use crate::codec::types::limits::TypeLimits;
 use crate::error::{ErrKind, ProtocolError, ProtocolResult};
 
 pub struct Skip<'a, E: ?Sized, T> {
@@ -91,7 +90,7 @@ pub trait Encoder {
     /// Encodes a group of iterable elements into the encoder.
     fn encode_next_group<P, T, I>(&mut self, values: I, limits: P::Limits) -> ProtocolResult<()>
     where
-        P: ProtocolType + TypeLimits,
+        P: ProtocolType,
         T: Encode<P, Self>,
         I: ExactSizeIterator<Item = T>,
     {
@@ -121,7 +120,7 @@ pub trait Encoder {
     /// Encodes a single value into the encoder.
     fn encode_next<P, T>(&mut self, value: T, limits: P::Limits) -> ProtocolResult<()>
     where
-        P: ProtocolType + TypeLimits,
+        P: ProtocolType,
         T: Encode<P, Self>,
     {
         self.encode_next_group(core::iter::once(value), limits)

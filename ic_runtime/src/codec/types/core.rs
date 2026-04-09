@@ -501,9 +501,9 @@ unsafe impl<T: ProtocolType, const N: usize> ProtocolType for [T; N] {
     type Type<'de> = [T::Type<'de>; N];
 
     #[inline]
-    fn write_zero_padding(to: &mut MaybeUninit<Self>) {
+    fn write_zero_padding(storage: &mut MaybeUninit<Self>) {
         for i in 0..N {
-            let item = unsafe { &mut *to.as_mut_ptr().cast::<MaybeUninit<T>>().add(i) };
+            let item = unsafe { &mut *storage.as_mut_ptr().cast::<MaybeUninit<T>>().add(i) };
             T::write_zero_padding(item);
         }
     }

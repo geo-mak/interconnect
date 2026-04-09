@@ -26,13 +26,16 @@ where
     pub unsafe fn write_next(&mut self, value: &T) {
         #[cfg(debug_assertions)]
         {
-            assert!(self.remaining > 0, "Storing beyond the remained capacity");
+            assert!(self.remaining > 0, "Writing beyond the remained capacity");
             self.remaining -= 1;
         }
 
         let bytes_ptr = (value as *const T).cast::<u8>();
+
         let value_bytes = unsafe { from_raw_parts(bytes_ptr, size_of::<T>()) };
+
         self.encoder.write_encoded_at(self.offset, value_bytes);
+
         self.offset += size_of::<T>();
     }
 }

@@ -14,6 +14,32 @@ pub trait TypeLimits {
     fn check_limits(value: TypeRef<'_, Self>, limits: Self::Limits) -> ProtocolResult<()>;
 }
 
+macro_rules! impl_unlimited_for {
+    ($ty:ty) => {
+        impl TypeLimits for $ty {
+            type Limits = ();
+
+            #[inline]
+            fn check_limits(_: TypeRef<'_, Self>, _: ()) -> ProtocolResult<()> {
+                Ok(())
+            }
+        }
+    };
+}
+
+impl_unlimited_for!(());
+impl_unlimited_for!(bool);
+impl_unlimited_for!(TypeI8);
+impl_unlimited_for!(TypeI16);
+impl_unlimited_for!(TypeI32);
+impl_unlimited_for!(TypeI64);
+impl_unlimited_for!(TypeU8);
+impl_unlimited_for!(TypeU16);
+impl_unlimited_for!(TypeU32);
+impl_unlimited_for!(TypeU64);
+impl_unlimited_for!(TypeF32);
+impl_unlimited_for!(TypeF64);
+
 impl<T, const N: usize> TypeLimits for [T; N]
 where
     T: TypeLimits,
@@ -33,32 +59,3 @@ where
         Ok(())
     }
 }
-
-macro_rules! impl_unlimited_for {
-    ($ty:ty) => {
-        impl TypeLimits for $ty {
-            type Limits = ();
-
-            #[inline]
-            fn check_limits(_: TypeRef<'_, Self>, _: ()) -> ProtocolResult<()> {
-                Ok(())
-            }
-        }
-    };
-}
-
-impl_unlimited_for!(());
-impl_unlimited_for!(bool);
-
-impl_unlimited_for!(TypeI8);
-impl_unlimited_for!(TypeI16);
-impl_unlimited_for!(TypeI32);
-impl_unlimited_for!(TypeI64);
-
-impl_unlimited_for!(TypeU8);
-impl_unlimited_for!(TypeU16);
-impl_unlimited_for!(TypeU32);
-impl_unlimited_for!(TypeU64);
-
-impl_unlimited_for!(TypeF32);
-impl_unlimited_for!(TypeF64);

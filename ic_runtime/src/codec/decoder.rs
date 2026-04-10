@@ -95,7 +95,7 @@ pub unsafe trait Decoder {
     fn decode_associated_type<'de, T>(
         self: &mut &'de mut Self,
         limits: T::Limits,
-    ) -> Result<T::Type<'de>, ProtocolError>
+    ) -> ProtocolResult<T::Type<'de>>
     where
         T: Decode<Self>,
     {

@@ -83,22 +83,26 @@ where
 
         let recv_task = executor.spawn(async move {
             let reporter = &client_state.reporter;
+
+            // TODO: Refine error-handling, the current implementation is too rigid regarding errors.
             loop {
                 let Some(mut recv_segment) = client_state.provider.acquire_receive() else {
                     reporter.error("Failed to get memory for receiving", &NoContent);
                     break;
                 };
 
-                match receiver.receive(&mut recv_segment).await {
-                    Ok(_) => {
-                        if let Err(err) = Self::process_message(recv_segment, &client_state).await {
-                            reporter.error("Processing error", &err);
-                            break;
-                        }
-                    }
+                if let Err(err) = receiver.receive(&mut recv_segment).await {
+                    reporter.error("Receiving error", &err);
+                    break;
+                };
 
+                match TypeMessageHeader::decode_header(&mut recv_segment) {
+                    Ok((id, _directive)) => {
+                        // TODO: Directive matching according to directive-rules.
+                        client_state.publishers.publish(id, Ok(recv_segment));
+                    }
                     Err(err) => {
-                        reporter.error("Receiving error", &err);
+                        reporter.error("Failed to decode header", &err);
                         break;
                     }
                 }
@@ -106,16 +110,6 @@ where
         });
 
         Ok(Self { state, recv_task })
-    }
-
-    async fn process_message(
-        mut message: P::ReceiveSegment,
-        state: &Arc<ClientState<T::Sender, E, P, R>>,
-    ) -> ProtocolResult<()> {
-        let (id, _directive) = { TypeMessageHeader::decode_header(&mut message)? };
-        // TODO: Directive matching according to directive-rules.
-        state.publishers.publish(id, Ok(message));
-        Ok(())
     }
 
     async fn send<'a, I, M, O>(

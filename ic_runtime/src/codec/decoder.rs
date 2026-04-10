@@ -33,9 +33,6 @@ pub struct Decoded<T: ?Sized, D> {
     decoder: ManuallyDrop<D>,
 }
 
-// Safety:
-// - `Send` if `T` and `D` are `Send`.
-// - `Sync` if `T` and `D` are `Sync`.
 unsafe impl<T: Send + ?Sized, D: Send> Send for Decoded<T, D> {}
 unsafe impl<T: Sync + ?Sized, D: Sync> Sync for Decoded<T, D> {}
 
@@ -183,6 +180,10 @@ pub unsafe trait Decoder {
         unsafe { Ok(TypeRef::new_slice_assume_init(blocks_ptr.cast(), len)) }
     }
 
+    /// Attempts to decode the available data as a value of type `T`.
+    ///
+    /// Consumes the instance and returns a decoded value as owned value,
+    /// which can be accessed as value of type `T`.
     fn decode<T>(mut self, limits: T::Limits) -> ProtocolResult<Decoded<T, Self>>
     where
         T: Decode<Self>,
@@ -197,7 +198,12 @@ pub unsafe trait Decoder {
         unsafe { Ok(Decoded::new_assume_valid(view.as_ptr_mut(), self)) }
     }
 
-    fn decode_associated_type<'de, T>(
+    /// Attempts to decode the available data as a value of type `T::Type`.
+    ///
+    /// Returns a reference to the value after **advancing** the decoder.
+    ///
+    /// Advancing the decoder means that the bytes needed to construct `T::Type` will be skipped after this call.
+    fn decode_ref<'de, T>(
         self: &mut &'de mut Self,
         limits: T::Limits,
     ) -> ProtocolResult<T::Type<'de>>

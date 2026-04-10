@@ -7,7 +7,7 @@ use crate::codec::types::limits::TypeLimits;
 
 /// Interconnect's protocol type.
 pub unsafe trait ProtocolType: 'static + Sized + TypeLimits {
-    /// The referenced inner type.
+    /// The type represented by the this instance.
     type Type<'de>: TypeLimits<Limits = Self::Limits>;
 
     /// Writes zeroes to the padding for this type if applicable.

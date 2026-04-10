@@ -46,7 +46,7 @@ impl TypeMessageHeader {
     }
 
     pub fn decode_header<D: Decoder>(mut decoder: &mut D) -> ProtocolResult<(u64, u64)> {
-        let header = decoder.decode_associated_type::<Self>(())?;
+        let header = decoder.decode_ref::<Self>(())?;
         Ok((*header.id, *header.directive))
     }
 }

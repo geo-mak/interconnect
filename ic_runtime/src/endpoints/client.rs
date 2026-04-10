@@ -5,8 +5,8 @@ use std::sync::Arc;
 
 use tokio::sync::Mutex;
 
-use crate::codec::decode::{Decode, Decoded};
-use crate::codec::decoder::Decoder;
+use crate::codec::decode::Decode;
+use crate::codec::decoder::{Decoded, Decoder};
 use crate::codec::encode::Encode;
 use crate::codec::encoder::Encoder;
 use crate::codec::types::core::ProtocolType;

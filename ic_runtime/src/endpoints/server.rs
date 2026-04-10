@@ -460,7 +460,7 @@ where
 
                     if let Err(err) = service.call(directive, recv_segment, &mut context).await {
                         reporter.error(
-                            "Application failed to process the message",
+                            "Service failed to process the message",
                             &format_args!("{err}. Peer: {peer_id:?}"),
                         );
                         return;

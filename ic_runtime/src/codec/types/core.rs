@@ -11,7 +11,7 @@ pub unsafe trait ProtocolType: 'static + Sized + TypeLimits {
     type Type<'de>: TypeLimits<Limits = Self::Limits>;
 
     /// Writes zeroes to the padding for this type if applicable.
-    fn write_zero_padding(to: &mut MaybeUninit<Self>);
+    fn set_padding_zeros(storage: &mut MaybeUninit<Self>);
 }
 
 macro_rules! impl_protocol_type_for {
@@ -20,7 +20,7 @@ macro_rules! impl_protocol_type_for {
             type Type<'de> = Self;
 
             #[inline]
-            fn write_zero_padding(_: &mut MaybeUninit<Self>) {}
+            fn set_padding_zeros(_: &mut MaybeUninit<Self>) {}
         }
     };
 }
@@ -505,10 +505,10 @@ unsafe impl<T: ProtocolType, const N: usize> ProtocolType for [T; N] {
     type Type<'de> = [T::Type<'de>; N];
 
     #[inline]
-    fn write_zero_padding(storage: &mut MaybeUninit<Self>) {
+    fn set_padding_zeros(storage: &mut MaybeUninit<Self>) {
         for i in 0..N {
             let item = unsafe { &mut *storage.as_mut_ptr().cast::<MaybeUninit<T>>().add(i) };
-            T::write_zero_padding(item);
+            T::set_padding_zeros(item);
         }
     }
 }

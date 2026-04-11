@@ -109,7 +109,7 @@ pub trait Encoder {
         if let Some(mut outputs) = self.skip::<P>(values.len()) {
             let mut value_store = MaybeUninit::<P>::uninit();
 
-            P::write_zero_padding(&mut value_store);
+            P::set_padding_zeros(&mut value_store);
 
             for value in values {
                 value.encode(outputs.encoder, &mut value_store, limits)?;

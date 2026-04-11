@@ -64,7 +64,7 @@ unsafe impl ProtocolType for TypeMessageHeader {
     type Type<'de> = Self;
 
     #[inline]
-    fn write_zero_padding(_: &mut MaybeUninit<Self>) {}
+    fn set_padding_zeros(_: &mut MaybeUninit<Self>) {}
 }
 
 unsafe impl<E: ?Sized> Encode<TypeMessageHeader, E> for TypeMessageHeader {

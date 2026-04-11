@@ -1,4 +1,4 @@
-# Contribution's policies and guidelines
+# Contribution's guidelines
 
 Within the context of this project, contributions are defined as: 
 
@@ -26,3 +26,9 @@ The project's internal contribution's policy specifies the following:
 - All documentations and publications made available by this project **must** be **fully** written and audited by humans.
 
 Contributors are free to use LLMs for anything else, as long the internal policy remains respected.
+
+The adopted stances and policies regarding the usage of LLMs would eventually end up **breaking** the the ecosystem and impose **bans** on packages, tools and languages that permit writing code and content with LLMs regardless of specific details.
+
+Conflict in terms of policies is viewed as a **strategic risk** to the project as **core** technology. 
+
+Besides ensuring **clarity**, **maintainability** and **human-engagement**, these guidelines aim at **protecting** the project from being in conflict with other projects that would choose to use it.

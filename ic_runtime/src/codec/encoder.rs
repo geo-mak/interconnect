@@ -58,7 +58,7 @@ pub trait Encoder {
     /// Returns `false` in case of lack of memory or failure to allocate more.
     ///
     /// The length of the encoder is advanced to include the zeroed bytes and the padding bytes.
-    fn write_zero_bytes(&mut self, count: usize) -> bool;
+    fn memset_zero(&mut self, count: usize) -> bool;
 
     /// Appends the provided bytes to the encoder.
     ///
@@ -83,7 +83,7 @@ pub trait Encoder {
 
         let items_bytes = size_of::<T>() * count;
 
-        if !self.write_zero_bytes(items_bytes) {
+        if !self.memset_zero(items_bytes) {
             return None;
         };
 

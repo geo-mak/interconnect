@@ -29,6 +29,7 @@ macro_rules! impl_core_op_unary {
     ($trait:ident::$fn:ident, $name:ident : $inner:ty) => {
         impl core::ops::$trait for $name {
             type Output = <$inner as core::ops::$trait>::Output;
+
             #[inline]
             fn $fn(self) -> Self::Output {
                 self.0.$fn()
@@ -41,6 +42,7 @@ macro_rules! impl_core_op_binary {
     ($trait:ident::$fn:ident, $name:ident : $inner:ty) => {
         impl core::ops::$trait<$inner> for $name {
             type Output = $inner;
+
             #[inline]
             fn $fn(self, rhs: $inner) -> Self::Output {
                 self.0.$fn(rhs)
@@ -49,6 +51,7 @@ macro_rules! impl_core_op_binary {
 
         impl core::ops::$trait<&$inner> for $name {
             type Output = $inner;
+
             #[inline]
             fn $fn(self, rhs: &$inner) -> Self::Output {
                 self.0.$fn(*rhs)
@@ -57,6 +60,7 @@ macro_rules! impl_core_op_binary {
 
         impl core::ops::$trait<$name> for $name {
             type Output = $inner;
+
             #[inline]
             fn $fn(self, rhs: $name) -> Self::Output {
                 self.0.$fn(rhs.0)
@@ -165,7 +169,7 @@ macro_rules! impl_fmt {
         impl core::fmt::$trait for $name {
             #[inline]
             fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
-                ::core::fmt::$trait::fmt(&self.0, f)
+                core::fmt::$trait::fmt(&self.0, f)
             }
         }
     };

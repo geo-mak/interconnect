@@ -16,6 +16,15 @@ pub struct Skip<'a, E: ?Sized, T> {
     remaining: usize,
 }
 
+#[cfg(debug_assertions)]
+const fn debug_assert_writing_inbounds<E: ?Sized, T>(instance: &mut Skip<'_, E, T>) {
+    assert!(
+        instance.remaining > 0,
+        "Writing beyond the remained capacity"
+    );
+    instance.remaining -= 1;
+}
+
 impl<E, T> Skip<'_, E, T>
 where
     E: Encoder + ?Sized,
@@ -24,19 +33,17 @@ where
     ///
     /// Safety: `value` must be fully initialized with added **padding**.
     pub unsafe fn write_next(&mut self, value: &T) {
-        #[cfg(debug_assertions)]
-        {
-            assert!(self.remaining > 0, "Writing beyond the remained capacity");
-            self.remaining -= 1;
-        }
+        debug_assert_writing_inbounds(self);
 
         let bytes_ptr = (value as *const T).cast::<u8>();
 
-        let value_bytes = unsafe { from_raw_parts(bytes_ptr, size_of::<T>()) };
+        let value_size = size_of::<T>();
+
+        let value_bytes = unsafe { from_raw_parts(bytes_ptr, value_size) };
 
         self.encoder.write_encoded_at(self.offset, value_bytes);
 
-        self.offset += size_of::<T>();
+        self.offset += value_size;
     }
 }
 
@@ -80,14 +87,16 @@ pub trait Encoder {
             return None;
         };
 
-        Some(Skip {
+        let instance = Skip {
             encoder: self,
             offset: current_offset,
             _t: PhantomData,
 
             #[cfg(debug_assertions)]
             remaining: count,
-        })
+        };
+
+        Some(instance)
     }
 
     /// Encodes a group of iterable elements into the encoder.

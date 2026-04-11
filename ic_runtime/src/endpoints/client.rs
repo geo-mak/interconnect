@@ -83,10 +83,11 @@ where
 
         let recv_task = executor.spawn(async move {
             let reporter = &client_state.reporter;
+            let provider = &client_state.provider;
 
             // TODO: Refine error-handling, the current implementation is too rigid regarding errors.
             loop {
-                let Some(mut recv_segment) = client_state.provider.acquire_receive() else {
+                let Some(mut recv_segment) = provider.acquire_receive() else {
                     reporter.error("Failed to get memory for receiving", &NoContent);
                     break;
                 };

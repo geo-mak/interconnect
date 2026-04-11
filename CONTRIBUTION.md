@@ -1,4 +1,4 @@
-# Contribution's guidelines
+# Contribution's policies
 
 Within the context of this project, contributions are defined as: 
 
@@ -9,7 +9,7 @@ These activities are classified as the following:
 - Discussions of proposals or decisions.
 - Reporting concerns.
 
-Policies and guidelines in this document apply to the activities specified above.
+Policies in this document apply to the activities specified above.
 
 ## Authoring and communication
 
@@ -31,8 +31,8 @@ The adopted stances and policies regarding the usage of LLMs would eventually en
 
 Conflict in terms of policies is viewed as a **strategic risk** to the project as **core** technology. 
 
-Besides ensuring **clarity**, **maintainability** and **human-engagement**, these guidelines aim at **protecting** the project from being in conflict with other projects that would choose to use it.
+Besides ensuring **clarity**, **maintainability** and **human-engagement**, this policy aims at **protecting** the project from being in conflict with other projects that would choose to use it.
 
-Until now there are no guidelines regarding the policy of the used tools and packages by this project, but eventually all used tools and packages are **expected** to have policy in this regard. If there is no public policy available, a **request-for-comment** with **deadline** shall be sent for clarification. In case there was no response to the RFC after the deadline, the package shall be flagged for **removal** in planned mode. The removal and substitution protocol will be provided later.
+Regarding used tools and dependencies, all of them are **expected** to declare a public policy in this regard. If there is no public policy available, a **request for comment** with **deadline** shall be sent for clarification. In case there was no response to the RFC after the deadline, the dependency or tool shall be flagged for **removal** in planned mode. The removal and substitution protocol will be provided later.
 
 Conflict between project's policies and the declared policies of dependencies is still an **open case** and subject to attention in the meantime.

@@ -71,9 +71,9 @@ The runtime-library provides components to construct a compliant implementation 
 
 The specifications and the details of the data model are described in-depth in "SPECS" file and updated regularly.
 
-Moreover, Interconnect defines its own IDL (IPC Definition Language) and provides toolchain like compiler and code-generation backends for generating integrated endpoints that conform to the user-defined interface.
+Moreover, Interconnect defines its own SDL (Service Definition Language) and provides toolchain like compiler and code-generation backends for generating integrated endpoints that conform to the user-defined interface.
 
-The IDL and its toolchain are an **usability and safety** option for making use of Interconnect in an automated manner.
+The SDL and its toolchain are an **usability and safety** option for making use of Interconnect in an automated manner.
 
 The architecture of the compiler and other details related to the toolchain are not published yet.
 

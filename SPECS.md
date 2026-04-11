@@ -1,4 +1,4 @@
-# Interconnect IPC Definition Language Specification (Draft)
+# Interconnect Service Definition Language Specification (Draft)
 
 This document defines the specification of interconnect's data model and how it is expressed in its language.
 

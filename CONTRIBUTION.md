@@ -1,5 +1,16 @@
 # Contribution's policies and guidelines
 
+Within the context of this project, contributions are defined as: 
+
+> Activities aimed at maintaining, improving and evolving the project. 
+
+These activities are classified as the following:
+- Proposals of ideas, code and documentation.
+- Discussions of proposals or decisions.
+- Reporting concerns.
+
+Policies and guidelines in this document apply to the activities specified above.
+
 ## Authoring and communication
 
 Feedbacks, suggestions and ideas are welcomed, but all related issues **must** be authored by humans.

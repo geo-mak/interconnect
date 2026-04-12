@@ -688,10 +688,10 @@ impl IORing {
         self.seg_size
     }
 
-    const fn segment_data_of(&self, segment_index: usize) -> &mut [u8] {
+    const fn slice_at(&self, segment_index: usize) -> &mut [u8] {
         let offset = segment_index << self.offset_shift;
         unsafe {
-            std::slice::from_raw_parts_mut(
+            from_raw_parts_mut(
                 self.data.as_ptr().add(offset) as *mut u8,
                 self.seg_size as usize,
             )
@@ -719,14 +719,15 @@ impl IORing {
                 .is_ok()
             {
                 let metadata = &self.metadata[segment_index];
-                let segment_data = self.segment_data_of(segment_index);
 
                 debug_assert!(metadata.written.get() == 0);
 
-                return Some(IORingSegment {
-                    data: segment_data,
+                let segment = IORingSegment {
+                    data: self.slice_at(segment_index),
                     metadata,
-                });
+                };
+
+                return Some(segment);
             }
         }
     }
@@ -752,7 +753,7 @@ impl IORing {
 
             match metadata.state.load(Acquire) {
                 SEG_PUBLISHED => {
-                    let segment_data = self.segment_data_of(segment_index);
+                    let segment_data = self.slice_at(segment_index);
                     return Some(IORingPubSegment::new(self, segment_data, metadata, read));
                 }
                 SEG_NONE => return None,

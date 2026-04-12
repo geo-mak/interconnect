@@ -2,6 +2,8 @@ Interconnect is a modular framework for constructing inter-process communication
 
 Interconnect's design aims at providing OS-level framework for bridging the interaction between user-space applications, services and devices, local and remote alike, where "everything" is **neither** an **object** nor a **file**, but what it actually is, and what it declares in terms of functionalities exposed directly via well-defined bindings. 
 
+> **Note**: The design details apply to the reference implementation in **Rust**. Implementations in other languages may diverge according to the capabilities and limitations of the implementation language.
+
 ## Architectural model and implementation highlights
 
 Interconnect has a dataflow-oriented architecture where data availability drives computation.

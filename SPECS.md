@@ -85,12 +85,13 @@ Compound types aggregate multiple fields or variants.
 **Storage**: Inlined.
 
 **Syntax**:
-  ```rust 
-    enum EnumIdent: type { 
-      VariantIdent = 0,
-      ..
-    }
-  ```
+
+```rust 
+enum EnumIdent: type { 
+  VariantIdent = 0,
+  ..
+}
+```
 
 **Constraints**: 
   - Enums can't be empty.
@@ -99,14 +100,15 @@ Compound types aggregate multiple fields or variants.
 **Modification**: Modifying the tags of the variants is a breaking change.
 
 **Example**:
-  ```rust
-    enum EnumA: u8 {
-      A = 0,
-      B = 4,
-      C = 2,
-      D = 3,
-    }
-  ```
+
+```rust
+enum EnumA: u8 {
+  A = 0,
+  B = 4,
+  C = 2,
+  D = 3,
+}
+```
 
 ### Union
 
@@ -119,12 +121,13 @@ Compound types aggregate multiple fields or variants.
   - Out-of-line: Active member's data.
 
 **Syntax**:
-  ```rust 
-    union UnionIdent {
-      1: MemberIdent: type,
-      ..
-    }
-  ```
+
+```rust 
+union UnionIdent {
+  1: MemberIdent: type,
+  ..
+}
+```
 
 **Constraints**: 
   - Unions can't be empty.
@@ -134,14 +137,15 @@ Compound types aggregate multiple fields or variants.
 **Modification**: Modifying members or their tags is a breaking change.
 
 **Example**:
-  ```rust
-    // 16-bytes inline size aligned to 8 bytes.
-    union UnionA {
-      1: MemberA: StructA,
-      2: MemberB: EnumA,
-      3: MemberC: f32,
-    }
-  ```
+
+```rust
+// 16-bytes inline size aligned to 8 bytes.
+union UnionA {
+  1: MemberA: StructA,
+  2: MemberB: EnumA,
+  3: MemberC: f32,
+}
+```
 
 ### Struct
 
@@ -152,12 +156,13 @@ Compound types aggregate multiple fields or variants.
 **Storage**: Inlined.
 
 **Syntax**:
-  ```rust
-    struct StructIdent { 
-      ident: type, 
-      ..
-    }
-  ```
+
+```rust
+struct StructIdent { 
+  ident: type, 
+  ..
+}
+```
 
 **Constraints**: Structs can't be empty.
 
@@ -166,28 +171,29 @@ Compound types aggregate multiple fields or variants.
 Interconnect's structs are identical to C-structs in terms of memory-layout.
 
 **Example**:
-  ```rust
-    // Struct's size: 24 bytes.
-    // Struct's alignment: 8 bytes.
-    struct StructA {
-      // Size: 16,  Alignment: 8,  Offset: 0, Padding: 0.
-      first: [StructB],
-      // Size: 4,  Alignment: 4,  Offset: 16, Padding: 0.
-      second: f32,
-      // Size: 4,  Alignment: 4,  Offset: 20, Padding: 0.
-      third: f32,
-    }
-  ```
 
-  Struct's fields allow assignment of default values, but like optionality-rules their rules are still not well-defined.
+```rust
+// Struct's size: 24 bytes.
+// Struct's alignment: 8 bytes.
+struct StructA {
+  // Size: 16,  Alignment: 8,  Offset: 0, Padding: 0.
+  first: [StructB],
+  // Size: 4,  Alignment: 4,  Offset: 16, Padding: 0.
+  second: f32,
+  // Size: 4,  Alignment: 4,  Offset: 20, Padding: 0.
+  third: f32,
+}
+```
 
-  ```rust
-    struct StructB {
-      first: i32 = -5,
-      second: f64 = 5.6,
-      third: string = "hi there",
-    }
-  ```
+Struct's fields allow assignment of default values, but like optionality-rules their rules are still not well-defined.
+
+```rust
+struct StructB {
+  first: i32 = -5,
+  second: f64 = 5.6,
+  third: string = "hi there",
+}
+```
 
 ### Message
 
@@ -198,12 +204,13 @@ Interconnect's structs are identical to C-structs in terms of memory-layout.
 **Storage**: Inlined.
 
 **Syntax**:
-    ```rust
-      message MessageIdent { 
-        ident: type, 
-        ..
-      }
-    ```
+
+```rust
+message MessageIdent { 
+  ident: type, 
+  ..
+}
+```
 
 **Constraints**:
   - Messages can't be empty.
@@ -227,26 +234,27 @@ Both regions are aligned to **8-bytes**, this implies that the allocated encodin
 **Definition**: A collection of IPC functions.
 
 **Syntax**:
-  ```rust
-      interface InterfaceIdent {
-          // Niladic one-way call.
-          @attr
-          ident();
 
-          // Niladic two-way call.
-          // `: MessageDef` is equivalent to `-> MessageDef`.
-          @attr
-          ident(): MessageDef;
+```rust
+interface InterfaceIdent {
+  // Niladic one-way call.
+  @attr
+  ident();
+
+  // Niladic two-way call.
+  // `: MessageDef` is equivalent to `-> MessageDef`.
+  @attr
+  ident(): MessageDef;
           
-          // Monadic one-way call.
-          @attr
-          ident(param: MessageDef);
+  // Monadic one-way call.
+  @attr
+  ident(param: MessageDef);
 
-          // Monadic two-way call.
-          @attr
-          ident(param: MessageDef): MessageDef;
-      }
-  ```
+  // Monadic two-way call.
+  @attr
+  ident(param: MessageDef): MessageDef;
+}
+```
 
 **Constraints**: Interfaces defines functions that can take `message` types as arguments and return `message` types **only**.
 

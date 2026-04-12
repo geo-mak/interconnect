@@ -198,7 +198,7 @@ impl IOPoolSegment {
     fn release(&mut self) {
         let offset = self.segment_ptr as usize - self.pool.data.as_ptr() as usize;
         let index = offset >> self.pool.offset_shift;
-        self.pool.free_list.lock().release(index);
+        self.pool.index.lock().release(index);
     }
 }
 
@@ -351,16 +351,16 @@ unsafe impl Decoder for IOPoolSegment {
     }
 }
 
-struct IOPoolFreeList {
-    slots: Box<[usize]>,
+struct IOPoolIndex {
+    indices: Box<[usize]>,
     free: usize,
 }
 
-impl IOPoolFreeList {
+impl IOPoolIndex {
     #[inline]
     pub(crate) fn new(capacity: usize) -> Self {
-        IOPoolFreeList {
-            slots: (0..capacity).collect(),
+        IOPoolIndex {
+            indices: (0..capacity).collect(),
             free: capacity,
         }
     }
@@ -370,19 +370,19 @@ impl IOPoolFreeList {
             None
         } else {
             self.free -= 1;
-            Some(self.slots[self.free])
+            Some(self.indices[self.free])
         }
     }
 
     const fn release(&mut self, index: usize) {
-        self.slots[self.free] = index;
+        self.indices[self.free] = index;
         self.free += 1;
     }
 }
 
 struct IOSegmentsPool {
     data: Vec<BasicBlock>,
-    free_list: parking_lot::Mutex<IOPoolFreeList>,
+    index: parking_lot::Mutex<IOPoolIndex>,
     seg_size: usize,
     offset_shift: u32,
 }
@@ -408,14 +408,14 @@ impl IOPool {
         let blocks_count = capacity >> BASIC_BLOCK_SHIFT;
 
         let data = Vec::with_capacity(blocks_count);
-        let free_list = IOPoolFreeList::new(count);
+        let index = IOPoolIndex::new(count);
 
         IOPool {
             pool: Arc::new(IOSegmentsPool {
                 data,
                 seg_size,
                 offset_shift: seg_size.trailing_zeros(),
-                free_list: parking_lot::Mutex::new(free_list),
+                index: parking_lot::Mutex::new(index),
             }),
         }
     }
@@ -427,17 +427,19 @@ impl IOPool {
 
     #[inline]
     pub(crate) fn acquire(&self) -> Option<IOPoolSegment> {
-        let segment_index = self.pool.free_list.lock().acquire()?;
+        let segment_index = self.pool.index.lock().acquire()?;
 
         let offset = segment_index << self.pool.offset_shift;
         let segment_ptr = unsafe { (self.pool.data.as_ptr() as *mut u8).add(offset) };
 
-        Some(IOPoolSegment {
+        let segment = IOPoolSegment {
             pool: Arc::clone(&self.pool),
             segment_ptr,
             len: 0,
             read_offset: 0,
-        })
+        };
+
+        Some(segment)
     }
 }
 

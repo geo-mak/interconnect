@@ -178,7 +178,7 @@ unsafe impl Sync for IOPoolSegment {}
 
 impl Drop for IOPoolSegment {
     fn drop(&mut self) {
-        self.recycle();
+        self.release();
     }
 }
 
@@ -195,10 +195,10 @@ impl IOPoolSegment {
     }
 
     #[inline]
-    fn recycle(&mut self) {
+    fn release(&mut self) {
         let offset = self.segment_ptr as usize - self.pool.data.as_ptr() as usize;
         let index = offset >> self.pool.offset_shift;
-        self.pool.free_list.lock().recycle(index);
+        self.pool.free_list.lock().release(index);
     }
 }
 
@@ -374,7 +374,7 @@ impl IOPoolFreeList {
         }
     }
 
-    const fn recycle(&mut self, index: usize) {
+    const fn release(&mut self, index: usize) {
         self.slots[self.free] = index;
         self.free += 1;
     }
@@ -592,15 +592,15 @@ impl<'a> IORingPubSegment<'a> {
         &mut self.data[..written_len]
     }
 
-    /// Frees the segment to be reused.
+    /// Releases the segment to be reused.
     ///
     /// This method will panic if it is called on the same segment more than once.
     #[inline(always)]
-    pub(crate) fn recycle(self) {
+    pub(crate) fn release(self) {
         // RT_ASSERT.
         assert!(
             self.ring.read.load(Acquire) == self.read,
-            "Recycling the same segment more than once"
+            "Releasing the same segment more than once"
         );
         self.metadata.written.set(0);
         self.metadata.state.store(SEG_NONE, Relaxed);
@@ -881,15 +881,15 @@ mod tests_io_ring {
         let segment = ring.acquire();
         assert!(segment.is_none());
 
-        published.recycle();
+        published.release();
 
         let segment = ring.acquire();
         assert!(segment.is_some());
     }
 
     #[test]
-    #[should_panic = "Recycling the same segment more than once"]
-    fn test_io_ring_recycling_twice() {
+    #[should_panic = "Releasing the same segment more than once"]
+    fn test_io_ring_releasing_twice() {
         let ring = IORing::new(1, 1);
 
         let segment = ring.acquire().expect("must get a segment");
@@ -899,10 +899,10 @@ mod tests_io_ring {
         let same_published = ring.receive().expect("Must get published segment again");
 
         // Set none.
-        published.recycle();
+        published.release();
 
         // Fire in the hole...
-        same_published.recycle();
+        same_published.release();
     }
 
     #[test]
@@ -925,7 +925,7 @@ mod tests_io_ring {
         // Receiving + recycling.
         // Published consumed. Discarded recycled.
         while let Some(published) = ring.receive() {
-            published.recycle();
+            published.release();
         }
 
         // All clear.
@@ -954,7 +954,7 @@ mod tests_io_ring {
             let num = u16::from_le_bytes(dst);
             assert_eq!(num, i + 1);
 
-            published.recycle();
+            published.release();
         }
     }
 
@@ -991,7 +991,7 @@ mod tests_io_ring {
                 "thread3" => counts[3] += 1,
                 other => panic!("Unexpected data: {other}"),
             }
-            published.recycle();
+            published.release();
         }
 
         assert_eq!(counts, [30, 30, 30, 30]);

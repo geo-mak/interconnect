@@ -13,7 +13,7 @@ use crate::codec::encoder::Encoder;
 use crate::codec::types::core::TypeU64;
 use crate::error::{ErrKind, ProtocolError, ProtocolResult};
 
-/// Slice of eight bytes aligned to an 8-byte boundary.
+/// A memory segment with 8 bytes in size and alignment.
 pub type BasicBlock = TypeU64;
 pub const BASIC_BLOCK_SIZE: usize = 8;
 pub const BASIC_BLOCK_SHIFT: usize = 3;

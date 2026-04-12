@@ -12,7 +12,7 @@ use crate::error::ProtocolResult;
 pub unsafe trait Encode<P, E>: Sized
 where
     P: ProtocolType,
-    E: ?Sized
+    E: ?Sized,
 {
     /// Hint for encoders that enables fast conversion if the type can be copied bitwise.
     const COPY_CONVERSION: CopyConversion<Self, P> = CopyConversion::disable();
@@ -197,7 +197,7 @@ where
 pub unsafe trait EncodeOption<P, E>: Sized
 where
     P: ProtocolType,
-    E: ?Sized
+    E: ?Sized,
 {
     /// Encodes the optional value into the provided encoder and storage.
     fn encode_option(

@@ -116,7 +116,7 @@ impl<T> TypeRef<'_, T> {
 }
 
 impl<T, const N: usize> TypeRef<'_, [T; N]> {
-    /// Returns a instance referencing the element at the given `index`.
+    /// Returns an instance referencing the element at the given `index`.
     pub const fn index(&mut self, index: usize) -> TypeRef<'_, T> {
         assert!(index < N, "Referencing out-of-bounds");
         TypeRef {
@@ -166,10 +166,12 @@ impl<'de, T> Iterator for TypeRef<'de, [T]> {
             // Advance the slice pointer.
             self.ptr = slice_from_raw_parts_mut(first_ptr.add(1), len - 1);
 
-            Some(TypeRef {
+            let instance = TypeRef {
                 ptr: first_ptr,
                 _t: PhantomData,
-            })
+            };
+
+            Some(instance)
         }
     }
 

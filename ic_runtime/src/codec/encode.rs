@@ -9,7 +9,11 @@ use crate::codec::types::core::{
 use crate::codec::types::limits::TypeLimits;
 use crate::error::ProtocolResult;
 
-pub unsafe trait Encode<P: ProtocolType, E: ?Sized>: Sized {
+pub unsafe trait Encode<P, E>: Sized
+where
+    P: ProtocolType,
+    E: ?Sized
+{
     /// Hint for encoders that enables fast conversion if the type can be copied bitwise.
     const COPY_CONVERSION: CopyConversion<Self, P> = CopyConversion::disable();
 
@@ -20,33 +24,6 @@ pub unsafe trait Encode<P: ProtocolType, E: ?Sized>: Sized {
         storage: &mut MaybeUninit<P>,
         limits: P::Limits,
     ) -> ProtocolResult<()>;
-}
-
-unsafe impl<P: ProtocolType, E: ?Sized, T: Encode<P, E>> Encode<P, E> for Box<T> {
-    fn encode(
-        self,
-        encoder: &mut E,
-        storage: &mut MaybeUninit<P>,
-        limits: P::Limits,
-    ) -> ProtocolResult<()> {
-        T::encode(*self, encoder, storage, limits)
-    }
-}
-
-unsafe impl<'a, P, E, T> Encode<P, E> for &'a Box<T>
-where
-    P: ProtocolType,
-    E: ?Sized,
-    &'a T: Encode<P, E>,
-{
-    fn encode(
-        self,
-        encoder: &mut E,
-        storage: &mut MaybeUninit<P>,
-        limits: P::Limits,
-    ) -> ProtocolResult<()> {
-        <&'a T>::encode(self, encoder, storage, limits)
-    }
 }
 
 macro_rules! impl_encode_for {
@@ -94,17 +71,49 @@ impl_encode_for!(TypeU64);
 impl_encode_for!(TypeF32);
 impl_encode_for!(TypeF64);
 
-fn encode_into_array<V, P, E, T, const N: usize>(
-    value: V,
+unsafe impl<P, E, T> Encode<P, E> for Box<T>
+where
+    P: ProtocolType,
+    E: ?Sized,
+    T: Encode<P, E>,
+{
+    fn encode(
+        self,
+        encoder: &mut E,
+        storage: &mut MaybeUninit<P>,
+        limits: P::Limits,
+    ) -> ProtocolResult<()> {
+        T::encode(*self, encoder, storage, limits)
+    }
+}
+
+unsafe impl<'a, P, E, T> Encode<P, E> for &'a Box<T>
+where
+    P: ProtocolType,
+    E: ?Sized,
+    &'a T: Encode<P, E>,
+{
+    fn encode(
+        self,
+        encoder: &mut E,
+        storage: &mut MaybeUninit<P>,
+        limits: P::Limits,
+    ) -> ProtocolResult<()> {
+        <&'a T>::encode(self, encoder, storage, limits)
+    }
+}
+
+fn encode_into_array<A, P, E, T, const N: usize>(
+    value: A,
     encoder: &mut E,
     storage: &mut MaybeUninit<[P; N]>,
     limits: P::Limits,
 ) -> ProtocolResult<()>
 where
-    V: AsRef<[T]> + IntoIterator,
+    A: AsRef<[T]> + IntoIterator,
     P: ProtocolType,
     E: ?Sized,
-    V::Item: Encode<P, E>,
+    A::Item: Encode<P, E>,
     T: Encode<P, E>,
 {
     if T::COPY_CONVERSION.is_enabled() {
@@ -185,7 +194,11 @@ where
     }
 }
 
-pub unsafe trait EncodeOption<P: ProtocolType, E: ?Sized>: Sized {
+pub unsafe trait EncodeOption<P, E>: Sized
+where
+    P: ProtocolType,
+    E: ?Sized
+{
     /// Encodes the optional value into the provided encoder and storage.
     fn encode_option(
         instance: Option<Self>,

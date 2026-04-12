@@ -13,7 +13,7 @@ Policies in this document apply to the activities specified above.
 
 Contributors are persons who participate in the specified activities, and they are classified as the following:
 
-- Participant: Any person who engages with project in any form.
+- Participant: Any person who engages with the project in any form.
 - Collaborator: A person who works with project's members on specific task or goal.
 - Member: An official member of the project.
 

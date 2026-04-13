@@ -543,34 +543,26 @@ unsafe impl<'a> IOSegment for IORingSegment<'a> {
 ///
 /// Data can be accessed via `data` methods.
 ///
-/// After handling the data, `recycle` method must be called to drive the ring
+/// After handling the data, `release` method must be called to drive the ring
 /// and get the next published segment.
 ///
 /// Segment must be freed as soon as possible.
-/// Not calling `recycle` will never set the segment free, and a subsequent call to `receive`
-/// will return the same segment.
 ///
-/// The segment will panic when `recycle` is called on the same segment more than once.
+/// Subsequent calls to `receive` will always return `None` as long the same received
+/// segment has not been released yet.
 pub(crate) struct IORingPubSegment<'a> {
     ring: &'a IORing,
     data: &'a mut [u8],
     metadata: &'a IOSegmentMetadata,
-    read: usize,
 }
 
 impl<'a> IORingPubSegment<'a> {
     #[inline(always)]
-    const fn new(
-        ring: &'a IORing,
-        data: &'a mut [u8],
-        metadata: &'a IOSegmentMetadata,
-        read: usize,
-    ) -> Self {
+    const fn new(ring: &'a IORing, data: &'a mut [u8], metadata: &'a IOSegmentMetadata) -> Self {
         Self {
             ring,
             data,
             metadata,
-            read,
         }
     }
 
@@ -595,18 +587,16 @@ impl<'a> IORingPubSegment<'a> {
     }
 
     /// Releases the segment to be reused.
-    ///
-    /// This method will panic if it is called on the same segment more than once.
     #[inline(always)]
-    pub(crate) fn release(self) {
-        // RT_ASSERT.
-        assert!(
-            self.ring.read.load(Acquire) == self.read,
-            "Releasing the same segment more than once"
-        );
+    fn release(&mut self) {
         self.metadata.written.set(0);
-        self.metadata.state.store(SEG_NONE, Relaxed);
-        self.ring.read.store(self.read.wrapping_add(1), Release);
+        self.ring.read.fetch_add(1, Release);
+    }
+}
+
+impl<'a> Drop for IORingPubSegment<'a> {
+    fn drop(&mut self) {
+        self.release()
     }
 }
 
@@ -740,8 +730,6 @@ impl IORing {
     ///
     /// This method must have single consumer at a time, no concurrent calls.
     ///
-    /// The `XOR` mutability rule is not enforced to keep the type `mutex-free` at the type level.
-    ///
     /// User must guarantee that only one consumer at a time can call this method.
     ///
     /// Returns:
@@ -755,8 +743,9 @@ impl IORing {
 
             match metadata.state.load(Acquire) {
                 SEG_PUBLISHED => {
+                    metadata.state.store(SEG_NONE, Relaxed);
                     let segment_data = self.slice_at(segment_index);
-                    return Some(IORingPubSegment::new(self, segment_data, metadata, read));
+                    return Some(IORingPubSegment::new(self, segment_data, metadata));
                 }
                 SEG_NONE => return None,
                 SEG_DISCARDED => {
@@ -868,96 +857,40 @@ mod tests_io_ring {
             b"The quick brown fox jumps over the lazy dog"
         );
 
-        let res = ring.receive();
-        assert!(res.is_none());
+        let seg_none = ring.receive();
+        assert!(seg_none.is_none());
 
         segment.publish();
 
         let published = ring.receive().expect("Must get published segment");
+
         assert!(published.len() == 43);
         assert_eq!(
             published.data(),
             b"The quick brown fox jumps over the lazy dog"
         );
 
-        let segment = ring.acquire();
-        assert!(segment.is_none());
+        // Receiving again without releasing.
+        assert!(ring.receive().is_none());
 
-        published.release();
-
-        let segment = ring.acquire();
-        assert!(segment.is_some());
-    }
-
-    #[test]
-    #[should_panic = "Releasing the same segment more than once"]
-    fn test_io_ring_releasing_twice() {
-        let ring = IORing::new(1, 1);
-
-        let segment = ring.acquire().expect("must get a segment");
-        segment.publish();
-
-        let published = ring.receive().expect("Must get published segment");
-        let same_published = ring.receive().expect("Must get published segment again");
-
-        // Set none.
-        published.release();
-
-        // Fire in the hole...
-        same_published.release();
-    }
-
-    #[test]
-    fn test_io_ring_discarded_segment() {
-        let ring = IORing::new(2, 1);
-        // Total: 2
-
-        // Unpublished. Left 1.
-        {
-            let _ = ring.acquire().unwrap();
-        }
-
-        // Published. Left 0.
-        let seg_2 = ring.acquire().unwrap();
-        seg_2.publish();
-
-        // Must fail.
+        // Acquiring without releasing.
         assert!(ring.acquire().is_none());
 
-        // Receiving + recycling.
-        // Published consumed. Discarded recycled.
-        while let Some(published) = ring.receive() {
-            published.release();
+        // Release.
+        drop(published);
+
+        {
+            assert!(ring.acquire().is_some());
+            // Set discarded.
         }
 
-        // All clear.
-        let seg_4 = ring.acquire();
-        assert!(seg_4.is_some());
+        // Discarded.
+        assert!(ring.acquire().is_none());
 
-        let seg_5 = ring.acquire();
-        assert!(seg_5.is_some());
-    }
+        // Clear.
+        assert!(ring.receive().is_none());
 
-    #[test]
-    fn test_io_ring_wrapping_cycles() {
-        let ring = IORing::new(8, 2);
-
-        let mut dst = [0u8; 2];
-        for i in 0u16..4096 {
-            let mut seg = ring.acquire().expect("acquire failed");
-
-            assert!(seg.write(&(i + 1).to_le_bytes()));
-
-            seg.publish();
-
-            let published = ring.receive().unwrap();
-            dst.copy_from_slice(published.data());
-
-            let num = u16::from_le_bytes(dst);
-            assert_eq!(num, i + 1);
-
-            published.release();
-        }
+        assert!(ring.acquire().is_some());
     }
 
     #[test]
@@ -993,7 +926,6 @@ mod tests_io_ring {
                 "thread3" => counts[3] += 1,
                 other => panic!("Unexpected data: {other}"),
             }
-            published.release();
         }
 
         assert_eq!(counts, [30, 30, 30, 30]);

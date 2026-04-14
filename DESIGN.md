@@ -4,13 +4,16 @@ Interconnect's design aims at providing OS-level framework for bridging the inte
 
 > **Note**: The design details apply to the reference implementation in **Rust**. Implementations in other languages may diverge according to the capabilities and limitations of the implementation language.
 
-## Architectural model and implementation highlights
+## Architecture and general design approach
 
 Interconnect has a dataflow-oriented architecture where data availability drives computation.
 
 Interconnect's design is layered with modular components and makes heavy use of static parametric polymorphism.
 
-The main layers are:
+Interconnect's design encourages variety of optimized components over common ones with complex configurations in general.
+Diversity with optimized internals and simple setup is considered a better strategy than uniformity with wide set of configuration options.
+
+Interconnect's main layers are:
 
 **Transport Layer**:
 Transport components implement the actual mechanics of delivering data from I/O devices to decoders, and from encoders to I/O devices.
@@ -84,7 +87,7 @@ The architecture of the compiler and other details related to the toolchain are 
 Within the context of this project, these terms are understood as defined:
 
 - Async: An event-based execution model, where the control flow can switch to a notification broker,
-  instead of entering a loop for continuously checking the availability of a resource.
+  instead of continuously checking the availability of a resource.
   This term could be viewed as a "language-abuse" to describe a non-blocking, "cooperative" execution model,
   but it is commonly used out there, so this project assigns the above definition to it only.
 

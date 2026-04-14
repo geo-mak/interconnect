@@ -13,59 +13,56 @@ pub type ProtocolResult<T> = Result<T, ProtocolError>;
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[repr(u8)]
 pub enum ErrKind {
-    /// Application-defined error.
-    Application = 0,
-
     /// Unmapped transport-error.
-    Transport = 1,
+    Transport = 0,
 
-    Disconnected = 2,
+    PeerClosed = 1,
 
-    Canceled = 3,
+    Canceled = 2,
 
-    InvalidNegotiation = 4,
+    InvalidNegotiation = 3,
 
-    SpecsMismatch = 5,
+    SpecsMismatch = 4,
 
-    KeyDerivation = 6,
+    KeyDerivation = 5,
 
-    InvalidEncryptionKey = 7,
+    InvalidEncryptionKey = 6,
 
-    Encryption = 8,
+    Encryption = 7,
 
-    Decryption = 9,
+    Decryption = 8,
 
-    Encoding = 10,
+    Encoding = 9,
 
-    Decoding = 11,
+    Decoding = 10,
 
-    MemoryAllocation = 12,
+    MemoryAllocation = 11,
 
-    RoundLimit = 13,
+    RoundLimit = 12,
 
-    CapacityLimit = 14,
+    CapacityLimit = 13,
 
-    SendSizeLimit = 15,
+    SendSizeLimit = 14,
 
-    RecvSizeLimit = 16,
+    RecvSizeLimit = 15,
 
-    Timeout = 17,
+    Timeout = 16,
 
-    UnexpectedMsg = 18,
+    UnexpectedMsg = 17,
 
-    DroppedMessage = 19,
+    DroppedMessage = 18,
 
-    Unidentified = 20,
+    Unidentified = 19,
 
-    Unimplemented = 21,
+    Unimplemented = 20,
 
-    Validation = 22,
+    Validation = 21,
 
-    NotEnoughData = 23,
+    NotEnoughData = 22,
 
-    InvalidPadding = 24,
+    InvalidPadding = 23,
 
-    InvalidPtrTag = 25,
+    InvalidPtrTag = 24,
 }
 
 impl ErrKind {
@@ -73,32 +70,31 @@ impl ErrKind {
     pub fn from_byte(byte: u8) -> Option<Self> {
         use ErrKind::*;
         Some(match byte {
-            0 => Application,
-            1 => Transport,
-            2 => Disconnected,
-            3 => Canceled,
-            4 => InvalidNegotiation,
-            5 => SpecsMismatch,
-            6 => KeyDerivation,
-            7 => InvalidEncryptionKey,
-            8 => Encryption,
-            9 => Decryption,
-            10 => Encoding,
-            11 => Decoding,
-            12 => MemoryAllocation,
-            13 => RoundLimit,
-            14 => CapacityLimit,
-            15 => SendSizeLimit,
-            16 => RecvSizeLimit,
-            17 => Timeout,
-            18 => UnexpectedMsg,
-            19 => DroppedMessage,
-            20 => Unidentified,
-            21 => Unimplemented,
-            22 => Validation,
-            23 => NotEnoughData,
-            24 => InvalidPadding,
-            25 => InvalidPtrTag,
+            0 => Transport,
+            1 => PeerClosed,
+            2 => Canceled,
+            3 => InvalidNegotiation,
+            4 => SpecsMismatch,
+            5 => KeyDerivation,
+            6 => InvalidEncryptionKey,
+            7 => Encryption,
+            8 => Decryption,
+            9 => Encoding,
+            10 => Decoding,
+            11 => MemoryAllocation,
+            12 => RoundLimit,
+            13 => CapacityLimit,
+            14 => SendSizeLimit,
+            15 => RecvSizeLimit,
+            16 => Timeout,
+            17 => UnexpectedMsg,
+            18 => DroppedMessage,
+            19 => Unidentified,
+            20 => Unimplemented,
+            21 => Validation,
+            22 => NotEnoughData,
+            23 => InvalidPadding,
+            24 => InvalidPtrTag,
             _ => return None,
         })
     }
@@ -148,7 +144,7 @@ impl From<io::Error> for ProtocolError {
     fn from(err: io::Error) -> Self {
         if err.kind() == std::io::ErrorKind::UnexpectedEof {
             ProtocolError {
-                kind: ErrKind::Disconnected,
+                kind: ErrKind::PeerClosed,
                 refer: 0,
             }
         } else {

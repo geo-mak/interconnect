@@ -33,6 +33,7 @@ where
     ///
     /// Safety: `value` must be fully initialized with added **padding**.
     pub unsafe fn write_next(&mut self, value: &T) {
+        #[cfg(debug_assertions)]
         debug_assert_writing_inbounds(self);
 
         let bytes_ptr = (value as *const T).cast::<u8>();

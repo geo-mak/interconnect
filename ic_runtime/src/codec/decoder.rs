@@ -3,7 +3,7 @@ use core::mem;
 use core::mem::ManuallyDrop;
 use core::ops::Deref;
 use core::ptr::NonNull;
-use core::slice;
+use core::slice::{from_raw_parts, from_raw_parts_mut};
 
 use crate::codec::convert::from::FromProtocolType;
 use crate::codec::convert::into::IntoNative;
@@ -35,6 +35,14 @@ pub struct Decoded<T: ?Sized, D> {
 
 unsafe impl<T: Send + ?Sized, D: Send> Send for Decoded<T, D> {}
 unsafe impl<T: Sync + ?Sized, D: Sync> Sync for Decoded<T, D> {}
+
+impl<T: ?Sized, D> Deref for Decoded<T, D> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        unsafe { self.value_ptr.as_ref() }
+    }
+}
 
 impl<T: ?Sized, D> Drop for Decoded<T, D> {
     fn drop(&mut self) {
@@ -99,14 +107,6 @@ impl<T: ?Sized, D> Decoded<T, D> {
     }
 }
 
-impl<T: ?Sized, D> Deref for Decoded<T, D> {
-    type Target = T;
-
-    fn deref(&self) -> &Self::Target {
-        unsafe { self.value_ptr.as_ref() }
-    }
-}
-
 impl<T, D> fmt::Debug for Decoded<T, D>
 where
     T: fmt::Debug + ?Sized,
@@ -125,31 +125,32 @@ where
 ///
 /// Supporting OS-handles might get added later.
 pub unsafe trait Decoder {
-    /// Returns a pointer to a slice of blocks backed by decoder's memory.
+    /// Returns a pointer to a group of blocks backed by decoder's memory.
     ///
-    /// Safety:
-    /// - The returned pointer must point to `count` initialized blocks.
-    /// - The returned pointer must be valid for reads and writes.
-    /// - The returned pointer must not outlive the decoder.
-    fn get_blocks_pointer(&mut self, count: usize) -> ProtocolResult<NonNull<BasicBlock>>;
+    /// Safety: The returned pointer must not outlive the decoder.
+    fn get_blocks_pointer(&mut self, blocks_count: usize) -> ProtocolResult<NonNull<BasicBlock>>;
 
     fn get_blocks<'de>(
         self: &mut &'de mut Self,
-        count: usize,
+        blocks_count: usize,
     ) -> Result<&'de mut [BasicBlock], ProtocolError> {
-        let blocks_ptr = self.get_blocks_pointer(count)?;
+        let blocks_ptr = self.get_blocks_pointer(blocks_count)?;
 
-        Ok(unsafe { slice::from_raw_parts_mut(blocks_ptr.as_ptr(), count) })
+        let blocks_slice = unsafe { from_raw_parts_mut(blocks_ptr.as_ptr(), blocks_count) };
+
+        Ok(blocks_slice)
     }
 
     fn ref_as<'de, T>(self: &mut &'de mut Self) -> ProtocolResult<TypeRef<'de, T>> {
         assert_conform_to_alignment::<T>();
 
-        let count = size_of::<T>().div_ceil(BASIC_BLOCK_SIZE);
+        let blocks_count = size_of::<T>().div_ceil(BASIC_BLOCK_SIZE);
 
-        let blocks = self.get_blocks(count)?;
+        let blocks_slice = self.get_blocks(blocks_count)?;
 
-        unsafe { Ok(TypeRef::from_ptr_assume_init(blocks.as_mut_ptr().cast())) }
+        let type_ref = unsafe { TypeRef::from_ptr_assume_init(blocks_slice.as_mut_ptr().cast()) };
+
+        Ok(type_ref)
     }
 
     fn slice_of_ref_as<'de, T>(
@@ -169,7 +170,7 @@ pub unsafe trait Decoder {
         let blocks_ptr = self.get_blocks(blocks_count)?.as_mut_ptr();
 
         let padding_bytes: &[u8] =
-            unsafe { slice::from_raw_parts(blocks_ptr.cast::<u8>().add(items_bytes), padding_len) };
+            unsafe { from_raw_parts(blocks_ptr.cast::<u8>().add(items_bytes), padding_len) };
 
         // RT_ASSERT.
         // Padding bytes must be zeros.
@@ -177,7 +178,9 @@ pub unsafe trait Decoder {
             return Err(ProtocolError::error(ErrKind::InvalidPadding));
         }
 
-        unsafe { Ok(TypeRef::new_slice_assume_init(blocks_ptr.cast(), len)) }
+        let type_ref = unsafe { TypeRef::new_slice_assume_init(blocks_ptr.cast(), len) };
+
+        Ok(type_ref)
     }
 
     /// Attempts to decode the available data as a value of type `T`.
@@ -195,7 +198,9 @@ pub unsafe trait Decoder {
 
         T::decode(view.borrow_mut(), decoder, limits)?;
 
-        unsafe { Ok(Decoded::new_assume_valid(view.as_ptr_mut(), self)) }
+        let decoded = unsafe { Decoded::new_assume_valid(view.as_ptr_mut(), self) };
+
+        Ok(decoded)
     }
 
     /// Attempts to decode the available data as a value of type `T::Type`.
@@ -214,7 +219,9 @@ pub unsafe trait Decoder {
 
         T::decode(view.borrow_mut(), self, limits)?;
 
-        unsafe { Ok(view.as_ptr_mut().cast::<T::Type<'de>>().read()) }
+        let decoded_ref = unsafe { view.as_ptr_mut().cast::<T::Type<'de>>().read() };
+
+        Ok(decoded_ref)
     }
 }
 
@@ -231,6 +238,8 @@ unsafe impl Decoder for &mut [BasicBlock] {
 
         *self = rest;
 
-        unsafe { Ok(NonNull::new_unchecked(first.as_mut_ptr())) }
+        let blocks_ptr = unsafe { NonNull::new_unchecked(first.as_mut_ptr()) };
+
+        Ok(blocks_ptr)
     }
 }

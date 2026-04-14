@@ -88,8 +88,8 @@ impl<T: ?Sized, D> Decoded<T, D> {
         fn_return
     }
 
-    /// Transforms the value into type that can be converted to native type and consumes the current instance.
-    pub fn into_native_as<U>(self) -> U
+    /// Transforms the value into type that can be constructed from protocol type and consumes the current instance.
+    pub fn into<U>(self) -> U
     where
         T: ProtocolType,
         U: for<'de> FromProtocolType<T::Type<'de>>,
@@ -103,7 +103,7 @@ impl<T: ?Sized, D> Decoded<T, D> {
         T: ProtocolType + IntoNative,
         T::Native: for<'de> FromProtocolType<T::Type<'de>>,
     {
-        self.into_native_as::<T::Native>()
+        self.into::<T::Native>()
     }
 }
 
@@ -153,7 +153,7 @@ pub unsafe trait Decoder {
         Ok(type_ref)
     }
 
-    fn slice_of_ref_as<'de, T>(
+    fn slice_ref_as<'de, T>(
         self: &mut &'de mut Self,
         len: usize,
     ) -> ProtocolResult<TypeRef<'de, [T]>> {
@@ -183,26 +183,6 @@ pub unsafe trait Decoder {
         Ok(type_ref)
     }
 
-    /// Attempts to decode the available data as a value of type `T`.
-    ///
-    /// Consumes the instance and returns a decoded value as owned value,
-    /// which can be accessed as value of type `T`.
-    fn decode<T>(mut self, limits: T::Limits) -> ProtocolResult<Decoded<T, Self>>
-    where
-        T: Decode<Self>,
-        Self: Sized,
-    {
-        let mut decoder = &mut self;
-
-        let mut view = decoder.ref_as::<T>()?;
-
-        T::decode(view.borrow_mut(), decoder, limits)?;
-
-        let decoded = unsafe { Decoded::new_assume_valid(view.as_ptr_mut(), self) };
-
-        Ok(decoded)
-    }
-
     /// Attempts to decode the available data as a value of type `T::Type`.
     ///
     /// Returns a reference to the value after **advancing** the decoder.
@@ -222,6 +202,26 @@ pub unsafe trait Decoder {
         let decoded_ref = unsafe { view.as_ptr_mut().cast::<T::Type<'de>>().read() };
 
         Ok(decoded_ref)
+    }
+
+    /// Attempts to decode the available data as a value of type `T`.
+    ///
+    /// Consumes the instance and returns a decoded value as owned value,
+    /// which can be accessed as value of type `T`.
+    fn decode<T>(mut self, limits: T::Limits) -> ProtocolResult<Decoded<T, Self>>
+    where
+        T: Decode<Self>,
+        Self: Sized,
+    {
+        let mut decoder = &mut self;
+
+        let mut view = decoder.ref_as::<T>()?;
+
+        T::decode(view.borrow_mut(), decoder, limits)?;
+
+        let decoded = unsafe { Decoded::new_assume_valid(view.as_ptr_mut(), self) };
+
+        Ok(decoded)
     }
 }
 

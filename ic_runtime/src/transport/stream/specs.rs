@@ -98,40 +98,42 @@ impl EncryptionState {
 
 /// This modules contains the functions used to establish connections according to specifications.
 ///
-/// The client-side initiates the negotiation using `initiate` function.
+/// Initiation starts by sending `specification-frame` that is 8-bytes in size and its bytes
+/// represent the following:
 ///
-/// Initiation starts by sending `specification-frame`.
+///     [0..4]   Protocol signature and version
+///     [4]      ABI version
+///     [5]      Encryption flags:
+///            0x00 = Unencrypted
+///            0x01 = Encrypted
+///     [6..8]   Reserved.
 ///
-/// The `specification-frame` is 8-bytes in size and its bytes represent the following:
+/// The client-side is the side that initiates the negotiation using the `initiate` function.
 ///
-/// [0..4]   Specification protocol signature (and version)
-/// [4]      ABI version
-/// [5]      Flags:
-///            0x01 = encryption enabled
-///            0x02 = identity required (not implemented, future use)
-/// [6..8]   Reserved = 0 (2 bytes)
+/// The server-side waits for the `specification-frame` to arrive and compares the announced
+/// specifications with its configurations.
 ///
-/// The server-side waits for the `specification-frame` to arrive and reads its data.
+/// The server then sends back its response as single byte that represents two states:
+///     0x00 = rejected/abort
+///     0x01 = accepted
 ///
-/// The server shall compares the announced specifications with its configurations,
-/// then it sends back `confirmation-byte`.
+/// If the specifications have the encryption-flag set and server has confirmed, the server should
+/// expect a key-exchange session using `accept_key_exchange` function.
 ///
-/// The confirmation-byte` represents two states:
-/// 0x01 = accepted
-/// 0x00 = rejected/abort
+/// The client should start a key-exchange session using `initiate_key_exchange` function.
 ///
-/// If the agreed-upon specifications have the encryption-flag set, the two sides shall start key-exchange session.
+/// Each side sends its public key which is an ephemeral 32-bytes long X25519 public key.  
 ///
-/// The key-exchange session shall be initiated by the client using using `initiate_key_exchange` function.
-/// The server waits for client-key to arrive, then it sends back its public key using `accept_key_exchange` function.
+/// The the shared-secret is then derived using `diffie-hellman` algorithm.
 ///
-/// Both keys are ephemeral 32-bytes X25519 public key.
+/// The derived shared-secret is then passed to HMAC-based key derivation function to construct
+/// AEAD-based encryption-states, one for sending and another for receiving.
 ///
-/// The the shared-secret is derived using `diffie-hellman` algorithm.
+/// Each state has its own `Aes128Gcm` cipher constructed with derived unique key alongside nonce base
+/// and internal counter.
 ///
-/// The derived shared-secret is then passed to HMAC-based key derivation function to construct two encryption-states:
-/// - Encryption state for sending with internal counter.
-/// - Encryption state for receiving with internal counter.
+/// Each state encrypt and decrypt after generating 12-bytes nonce derived from the base and the counter.
+///
 pub mod negotiation {
     use super::*;
 
@@ -195,10 +197,10 @@ pub mod negotiation {
     {
         self::write_frame(transport, &capability).await?;
 
-        let mut confirmation = [0u8; 1];
-        transport.receive_bytes(&mut confirmation).await?;
+        let mut response = [0u8; 1];
+        transport.receive_bytes(&mut response).await?;
 
-        match confirmation[0] {
+        match response[0] {
             0x01 => Ok(()),
             0x00 => Err(ProtocolError::error(ErrKind::SpecsMismatch)),
             _ => Err(ProtocolError::error(ErrKind::InvalidNegotiation)),

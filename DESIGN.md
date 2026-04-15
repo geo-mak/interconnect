@@ -12,7 +12,7 @@ Interconnect's design is layered with modular components and makes heavy use of 
 
 From design perspective, components are **viewed** as **micro-servers** offering **services** that can be static, dynamic, local and remote.
 
-Interconnect's design encourages variety of optimized components over common ones with complex configurations in general.
+Interconnect's design favours variety of optimized components over common ones with complex configurations in general.
 Diversity with optimized internals and simple setup is considered a better strategy than uniformity with wide set of configuration options.
 
 Interconnect's main layers are:

@@ -30,19 +30,23 @@ impl ConnectionSpecs {
 pub type NonceBase = [u8; 4];
 
 pub type SenderKey = [u8; 16];
-pub type SenderState = EncryptionState;
+pub type SenderState = EncryptionProvider;
 
 pub type ReceiverKey = [u8; 16];
-pub type ReceiverState = EncryptionState;
+pub type ReceiverState = EncryptionProvider;
 
-/// Stores the cipher-state and provides encryption and decryption methods.
-pub struct EncryptionState {
+/// Provides encryption and decryption functionalities.
+///
+/// This provider uses `AES-GCM` cipher with 128-bit key.
+///
+/// It offers round limit up to `usize::MAX` before requiring rekeying.
+pub struct EncryptionProvider {
     cipher: Aes128Gcm,
     sequence: u64,
     nonce_base: [u8; 4],
 }
 
-impl EncryptionState {
+impl EncryptionProvider {
     pub fn new(key: &[u8], nonce_base: [u8; 4]) -> ProtocolResult<Self> {
         let cipher = Aes128Gcm::new_from_slice(key)
             .map_err(|_| ProtocolError::error(ErrKind::InvalidEncryptionKey))?;
@@ -226,8 +230,8 @@ pub mod negotiation {
         let (recv_key, send_key, nonce_base) = derive_session_keys(shared.as_bytes())?;
 
         Ok((
-            EncryptionState::new(&send_key, nonce_base)?,
-            EncryptionState::new(&recv_key, nonce_base)?,
+            EncryptionProvider::new(&send_key, nonce_base)?,
+            EncryptionProvider::new(&recv_key, nonce_base)?,
         ))
     }
 
@@ -250,8 +254,8 @@ pub mod negotiation {
         let (send_key, recv_key, nonce_base) = derive_session_keys(shared.as_bytes())?;
 
         Ok((
-            EncryptionState::new(&send_key, nonce_base)?,
-            EncryptionState::new(&recv_key, nonce_base)?,
+            EncryptionProvider::new(&send_key, nonce_base)?,
+            EncryptionProvider::new(&recv_key, nonce_base)?,
         ))
     }
 

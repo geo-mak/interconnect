@@ -8,7 +8,7 @@ use tokio::net::{TcpListener, TcpStream};
 use crate::error::{ErrKind, ProtocolError, ProtocolResult};
 use crate::mem::IOSegment;
 use crate::transport::stream;
-use crate::transport::stream::specs::{ConnectionSpecs, EncryptionState, negotiation};
+use crate::transport::stream::specs::{ConnectionSpecs, EncryptionProvider, negotiation};
 use crate::transport::traits::{
     Transport, TransportInitiator, TransportReceiver, TransportSender, TransportServer,
 };
@@ -133,12 +133,12 @@ where
 
 pub struct IPLinkSecureSender<T> {
     writer: OwnedWriteHalf,
-    state: EncryptionState,
+    state: EncryptionProvider,
     _t: PhantomData<T>,
 }
 
 impl<T> IPLinkSecureSender<T> {
-    pub const fn new(writer: OwnedWriteHalf, state: EncryptionState) -> Self {
+    pub const fn new(writer: OwnedWriteHalf, state: EncryptionProvider) -> Self {
         Self {
             writer,
             state,
@@ -165,12 +165,12 @@ where
 
 pub struct IPLinkSecureReceiver<T> {
     reader: OwnedReadHalf,
-    state: EncryptionState,
+    state: EncryptionProvider,
     _t: PhantomData<T>,
 }
 
 impl<T> IPLinkSecureReceiver<T> {
-    pub const fn new(reader: OwnedReadHalf, state: EncryptionState) -> Self {
+    pub const fn new(reader: OwnedReadHalf, state: EncryptionProvider) -> Self {
         Self {
             reader,
             state,
@@ -192,8 +192,8 @@ where
 
 pub struct IPLinkSecure<S, R> {
     stream: TcpStream,
-    send_state: EncryptionState,
-    recv_state: EncryptionState,
+    send_state: EncryptionProvider,
+    recv_state: EncryptionProvider,
     _s: PhantomData<S>,
     _r: PhantomData<R>,
 }
@@ -202,8 +202,8 @@ impl<S, R> IPLinkSecure<S, R> {
     #[inline]
     const fn from(
         stream: TcpStream,
-        send_state: EncryptionState,
-        recv_state: EncryptionState,
+        send_state: EncryptionProvider,
+        recv_state: EncryptionProvider,
     ) -> Self {
         Self {
             stream,

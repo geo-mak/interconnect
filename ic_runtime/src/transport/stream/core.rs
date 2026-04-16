@@ -3,7 +3,7 @@ use aead::{Buffer, Error};
 use crate::error::{ErrKind, ProtocolError, ProtocolResult};
 use crate::mem::IOSegment;
 use crate::opt::branch_hints::unlikely;
-use crate::transport::stream::specs::EncryptionState;
+use crate::transport::stream::specs::EncryptionProvider;
 use crate::transport::traits::{BytesReceiver, BytesSender};
 
 pub const MAX_MESSAGE_SIZE: u32 = 4 * 1024 * 1024;
@@ -169,7 +169,7 @@ pub async fn receive<T: BytesReceiver, D: IOSegment>(
 pub async fn send_encrypted<T: BytesSender, S: IOSegment>(
     transport: &mut T,
     source: &mut S,
-    state: &mut EncryptionState,
+    state: &mut EncryptionProvider,
 ) -> ProtocolResult<()> {
     let mut adapter_segment = EncryptionAdapter::new(source);
 
@@ -185,7 +185,7 @@ pub async fn send_encrypted<T: BytesSender, S: IOSegment>(
 pub async fn receive_encrypted<T: BytesReceiver, D: IOSegment>(
     transport: &mut T,
     destination: &mut D,
-    state: &mut EncryptionState,
+    state: &mut EncryptionProvider,
 ) -> ProtocolResult<()> {
     // TODO: use protocol types.
     let mut len_bytes = [0u8; 4];

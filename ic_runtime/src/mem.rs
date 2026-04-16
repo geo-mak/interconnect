@@ -590,7 +590,7 @@ impl<'a> IORingPubSegment<'a> {
     #[inline(always)]
     fn release(&mut self) {
         self.metadata.written.set(0);
-        self.ring.read.fetch_add(1, Release);
+        self.ring.rcv_pos.fetch_add(1, Release);
     }
 }
 
@@ -632,8 +632,8 @@ pub(crate) struct IORing {
     offset_shift: u32,
     index_mask: usize,
     // TODO: The two pointers are monotonic with wrapping arithmetic.
-    write: AtomicUsize,
-    read: AtomicUsize,
+    send_pos: AtomicUsize,
+    rcv_pos: AtomicUsize,
 }
 
 const SEG_NONE: u8 = 0;
@@ -667,8 +667,8 @@ impl IORing {
             seg_size: seg_size as u32,
             offset_shift: seg_size.trailing_zeros(),
             index_mask: count - 1,
-            write: AtomicUsize::new(0),
-            read: AtomicUsize::new(0),
+            send_pos: AtomicUsize::new(0),
+            rcv_pos: AtomicUsize::new(0),
         }
     }
 
@@ -695,19 +695,19 @@ impl IORing {
     /// Returns `None` if all segments are currently in use.
     pub(crate) fn acquire(&self) -> Option<IORingSegment<'_>> {
         loop {
-            let write = self.write.load(Relaxed);
-            let read = self.read.load(Acquire);
+            let send_pos = self.send_pos.load(Relaxed);
+            let rcv_pos = self.rcv_pos.load(Acquire);
 
-            if write.wrapping_sub(read) >= self.seg_count {
+            if send_pos.wrapping_sub(rcv_pos) >= self.seg_count {
                 return None;
             }
 
-            let segment_index = write & self.index_mask;
+            let segment_index = send_pos & self.index_mask;
 
             // Acquire exclusive segment.
             if self
-                .write
-                .compare_exchange_weak(write, write.wrapping_add(1), AcqRel, Relaxed)
+                .send_pos
+                .compare_exchange_weak(send_pos, send_pos.wrapping_add(1), AcqRel, Relaxed)
                 .is_ok()
             {
                 let metadata = &self.metadata[segment_index];
@@ -737,8 +737,8 @@ impl IORing {
     /// Returns a reference to the current published segment if any, or `None` otherwise.
     pub(crate) fn receive(&self) -> Option<IORingPubSegment<'_>> {
         loop {
-            let read = self.read.load(Relaxed);
-            let segment_index = read & self.index_mask;
+            let rcv_pos = self.rcv_pos.load(Relaxed);
+            let segment_index = rcv_pos & self.index_mask;
             let metadata = &self.metadata[segment_index];
 
             match metadata.state.load(Acquire) {
@@ -750,7 +750,7 @@ impl IORing {
                 SEG_NONE => return None,
                 SEG_DISCARDED => {
                     metadata.state.store(SEG_NONE, Relaxed);
-                    self.read.store(read.wrapping_add(1), Release);
+                    self.rcv_pos.store(rcv_pos.wrapping_add(1), Release);
                 }
                 _ => unreachable!(),
             }

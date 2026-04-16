@@ -49,7 +49,7 @@ where
     #[inline(always)]
     fn extend_from_slice(&mut self, other: &[u8]) -> aead::Result<()> {
         // RT_ALLOC.
-        if self.seg.write(other) {
+        if self.seg.store(other) {
             return Ok(());
         }
         Err(Error)

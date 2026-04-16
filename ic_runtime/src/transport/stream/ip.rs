@@ -465,7 +465,7 @@ mod tests {
 
             // Send response.
             let mut response = server_pool.acquire().unwrap();
-            response.write(b"hello from server");
+            response.store(b"hello from server");
             link.send(&mut response).await.unwrap();
         });
 
@@ -475,7 +475,7 @@ mod tests {
             .unwrap();
 
         let mut segment = pool.acquire().unwrap();
-        segment.write(b"hello from client");
+        segment.store(b"hello from client");
         link.send(&mut segment).await.unwrap();
 
         // Receive.
@@ -510,7 +510,7 @@ mod tests {
 
             // Send response.
             let mut response = server_pool.acquire().unwrap();
-            response.write(b"hello secure server");
+            response.store(b"hello secure server");
             link.send(&mut response).await.unwrap();
         });
 
@@ -521,7 +521,7 @@ mod tests {
 
         // Send.
         let mut segment = pool.acquire().unwrap();
-        segment.write(b"hello secure client");
+        segment.store(b"hello secure client");
         link.send(&mut segment).await.unwrap();
 
         // Receive.

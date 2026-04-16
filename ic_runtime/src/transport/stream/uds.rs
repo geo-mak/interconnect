@@ -242,7 +242,7 @@ mod tests {
 
             // Send response.
             let mut response = server_pool.acquire().unwrap();
-            response.write(b"hello from server");
+            response.store(b"hello from server");
             link.send(&mut response).await.unwrap();
         });
 
@@ -253,7 +253,7 @@ mod tests {
 
         // Send.
         let mut segment = pool.acquire().unwrap();
-        segment.write(b"hello from client");
+        segment.store(b"hello from client");
         link.send(&mut segment).await.unwrap();
 
         // Receive.

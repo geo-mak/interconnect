@@ -104,19 +104,19 @@ pub unsafe trait IOSegment {
         unsafe { from_raw_parts_mut(self.as_ptr_mut(), count) }
     }
 
-    /// Tries to writes the provided data to the segment in checked-mode.
+    /// Tries to append the provided data to the segment in checked-mode.
     ///
     /// If the implementation enables dynamic allocation, this call may allocate more capacity if needed.
     ///
     /// Returns `true` on success or `false` in case of not enough capacity or failure to allocate more.
     ///
-    /// Length is **advanced** after successful writing.
+    /// Length is **advanced** after successful storage.
     ///
     /// Safety:
     /// - The source slice must consist of fully initialized bytes.
     /// - The source slice must be a non-overlapping (disjoint) memory-region.
     #[inline]
-    fn write(&mut self, source: &[u8]) -> bool {
+    fn store(&mut self, source: &[u8]) -> bool {
         let segment_len = self.len();
         let source_len = source.len();
 
@@ -139,10 +139,10 @@ pub unsafe trait IOSegment {
         false
     }
 
-    /// Writes data to the segment in unchecked-mode.
+    /// Stores the provided source data in the segment at the provided `offset` in unchecked-mode.
     ///
-    /// This function enables writing data anywhere within the capacity of the segment,
-    /// regardless of segment's length.
+    /// This function enables storing data anywhere within the capacity of the segment,
+    /// regardless of current segment's length.
     ///
     /// Safety:
     /// - The source slice must consist of fully initialized bytes.
@@ -151,7 +151,7 @@ pub unsafe trait IOSegment {
     /// - The segment is valid for writing/overwriting withing the range [`offset`: source length - 1].
     /// - The current length remains **unchanged** after writing.
     #[inline]
-    unsafe fn write_at(&mut self, offset: usize, source: &[u8]) {
+    unsafe fn store_at(&mut self, offset: usize, source: &[u8]) {
         let count = source.len();
         debug_assert!(offset + count <= self.capacity());
         unsafe { copy_nonoverlapping(source.as_ptr(), self.as_ptr_mut().add(offset), count) };
@@ -771,11 +771,11 @@ mod tests_io_pool {
         assert!(segment.len() == 0);
         assert_eq!(segment.as_slice(), b"");
 
-        assert!(segment.write(b"The quick brown fox "));
+        assert!(segment.store(b"The quick brown fox "));
         assert!(segment.len() == 20);
         assert_eq!(segment.as_slice(), b"The quick brown fox ");
 
-        assert!(segment.write(b"jumps over the lazy dog"));
+        assert!(segment.store(b"jumps over the lazy dog"));
         assert!(segment.len() == 43);
         assert_eq!(
             segment.as_slice(),
@@ -846,11 +846,11 @@ mod tests_io_ring {
         assert!(segment.len() == 0);
         assert_eq!(segment.as_slice(), b"");
 
-        assert!(segment.write(b"The quick brown fox "));
+        assert!(segment.store(b"The quick brown fox "));
         assert!(segment.len() == 20);
         assert_eq!(segment.as_slice(), b"The quick brown fox ");
 
-        assert!(segment.write(b"jumps over the lazy dog"));
+        assert!(segment.store(b"jumps over the lazy dog"));
         assert!(segment.len() == 43);
         assert_eq!(
             segment.as_slice(),
@@ -906,7 +906,7 @@ mod tests_io_ring {
                 barrier_clone.wait();
                 for _ in 0..30 {
                     let mut segment = ring_clone.acquire().unwrap();
-                    assert!(segment.write(format!("thread{}", i).as_bytes()));
+                    assert!(segment.store(format!("thread{}", i).as_bytes()));
                     segment.publish();
                 }
             }));

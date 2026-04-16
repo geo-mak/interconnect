@@ -276,7 +276,7 @@ impl Encoder for IOPoolSegment {
     }
 
     #[inline]
-    fn write_encoded(&mut self, source: &[u8]) -> bool {
+    fn store_encoded(&mut self, source: &[u8]) -> bool {
         let source_len = source.len();
 
         if source_len == 0 {
@@ -316,7 +316,7 @@ impl Encoder for IOPoolSegment {
     }
 
     #[inline]
-    fn write_encoded_at(&mut self, offset: usize, source: &[u8]) {
+    fn store_encoded_at(&mut self, offset: usize, source: &[u8]) {
         // RT_ASSERT.
         assert!(offset + source.len() <= self.len);
         unsafe {
@@ -799,10 +799,10 @@ mod tests_io_pool {
         segment.memset_zero(5);
         assert_eq!(segment.len_bytes(), 8);
 
-        segment.write_encoded(b"there!");
+        segment.store_encoded(b"there!");
         assert_eq!(segment.len_bytes(), 16);
 
-        segment.write_encoded_at(0, b"hi");
+        segment.store_encoded_at(0, b"hi");
 
         assert_eq!(segment.remaining_blocks(), 2);
 

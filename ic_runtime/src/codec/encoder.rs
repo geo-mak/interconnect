@@ -32,7 +32,7 @@ where
     /// Stores a value to the original offset before skipping.
     ///
     /// Safety: `value` must be fully initialized with added **padding**.
-    pub unsafe fn write_next(&mut self, value: &T) {
+    pub unsafe fn store_next(&mut self, value: &T) {
         #[cfg(debug_assertions)]
         debug_assert_writing_inbounds(self);
 
@@ -42,7 +42,7 @@ where
 
         let value_bytes = unsafe { from_raw_parts(bytes_ptr, value_size) };
 
-        self.encoder.write_encoded_at(self.offset, value_bytes);
+        self.encoder.store_encoded_at(self.offset, value_bytes);
 
         self.offset += value_size;
     }
@@ -68,12 +68,12 @@ pub trait Encoder {
     /// Returns `false` in case of lack of memory or failure to allocate more.
     ///
     /// The length of the encoder is advanced to include the encoded bytes and the padding bytes.
-    fn write_encoded(&mut self, source: &[u8]) -> bool;
+    fn store_encoded(&mut self, source: &[u8]) -> bool;
 
     /// Stores bytes at the provided `offset` in the encoder.
     ///
     /// The length of the encoder remains unchanged.
-    fn write_encoded_at(&mut self, offset: usize, source: &[u8]);
+    fn store_encoded_at(&mut self, offset: usize, source: &[u8]);
 
     /// Skips number of bytes as reserved space and returns
     /// a type that stores the value at its original offset.
@@ -120,7 +120,7 @@ pub trait Encoder {
                 P::check_limits(value_ref, limits)?;
 
                 unsafe {
-                    outputs.write_next(value_store.assume_init_ref());
+                    outputs.store_next(value_store.assume_init_ref());
                 }
             }
 

@@ -1,4 +1,4 @@
-use aead::{AeadInPlace, Buffer, KeyInit, Nonce, OsRng};
+use aead::{AeadInPlace, Buffer, Key, KeyInit, Nonce, OsRng};
 use aes_gcm::Aes128Gcm;
 use hkdf::Hkdf;
 use sha2::Sha256;
@@ -47,18 +47,19 @@ pub struct EncryptionProvider {
 }
 
 impl EncryptionProvider {
-    pub fn new(key: &[u8], nonce_base: [u8; 4]) -> ProtocolResult<Self> {
-        let cipher = Aes128Gcm::new_from_slice(key)
-            .map_err(|_| ProtocolError::error(ErrKind::InvalidEncryptionKey))?;
-        Ok(Self {
+    pub fn new(key: [u8; 16], nonce_base: [u8; 4]) -> Self {
+        let aes_key = Key::<Aes128Gcm>::from(key);
+        let cipher = Aes128Gcm::new(&aes_key);
+        Self {
             cipher,
             sequence: 0,
             nonce_base,
-        })
+        }
     }
 
     #[inline]
     fn next_nonce(&mut self) -> [u8; 12] {
+        // Note: Nonce must be 12-bytes in order to use it directly and avoid rehashing.
         let mut nonce = [0u8; 12];
         nonce[0..4].copy_from_slice(&self.nonce_base);
         nonce[4..12].copy_from_slice(&self.sequence.to_le_bytes());
@@ -234,10 +235,10 @@ pub mod negotiation {
         let shared = client_secret.diffie_hellman(&server_public);
         let (recv_key, send_key, nonce_base) = derive_session_keys(shared.as_bytes())?;
 
-        Ok((
-            EncryptionProvider::new(&send_key, nonce_base)?,
-            EncryptionProvider::new(&recv_key, nonce_base)?,
-        ))
+        let sender_state = EncryptionProvider::new(send_key, nonce_base);
+        let receiver_state = EncryptionProvider::new(recv_key, nonce_base);
+
+        Ok((sender_state, receiver_state))
     }
 
     /// Accepts an expected cryptographic key-exchange session.
@@ -258,10 +259,10 @@ pub mod negotiation {
         let shared = server_secret.diffie_hellman(&client_public);
         let (send_key, recv_key, nonce_base) = derive_session_keys(shared.as_bytes())?;
 
-        Ok((
-            EncryptionProvider::new(&send_key, nonce_base)?,
-            EncryptionProvider::new(&recv_key, nonce_base)?,
-        ))
+        let sender_state = EncryptionProvider::new(send_key, nonce_base);
+        let receiver_state = EncryptionProvider::new(recv_key, nonce_base);
+
+        Ok((sender_state, receiver_state))
     }
 
     /// HMAC-based key-derivation function.

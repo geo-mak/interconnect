@@ -105,12 +105,15 @@ impl EncryptionProvider {
 /// Initiation starts by sending `specification-frame` that is 8-bytes in size and its bytes
 /// represent the following:
 ///
-/// [0..4]   Protocol signature and version
-/// [4]      ABI version
-/// [5]      Encryption flags:
-///            0x00 = Unencrypted
-///            0x01 = Encrypted
-/// [6..8]   Reserved.
+/// - `[0-4]`   Protocol signature and version.
+///
+/// - `[4]`      ABI version.
+///
+/// - `[5]`      Encryption flags:
+///            - `0x00` = Unencrypted.
+///            - `0x01` = Encrypted.
+///
+/// - `[6-8]`   Reserved.
 ///
 /// The client-side is the side that initiates the negotiation using the `initiate` function.
 ///
@@ -118,8 +121,10 @@ impl EncryptionProvider {
 /// specifications with its configurations.
 ///
 /// The server then sends back its response as single byte that represents two states:
-/// 0x00 = rejected/abort
-/// 0x01 = accepted
+///
+/// - `0x00` = rejected/abort.
+///
+/// - `0x01` = accepted.
 ///
 /// If the specifications have the encryption-flag set and server has confirmed, the server should
 /// expect a key-exchange session using `accept_key_exchange` function.

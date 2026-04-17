@@ -168,8 +168,14 @@ Interconnect's design defines three categories of security:
   All key-exchange protocols **must** apply perfect forward secrecy algorithms using **ephemeral** key materials.
   
 - **Identification**: Verification process of valid **identity** as proof of trusted origin.
+
   Identification helps peers to make sure they are communicating with what they are expecting as peer.
 
-  When using secure transport, identity-exchange **must** take place **after** establishing secure connection.
+  When using secure transport, identity-exchange **must** take place **after** establishing secure connection. 
+  Secure transport protocols **must** never implement identity-exchange as part of their establishing phase.
 
+  Verification of valid identities is the responsibility of components that are referred to as identity-providers. 
+  
 - **Access control**: Enabling operations according to adequate privileges.
+
+  Access control is the responsibility of the service implementation.

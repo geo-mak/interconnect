@@ -148,3 +148,24 @@ Components ask for memory from an explicitly passed memory server that may provi
 The core idea is to enable sharing and reusability of the same acquired memory across components and layers as much as possible.
 
 Interconnect's design is **centered** around memory subsystems and their implementation for various cases is an **essential** part of the project.
+
+# Security
+
+Security is **marginal** and subject to the required margin and the cost of performance and complexity.
+
+Security considerations are part of the core design and they are taken into account on all levels.
+
+Interconnect's design defines three categories of security:
+
+- **Transport security**: Securing the communication via encrypted channels that protect **confidentiality** and **integrity**.
+
+  Securing the transport is the responsibility of the transport components and it is subject to each implementation and its defined threat-model.
+
+  The security of transport is **independent** from other security procedures. Fixed security token are **prohibited** from being used as keys to secure a transport session.
+
+  Fixed security tokens can be used for identification and to control access to assets and functionalities, but **never** to secure a transport session.
+
+- **Identification**: Verification process of valid **identity** as proof of trusted origin.
+  Identification helps peers to make sure they are communicating with what they are expecting as peer.
+
+- **Access control**: Enabling operations according to adequate privileges.

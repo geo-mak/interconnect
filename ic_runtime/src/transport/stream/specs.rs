@@ -39,7 +39,7 @@ pub type ReceiverState = EncryptionProvider;
 ///
 /// This provider uses `AES-GCM` cipher with 128-bit key.
 ///
-/// It offers round limit up to `usize::MAX` before requiring rekeying.
+/// It offers round limit up to `u64::MAX` before requiring rekeying.
 pub struct EncryptionProvider {
     cipher: Aes128Gcm,
     sequence: u64,

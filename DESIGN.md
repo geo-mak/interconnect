@@ -161,11 +161,15 @@ Interconnect's design defines three categories of security:
 
   Securing the transport is the responsibility of the transport components and it is subject to each implementation and its defined threat-model.
 
-  The security of transport is **independent** from other security procedures. Fixed security token are **prohibited** from being used as keys to secure a transport session.
+  The security of transport is **independent** from other security procedures. Static security token are **prohibited** from being used as keys to secure a transport session.
 
-  Fixed security tokens can be used for identification and to control access to assets and functionalities, but **never** to secure a transport session.
+  Static security tokens can be used for identification and to control access to assets and functionalities, but **never** to secure a transport session.
 
+  All key-exchange protocols **must** apply perfect forward secrecy algorithms using **ephemeral** key materials.
+  
 - **Identification**: Verification process of valid **identity** as proof of trusted origin.
   Identification helps peers to make sure they are communicating with what they are expecting as peer.
+
+  When using secure transport, identity-exchange **must** take place **after** establishing secure connection.
 
 - **Access control**: Enabling operations according to adequate privileges.

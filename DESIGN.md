@@ -149,7 +149,7 @@ The core idea is to enable sharing and reusability of the same acquired memory a
 
 Interconnect's design is **centered** around memory subsystems and their implementation for various cases is an **essential** part of the project.
 
-# Security
+## Security
 
 Security is **marginal** and subject to the required margin and the cost of performance and complexity.
 

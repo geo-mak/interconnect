@@ -10,7 +10,7 @@ Interconnect has a dataflow-oriented architecture where data availability drives
 
 Interconnect's design is layered with modular components and makes heavy use of static parametric polymorphism.
 
-Interconnect's design utilizes a **meta-system** that uses `server` as a universal abstraction to describe its model of composition.
+Interconnect's design utilizes a **meta-system** that uses `server` as a universal abstraction to describe its model of composition. According to this **meta-system**, the software is a network and the hardware is a network, and all components on all levels are `servers`.
 
 From design perspective, components are **viewed** as **micro-servers** offering **services** that can be static, dynamic, local and remote.
 

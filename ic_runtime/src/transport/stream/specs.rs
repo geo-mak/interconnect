@@ -150,11 +150,11 @@ pub mod negotiation {
     use x25519_dalek::{EphemeralSecret, PublicKey};
 
     use crate::error::{ErrKind, ProtocolError, ProtocolResult};
-    use crate::transport::traits::BytesTransport;
+    use crate::transport::traits::{BytesReceiver, BytesSender, BytesTransport};
 
     pub async fn read_frame<T>(transport: &mut T) -> ProtocolResult<ConnectionSpecs>
     where
-        T: BytesTransport,
+        T: BytesReceiver,
     {
         let mut destination = [0u8; SPECS_FRAME_LEN];
         transport.receive(&mut destination).await?;
@@ -172,7 +172,7 @@ pub mod negotiation {
 
     pub async fn write_frame<T>(transport: &mut T, specs: &ConnectionSpecs) -> ProtocolResult<()>
     where
-        T: BytesTransport,
+        T: BytesSender,
     {
         let mut source = [0u8; SPECS_FRAME_LEN];
         source[0..4].copy_from_slice(SPECS_PROTO);
@@ -186,7 +186,7 @@ pub mod negotiation {
     #[inline(always)]
     pub async fn confirm<T>(transport: &mut T) -> ProtocolResult<()>
     where
-        T: BytesTransport,
+        T: BytesSender,
     {
         transport.send(&[0x01]).await
     }
@@ -195,7 +195,7 @@ pub mod negotiation {
     #[inline(always)]
     pub async fn reject<T>(transport: &mut T) -> ProtocolResult<()>
     where
-        T: BytesTransport,
+        T: BytesSender,
     {
         transport.send(&[0x00]).await
     }

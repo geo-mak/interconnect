@@ -225,6 +225,7 @@ pub mod negotiation {
         T: BytesTransport,
     {
         let client_secret = EphemeralSecret::random_from_rng(OsRng);
+
         let client_public = PublicKey::from(&client_secret);
         transport.send_bytes(client_public.as_bytes()).await?;
 
@@ -232,8 +233,8 @@ pub mod negotiation {
         transport.receive_bytes(&mut server_pub_bytes).await?;
         let server_public = PublicKey::from(server_pub_bytes);
 
-        let shared = client_secret.diffie_hellman(&server_public);
-        let (recv_key, send_key, nonce_base) = derive_session_keys(shared.as_bytes())?;
+        let shared_secret = client_secret.diffie_hellman(&server_public);
+        let (recv_key, send_key, nonce_base) = derive_session_keys(shared_secret.as_bytes())?;
 
         let sender_state = EncryptionProvider::new(send_key, nonce_base);
         let receiver_state = EncryptionProvider::new(recv_key, nonce_base);
@@ -253,11 +254,12 @@ pub mod negotiation {
         let client_public = PublicKey::from(client_pub_bytes);
 
         let server_secret = EphemeralSecret::random_from_rng(OsRng);
+
         let server_public = PublicKey::from(&server_secret);
         transport.send_bytes(server_public.as_bytes()).await?;
 
-        let shared = server_secret.diffie_hellman(&client_public);
-        let (send_key, recv_key, nonce_base) = derive_session_keys(shared.as_bytes())?;
+        let shared_secret = server_secret.diffie_hellman(&client_public);
+        let (send_key, recv_key, nonce_base) = derive_session_keys(shared_secret.as_bytes())?;
 
         let sender_state = EncryptionProvider::new(send_key, nonce_base);
         let receiver_state = EncryptionProvider::new(recv_key, nonce_base);
@@ -269,7 +271,7 @@ pub mod negotiation {
     fn derive_session_keys(
         shared_secret: &[u8],
     ) -> ProtocolResult<(SenderKey, ReceiverKey, NonceBase)> {
-        let hkdf = Hkdf::<Sha256>::new(Some(b"ics-negotiation"), shared_secret);
+        let hkdf = Hkdf::<Sha256>::new(Some(b"ics-session"), shared_secret);
 
         let mut send_key = [0u8; 16];
         let mut recv_key = [0u8; 16];
@@ -277,10 +279,11 @@ pub mod negotiation {
 
         let map_err = |_| ProtocolError::error(ErrKind::KeyDerivation);
 
-        hkdf.expand(b"ics-session-write", &mut send_key)
+        hkdf.expand(b"ics-send", &mut send_key).map_err(map_err)?;
+
+        hkdf.expand(b"ics-receive", &mut recv_key)
             .map_err(map_err)?;
-        hkdf.expand(b"ics-session-read", &mut recv_key)
-            .map_err(map_err)?;
+
         hkdf.expand(b"ics-nonce-base", &mut nonce_base)
             .map_err(map_err)?;
 

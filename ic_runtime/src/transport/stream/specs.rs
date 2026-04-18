@@ -9,9 +9,9 @@ use crate::opt::branch_hints::unlikely;
 
 const SPECS_FRAME_LEN: usize = 8;
 
-/// Protocol flags.
+/// Protocol signature.
 /// `ICS0` = Interconnect Connection Specification Version 0.
-const SPECS_PROTO: &[u8; 4] = b"ICS0";
+const SPECS_PROTO_SIG_0: &[u8; 4] = b"ICS0";
 
 #[derive(Debug, Clone, Copy)]
 pub struct ConnectionSpecs {
@@ -106,7 +106,7 @@ impl EncryptionProvider {
 /// Initiation starts by sending `specification-frame` that is 8-bytes in size and its bytes
 /// represent the following:
 ///
-/// - `[0-4]`   Protocol signature and version.
+/// - `[0-4]`   Protocol signature.
 ///
 /// - `[4]`      ABI version.
 ///
@@ -159,7 +159,7 @@ pub mod negotiation {
         let mut destination = [0u8; SPECS_FRAME_LEN];
         transport.receive(&mut destination).await?;
 
-        if &destination[0..4] != SPECS_PROTO {
+        if &destination[0..4] != SPECS_PROTO_SIG_0 {
             return Err(ProtocolError::error(ErrKind::InvalidNegotiation));
         }
 
@@ -175,7 +175,7 @@ pub mod negotiation {
         T: BytesSender,
     {
         let mut source = [0u8; SPECS_FRAME_LEN];
-        source[0..4].copy_from_slice(SPECS_PROTO);
+        source[0..4].copy_from_slice(SPECS_PROTO_SIG_0);
         source[4] = specs.abi;
         source[5] = specs.encrypted as u8;
         source[6..8].copy_from_slice(&0u16.to_le_bytes());

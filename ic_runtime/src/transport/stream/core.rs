@@ -125,8 +125,8 @@ pub async fn send<T: BytesSender, S: IOSegment>(
     // TODO: use protocol types.
     let len_u32 = source.len() as u32;
     // Note: We don't control the segment's layout, so it has to be two calls.
-    transport.send_bytes(&len_u32.to_le_bytes()).await?;
-    transport.send_bytes(source.as_slice()).await
+    transport.send(&len_u32.to_le_bytes()).await?;
+    transport.send(source.as_slice()).await
 }
 
 pub async fn receive<T: BytesReceiver, D: IOSegment>(
@@ -135,7 +135,7 @@ pub async fn receive<T: BytesReceiver, D: IOSegment>(
 ) -> ProtocolResult<()> {
     // TODO: use protocol types.
     let mut len_bytes = [0u8; 4];
-    transport.receive_bytes(&mut len_bytes).await?;
+    transport.receive(&mut len_bytes).await?;
     let len = u32::from_le_bytes(len_bytes);
 
     if unlikely(len > MAX_MESSAGE_SIZE) {
@@ -156,7 +156,7 @@ pub async fn receive<T: BytesReceiver, D: IOSegment>(
         let recv_segment = unsafe { destination.as_slice_mut_of(len) };
 
         // Safety: This call must initialize the provided segment or it must fail and return.
-        transport.receive_bytes(recv_segment).await?;
+        transport.receive(recv_segment).await?;
 
         // Safety: `len` bytes are assumed to have been initialized.
         unsafe { destination.set_len(len) };
@@ -178,8 +178,8 @@ pub async fn send_encrypted<T: BytesSender, S: IOSegment>(
     // TODO: use protocol types.
     let len_u32 = source.len() as u32;
     // Note: We don't control the segment's layout, so it has to be two calls.
-    transport.send_bytes(&len_u32.to_le_bytes()).await?;
-    transport.send_bytes(source.as_slice()).await
+    transport.send(&len_u32.to_le_bytes()).await?;
+    transport.send(source.as_slice()).await
 }
 
 pub async fn receive_encrypted<T: BytesReceiver, D: IOSegment>(
@@ -189,7 +189,7 @@ pub async fn receive_encrypted<T: BytesReceiver, D: IOSegment>(
 ) -> ProtocolResult<()> {
     // TODO: use protocol types.
     let mut len_bytes = [0u8; 4];
-    transport.receive_bytes(&mut len_bytes).await?;
+    transport.receive(&mut len_bytes).await?;
     let len = u32::from_le_bytes(len_bytes);
 
     if unlikely(len > MAX_MESSAGE_SIZE) {
@@ -210,7 +210,7 @@ pub async fn receive_encrypted<T: BytesReceiver, D: IOSegment>(
         let recv_segment = unsafe { destination.as_slice_mut_of(len) };
 
         // Safety: This call must initialize the provided segment or it must fail and return.
-        transport.receive_bytes(recv_segment).await?;
+        transport.receive(recv_segment).await?;
 
         // Safety:
         // - Reading is assumed to be done on initialized bytes at this stage.

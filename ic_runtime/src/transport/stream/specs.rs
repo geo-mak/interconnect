@@ -157,7 +157,7 @@ pub mod negotiation {
         T: BytesTransport,
     {
         let mut destination = [0u8; SPECS_FRAME_LEN];
-        transport.receive_bytes(&mut destination).await?;
+        transport.receive(&mut destination).await?;
 
         if &destination[0..4] != SPECS_PROTO {
             return Err(ProtocolError::error(ErrKind::InvalidNegotiation));
@@ -179,7 +179,7 @@ pub mod negotiation {
         source[4] = specs.abi;
         source[5] = specs.encrypted as u8;
         source[6..8].copy_from_slice(&0u16.to_le_bytes());
-        transport.send_bytes(&source).await
+        transport.send(&source).await
     }
 
     /// Send a confirmation (0x01) to the transport.
@@ -188,7 +188,7 @@ pub mod negotiation {
     where
         T: BytesTransport,
     {
-        transport.send_bytes(&[0x01]).await
+        transport.send(&[0x01]).await
     }
 
     /// Send a rejection (0x00) to the transport.
@@ -197,7 +197,7 @@ pub mod negotiation {
     where
         T: BytesTransport,
     {
-        transport.send_bytes(&[0x00]).await
+        transport.send(&[0x00]).await
     }
 
     /// Initiates a capability negotiation.
@@ -208,7 +208,7 @@ pub mod negotiation {
         self::write_frame(transport, &capability).await?;
 
         let mut response = [0u8; 1];
-        transport.receive_bytes(&mut response).await?;
+        transport.receive(&mut response).await?;
 
         match response[0] {
             0x01 => Ok(()),
@@ -227,10 +227,10 @@ pub mod negotiation {
         let client_secret = EphemeralSecret::random_from_rng(OsRng);
 
         let client_public = PublicKey::from(&client_secret);
-        transport.send_bytes(client_public.as_bytes()).await?;
+        transport.send(client_public.as_bytes()).await?;
 
         let mut server_pub_bytes = [0u8; 32];
-        transport.receive_bytes(&mut server_pub_bytes).await?;
+        transport.receive(&mut server_pub_bytes).await?;
         let server_public = PublicKey::from(server_pub_bytes);
 
         let shared_secret = client_secret.diffie_hellman(&server_public);
@@ -250,13 +250,13 @@ pub mod negotiation {
         T: BytesTransport,
     {
         let mut client_pub_bytes = [0u8; 32];
-        transport.receive_bytes(&mut client_pub_bytes).await?;
+        transport.receive(&mut client_pub_bytes).await?;
         let client_public = PublicKey::from(client_pub_bytes);
 
         let server_secret = EphemeralSecret::random_from_rng(OsRng);
 
         let server_public = PublicKey::from(&server_secret);
-        transport.send_bytes(server_public.as_bytes()).await?;
+        transport.send(server_public.as_bytes()).await?;
 
         let shared_secret = server_secret.diffie_hellman(&client_public);
         let (send_key, recv_key, nonce_base) = derive_session_keys(shared_secret.as_bytes())?;
@@ -326,21 +326,21 @@ mod test {
 
             // First message.
             let mut bytes = [0u8; 2];
-            transport.receive_bytes(&mut bytes).await.unwrap();
+            transport.receive(&mut bytes).await.unwrap();
             let len = u16::from_le_bytes(bytes) as usize;
 
             let mut buffer = vec![0u8; len];
-            transport.receive_bytes(&mut buffer).await.unwrap();
+            transport.receive(&mut buffer).await.unwrap();
 
             recv_state.decrypt(&mut buffer, b"").unwrap();
             assert_eq!(&buffer, b"first message!");
 
             // Second message.
-            transport.receive_bytes(&mut bytes).await.unwrap();
+            transport.receive(&mut bytes).await.unwrap();
             let len = u16::from_le_bytes(bytes) as usize;
 
             let mut buffer = vec![0u8; len];
-            transport.receive_bytes(&mut buffer).await.unwrap();
+            transport.receive(&mut buffer).await.unwrap();
 
             recv_state.decrypt(&mut buffer, b"").unwrap();
             assert_eq!(&buffer, b"second message!");
@@ -368,16 +368,16 @@ mod test {
         send_state.encrypt(&mut buffer, b"").unwrap();
 
         let mut bytes = (buffer.len() as u16).to_le_bytes();
-        transport.send_bytes(&mut bytes).await.unwrap();
-        transport.send_bytes(&buffer).await.unwrap();
+        transport.send(&mut bytes).await.unwrap();
+        transport.send(&buffer).await.unwrap();
 
         // Second message.
         let mut buffer = b"second message!".to_vec();
         send_state.encrypt(&mut buffer, b"").unwrap();
 
         let mut bytes = (buffer.len() as u16).to_le_bytes();
-        transport.send_bytes(&mut bytes).await.unwrap();
-        transport.send_bytes(&buffer).await.unwrap();
+        transport.send(&mut bytes).await.unwrap();
+        transport.send(&buffer).await.unwrap();
 
         server.await.unwrap();
     }

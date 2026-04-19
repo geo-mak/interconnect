@@ -26,7 +26,7 @@ pub enum ErrKind {
 
     KeyDerivation = 5,
 
-    InvalidEncryptionKey = 6,
+    InvalidKey = 6,
 
     Encryption = 7,
 
@@ -76,7 +76,7 @@ impl ErrKind {
             3 => InvalidNegotiation,
             4 => SpecsMismatch,
             5 => KeyDerivation,
-            6 => InvalidEncryptionKey,
+            6 => InvalidKey,
             7 => Encryption,
             8 => Decryption,
             9 => Encoding,

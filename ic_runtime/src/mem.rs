@@ -254,7 +254,7 @@ impl Encoder for IOPoolSegment {
         let segment_len = self.len;
 
         // Assuming the current len is padded.
-        debug_assert!(segment_len % BASIC_BLOCK_SIZE == 0);
+        debug_assert!(segment_len.is_multiple_of(BASIC_BLOCK_SIZE));
         let new_len_aligned = segment_len + zeroing_len_aligned;
 
         // Safety: Capacity must be enured for "extra" aligned bytes.
@@ -288,7 +288,7 @@ impl Encoder for IOPoolSegment {
         let segment_len = self.len;
 
         // Assuming the current len is padded.
-        debug_assert!(segment_len % BASIC_BLOCK_SIZE == 0);
+        debug_assert!(segment_len.is_multiple_of(BASIC_BLOCK_SIZE));
         let new_len_aligned = segment_len + source_len_aligned;
 
         // Safety: Capacity must be enured for "extra" aligned bytes.

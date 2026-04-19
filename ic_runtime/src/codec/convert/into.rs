@@ -1,6 +1,6 @@
 use crate::codec::convert::from::FromProtocolType;
 use crate::codec::types::core::{
-    TypeF32, TypeF64, TypeI8, TypeI16, TypeI32, TypeI64, TypeU8, TypeU16, TypeU32, TypeU64,
+    TypeF32, TypeF64, TypeI16, TypeI32, TypeI64, TypeU16, TypeU32, TypeU64,
 };
 
 /// Type that is convertible to native type.
@@ -26,11 +26,11 @@ macro_rules! impl_into_native_for {
 
 impl_into_native_for! {()}
 impl_into_native_for! {bool}
-impl_into_native_for! { TypeI8, into i8 }
+impl_into_native_for! { i8 }
 impl_into_native_for! { TypeI16, into i16 }
 impl_into_native_for! { TypeI32, into i32 }
 impl_into_native_for! { TypeI64, into i64 }
-impl_into_native_for! { TypeU8, into u8 }
+impl_into_native_for! { u8 }
 impl_into_native_for! { TypeU16, into u16 }
 impl_into_native_for! { TypeU32, into u32 }
 impl_into_native_for! { TypeU64, into u64 }

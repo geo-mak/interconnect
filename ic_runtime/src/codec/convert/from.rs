@@ -3,7 +3,7 @@ use core::ptr::copy_nonoverlapping;
 
 use crate::codec::convert::opt::CopyConversion;
 use crate::codec::types::core::{
-    TypeF32, TypeF64, TypeI8, TypeI16, TypeI32, TypeI64, TypeU8, TypeU16, TypeU32, TypeU64,
+    TypeF32, TypeF64, TypeI16, TypeI32, TypeI64, TypeU16, TypeU32, TypeU64,
 };
 
 /// A type which can be constructed from a protocol type.
@@ -59,11 +59,11 @@ macro_rules! impl_from_protocol_type_for {
 
 impl_from_protocol_type_for! {()}
 impl_from_protocol_type_for! {bool}
-impl_from_protocol_type_for! { i8, from TypeI8 }
+impl_from_protocol_type_for! { i8 }
 impl_from_protocol_type_for! { i16, from TypeI16 }
 impl_from_protocol_type_for! { i32, from TypeI32 }
 impl_from_protocol_type_for! { i64, from TypeI64 }
-impl_from_protocol_type_for! { u8, from TypeU8 }
+impl_from_protocol_type_for! { u8 }
 impl_from_protocol_type_for! { u16, from TypeU16 }
 impl_from_protocol_type_for! { u32, from TypeU32 }
 impl_from_protocol_type_for! { u64, from TypeU64 }

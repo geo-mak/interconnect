@@ -3,8 +3,7 @@ use core::ptr::copy_nonoverlapping;
 
 use crate::codec::convert::opt::CopyConversion;
 use crate::codec::types::core::{
-    ProtocolType, TypeF32, TypeF64, TypeI8, TypeI16, TypeI32, TypeI64, TypeU8, TypeU16, TypeU32,
-    TypeU64,
+    ProtocolType, TypeF32, TypeF64, TypeI16, TypeI32, TypeI64, TypeU16, TypeU32, TypeU64,
 };
 use crate::codec::types::limits::TypeLimits;
 use crate::error::ProtocolResult;
@@ -60,11 +59,11 @@ macro_rules! impl_encode_for {
 
 impl_encode_for!(());
 impl_encode_for!(bool);
-impl_encode_for!(TypeI8);
+impl_encode_for!(i8);
 impl_encode_for!(TypeI16);
 impl_encode_for!(TypeI32);
 impl_encode_for!(TypeI64);
-impl_encode_for!(TypeU8);
+impl_encode_for!(u8);
 impl_encode_for!(TypeU16);
 impl_encode_for!(TypeU32);
 impl_encode_for!(TypeU64);

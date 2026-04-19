@@ -477,24 +477,24 @@ macro_rules! define_float {
     }
 }
 
-define_int!(TypeI8: i8, 1);
 define_int!(TypeI16: i16, 2);
 define_int!(TypeI32: i32, 4);
 define_int!(TypeI64: i64, 8);
-define_uint!(TypeU8: u8, 1);
+
 define_uint!(TypeU16: u16, 2);
 define_uint!(TypeU32: u32, 4);
 define_uint!(TypeU64: u64, 8);
+
 define_float!(TypeF32: f32, 4);
 define_float!(TypeF64: f64, 8);
 
 impl_protocol_type_for!(());
 impl_protocol_type_for!(bool);
-impl_protocol_type_for!(TypeI8);
+impl_protocol_type_for!(i8);
 impl_protocol_type_for!(TypeI16);
 impl_protocol_type_for!(TypeI32);
 impl_protocol_type_for!(TypeI64);
-impl_protocol_type_for!(TypeU8);
+impl_protocol_type_for!(u8);
 impl_protocol_type_for!(TypeU16);
 impl_protocol_type_for!(TypeU32);
 impl_protocol_type_for!(TypeU64);

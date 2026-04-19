@@ -1,7 +1,7 @@
 use core::marker::PhantomData;
 
 use crate::codec::types::core::{
-    TypeF32, TypeF64, TypeI8, TypeI16, TypeI32, TypeI64, TypeU8, TypeU16, TypeU32, TypeU64,
+    TypeF32, TypeF64, TypeI16, TypeI32, TypeI64, TypeU16, TypeU32, TypeU64,
 };
 
 /// Conversion hint, that tells if conversion from `T` to `U` can be achieved by copying bitwise bytes of `T`.
@@ -80,11 +80,11 @@ macro_rules! impl_copy_conversion_between {
 
 impl_copy_conversion_between! {()}
 impl_copy_conversion_between! {bool}
-impl_copy_conversion_between! { i8, TypeI8 }
+impl_copy_conversion_between! { i8 }
 impl_copy_conversion_between! { i16, TypeI16 }
 impl_copy_conversion_between! { i32, TypeI32 }
 impl_copy_conversion_between! { i64, TypeI64 }
-impl_copy_conversion_between! { u8, TypeU8 }
+impl_copy_conversion_between! { u8 }
 impl_copy_conversion_between! { u16, TypeU16 }
 impl_copy_conversion_between! { u32, TypeU32 }
 impl_copy_conversion_between! { u64, TypeU64 }

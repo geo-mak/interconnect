@@ -1,6 +1,6 @@
 use crate::codec::reference::TypeRef;
 use crate::codec::types::core::{
-    TypeF32, TypeF64, TypeI8, TypeI16, TypeI32, TypeI64, TypeU8, TypeU16, TypeU32, TypeU64,
+    TypeF32, TypeF64, TypeI16, TypeI32, TypeI64, TypeU16, TypeU32, TypeU64,
 };
 use crate::error::ProtocolResult;
 
@@ -29,11 +29,11 @@ macro_rules! impl_unlimited_for {
 
 impl_unlimited_for!(());
 impl_unlimited_for!(bool);
-impl_unlimited_for!(TypeI8);
+impl_unlimited_for!(i8);
 impl_unlimited_for!(TypeI16);
 impl_unlimited_for!(TypeI32);
 impl_unlimited_for!(TypeI64);
-impl_unlimited_for!(TypeU8);
+impl_unlimited_for!(u8);
 impl_unlimited_for!(TypeU16);
 impl_unlimited_for!(TypeU32);
 impl_unlimited_for!(TypeU64);

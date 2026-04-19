@@ -1,7 +1,6 @@
 use crate::codec::reference::TypeRef;
 use crate::codec::types::core::{
-    ProtocolType, TypeF32, TypeF64, TypeI8, TypeI16, TypeI32, TypeI64, TypeU8, TypeU16, TypeU32,
-    TypeU64,
+    ProtocolType, TypeF32, TypeF64, TypeI16, TypeI32, TypeI64, TypeU16, TypeU32, TypeU64,
 };
 use crate::error::{ErrKind, ProtocolError, ProtocolResult};
 
@@ -41,11 +40,11 @@ unsafe impl<D: ?Sized> Decode<D> for bool {
     }
 }
 
-impl_decode_for!(TypeI8);
+impl_decode_for!(i8);
 impl_decode_for!(TypeI16);
 impl_decode_for!(TypeI32);
 impl_decode_for!(TypeI64);
-impl_decode_for!(TypeU8);
+impl_decode_for!(u8);
 impl_decode_for!(TypeU16);
 impl_decode_for!(TypeU32);
 impl_decode_for!(TypeU64);

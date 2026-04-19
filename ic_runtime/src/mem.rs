@@ -19,7 +19,7 @@ pub const BASIC_BLOCK_SIZE: usize = 8;
 pub const BASIC_BLOCK_SHIFT: usize = 3;
 pub const BASIC_BLOCK_MASK: usize = BASIC_BLOCK_SIZE - 1;
 
-/// A unified interface for types that perform untyped reads from and writes to a memory-region directly.
+/// A type that performs **untyped** memory operations.
 pub unsafe trait IOSegment {
     /// Returns the number of the **initialized** bytes in the segment.
     fn len(&self) -> usize;
@@ -148,7 +148,7 @@ pub unsafe trait IOSegment {
     /// - The source slice must consist of fully initialized bytes.
     /// - The source slice must be a non-overlapping (disjoint) memory-region.
     /// - The segment must have enough capacity to accommodate the the source data.
-    /// - The segment is valid for writing/overwriting withing the range [`offset`: source length - 1].
+    /// - The segment is valid for writing/overwriting within the range [`offset`: source length - 1].
     /// - The current length remains **unchanged** after writing.
     #[inline]
     unsafe fn store_at(&mut self, offset: usize, source: &[u8]) {

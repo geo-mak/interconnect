@@ -19,7 +19,7 @@ pub struct IPLinkSender<T> {
 }
 
 impl<T> IPLinkSender<T> {
-    pub const fn new(writer: OwnedWriteHalf) -> Self {
+    const fn new(writer: OwnedWriteHalf) -> Self {
         Self {
             writer,
             _t: PhantomData,
@@ -49,7 +49,7 @@ pub struct IPLinkReceiver<T> {
 }
 
 impl<T> IPLinkReceiver<T> {
-    pub const fn new(reader: OwnedReadHalf) -> Self {
+    const fn new(reader: OwnedReadHalf) -> Self {
         Self {
             reader,
             _t: PhantomData,
@@ -75,8 +75,7 @@ pub struct IPLink<S, R> {
 }
 
 impl<S, R> IPLink<S, R> {
-    #[inline]
-    const fn from(stream: TcpStream) -> Self {
+    const fn new(stream: TcpStream) -> Self {
         Self {
             stream,
             _s: PhantomData,
@@ -138,7 +137,7 @@ pub struct IPLinkSecureSender<T> {
 }
 
 impl<T> IPLinkSecureSender<T> {
-    pub const fn new(writer: OwnedWriteHalf, state: EncryptionProvider) -> Self {
+    const fn new(writer: OwnedWriteHalf, state: EncryptionProvider) -> Self {
         Self {
             writer,
             state,
@@ -170,7 +169,7 @@ pub struct IPLinkSecureReceiver<T> {
 }
 
 impl<T> IPLinkSecureReceiver<T> {
-    pub const fn new(reader: OwnedReadHalf, state: EncryptionProvider) -> Self {
+    const fn new(reader: OwnedReadHalf, state: EncryptionProvider) -> Self {
         Self {
             reader,
             state,
@@ -199,8 +198,7 @@ pub struct IPLinkSecure<S, R> {
 }
 
 impl<S, R> IPLinkSecure<S, R> {
-    #[inline]
-    const fn from(
+    const fn new(
         stream: TcpStream,
         send_state: EncryptionProvider,
         recv_state: EncryptionProvider,
@@ -237,7 +235,7 @@ where
 
         let (send_state, recv_state) = negotiation::initiate_key_exchange(&mut stream).await?;
 
-        Ok(Self::from(stream, send_state, recv_state))
+        Ok(Self::new(stream, send_state, recv_state))
     }
 
     async fn send(&mut self, source: &mut S) -> ProtocolResult<()> {
@@ -269,8 +267,7 @@ pub struct IPLinkInitiator<S, R> {
 }
 
 impl<S, R> IPLinkInitiator<S, R> {
-    #[inline]
-    const fn from(stream: TcpStream) -> Self {
+    const fn new(stream: TcpStream) -> Self {
         Self {
             stream,
             _s: PhantomData,
@@ -293,11 +290,12 @@ where
         if specs.abi == 1 && specs.encrypted == false {
             negotiation::confirm(&mut self.stream).await?;
 
-            return Ok(IPLink::from(self.stream));
+            return Ok(IPLink::new(self.stream));
         }
 
         negotiation::reject(&mut self.stream).await?;
-        return Err(ProtocolError::error(ErrKind::SpecsMismatch));
+
+        Err(ProtocolError::error(ErrKind::SpecsMismatch))
     }
 }
 
@@ -335,7 +333,7 @@ where
 
     async fn accept(&self) -> ProtocolResult<(IPLinkInitiator<S, R>, SocketAddr)> {
         let (stream, addr) = self.listener.accept().await?;
-        Ok((IPLinkInitiator::from(stream), addr))
+        Ok((IPLinkInitiator::new(stream), addr))
     }
 
     fn id(&self) -> ProtocolResult<SocketAddr> {
@@ -354,8 +352,7 @@ pub struct IPLinkSecureInitiator<S, R> {
 }
 
 impl<S, R> IPLinkSecureInitiator<S, R> {
-    #[inline]
-    const fn from(stream: TcpStream) -> Self {
+    const fn new(stream: TcpStream) -> Self {
         Self {
             stream,
             _s: PhantomData,
@@ -381,11 +378,12 @@ where
             let (send_state, recv_state) =
                 negotiation::accept_key_exchange(&mut self.stream).await?;
 
-            return Ok(IPLinkSecure::from(self.stream, send_state, recv_state));
+            return Ok(IPLinkSecure::new(self.stream, send_state, recv_state));
         }
 
         negotiation::reject(&mut self.stream).await?;
-        return Err(ProtocolError::error(ErrKind::SpecsMismatch));
+
+        Err(ProtocolError::error(ErrKind::SpecsMismatch))
     }
 }
 
@@ -423,7 +421,7 @@ where
 
     async fn accept(&self) -> ProtocolResult<(IPLinkSecureInitiator<S, R>, SocketAddr)> {
         let (stream, addr) = self.listener.accept().await?;
-        Ok((IPLinkSecureInitiator::from(stream), addr))
+        Ok((IPLinkSecureInitiator::new(stream), addr))
     }
 
     fn id(&self) -> ProtocolResult<SocketAddr> {

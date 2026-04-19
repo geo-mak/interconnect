@@ -29,7 +29,7 @@ pub trait TransportReceiver {
 ///
 /// Types that implement this trait shall ask for their memory from a specified allocator or `provider`.
 pub trait Transport: Sized {
-    /// TODO: Add associated error-type?
+    // TODO: Add associated error-type?
 
     type Parameters;
 

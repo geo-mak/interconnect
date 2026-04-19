@@ -4,7 +4,7 @@ description = "High performance inter-process communication protocol"
 repository = "https://github.com/geo-mak/interconnect"
 license-file = "LICENSE"
 
-rust-version = "1.94.1"
+rust-version = "1.95.0"
 edition = "2024"
 
 [workspace]

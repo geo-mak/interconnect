@@ -271,7 +271,7 @@ impl Encoder for IOPoolSegment {
             // Advance aligned.
             self.set_len(new_len_aligned);
 
-            return true;
+            true
         }
     }
 
@@ -311,7 +311,7 @@ impl Encoder for IOPoolSegment {
             // Advance aligned.
             self.set_len(new_len_aligned);
 
-            return true;
+            true
         }
     }
 

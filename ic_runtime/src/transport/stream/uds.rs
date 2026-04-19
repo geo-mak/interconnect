@@ -155,7 +155,7 @@ where
     type Transport = UnixLink<S, R>;
 
     async fn initiate(mut self) -> ProtocolResult<UnixLink<S, R>> {
-        let specs = negotiation::read_frame(&mut self.stream).await?;
+        let specs = negotiation::receive_specs(&mut self.stream).await?;
         // TODO: Hardcoded because config are not accepted currently.
         if specs.abi != 1 {
             negotiation::reject(&mut self.stream).await?;

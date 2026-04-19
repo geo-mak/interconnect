@@ -152,7 +152,7 @@ pub mod negotiation {
     use crate::error::{ErrKind, ProtocolError, ProtocolResult};
     use crate::transport::traits::{BytesReceiver, BytesSender, BytesTransport};
 
-    pub async fn read_frame<T>(transport: &mut T) -> ProtocolResult<ConnectionSpecs>
+    pub async fn receive_specs<T>(transport: &mut T) -> ProtocolResult<ConnectionSpecs>
     where
         T: BytesReceiver,
     {
@@ -170,7 +170,7 @@ pub mod negotiation {
         Ok(ConnectionSpecs { abi, encrypted })
     }
 
-    pub async fn write_frame<T>(transport: &mut T, specs: &ConnectionSpecs) -> ProtocolResult<()>
+    pub async fn send_specs<T>(transport: &mut T, specs: &ConnectionSpecs) -> ProtocolResult<()>
     where
         T: BytesSender,
     {
@@ -205,7 +205,7 @@ pub mod negotiation {
     where
         T: BytesTransport,
     {
-        self::write_frame(transport, &capability).await?;
+        self::send_specs(transport, &capability).await?;
 
         let mut response = [0u8; 1];
         transport.receive(&mut response).await?;
@@ -308,7 +308,7 @@ mod test {
         let server = tokio::spawn(async move {
             let (mut transport, _) = listener.accept().await.expect("accept failed");
 
-            let proposed = negotiation::read_frame(&mut transport)
+            let proposed = negotiation::receive_specs(&mut transport)
                 .await
                 .expect("server negotiation failed");
 

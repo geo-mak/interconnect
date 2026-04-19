@@ -287,7 +287,7 @@ where
     type Transport = IPLink<S, R>;
 
     async fn initiate(mut self) -> ProtocolResult<IPLink<S, R>> {
-        let specs = negotiation::read_frame(&mut self.stream).await?;
+        let specs = negotiation::receive_specs(&mut self.stream).await?;
 
         // TODO: Hardcoded because config are not accepted currently.
         if specs.abi == 1 && specs.encrypted == false {
@@ -372,7 +372,7 @@ where
     type Transport = IPLinkSecure<S, R>;
 
     async fn initiate(mut self) -> ProtocolResult<IPLinkSecure<S, R>> {
-        let specs = negotiation::read_frame(&mut self.stream).await?;
+        let specs = negotiation::receive_specs(&mut self.stream).await?;
 
         // TODO: Hardcoded because config are not accepted currently.
         if specs.abi == 1 && specs.encrypted == true {

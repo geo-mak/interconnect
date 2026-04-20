@@ -88,7 +88,7 @@ pub unsafe trait IOSegment {
 
     /// Constructs a mutable slice of `count` bytes from offset `0` to offset `count - 1`.
     ///
-    /// # Safety
+    /// Safety:
     /// - The count must be within the bounds of the allocated memory.
     /// - The bytes of the slice might be uninitialized.
     ///

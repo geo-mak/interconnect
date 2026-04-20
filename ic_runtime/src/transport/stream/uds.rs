@@ -18,7 +18,7 @@ pub struct UnixLinkSender<T> {
 }
 
 impl<T> UnixLinkSender<T> {
-    pub const fn new(writer: OwnedWriteHalf) -> Self {
+    const fn new(writer: OwnedWriteHalf) -> Self {
         Self {
             writer,
             _t: PhantomData,
@@ -48,7 +48,7 @@ pub struct UnixLinkReceiver<T> {
 }
 
 impl<T> UnixLinkReceiver<T> {
-    pub const fn new(reader: OwnedReadHalf) -> Self {
+    const fn new(reader: OwnedReadHalf) -> Self {
         Self {
             reader,
             _t: PhantomData,
@@ -74,8 +74,7 @@ pub struct UnixLink<S, R> {
 }
 
 impl<S, R> UnixLink<S, R> {
-    #[inline]
-    const fn from(stream: UnixStream) -> Self {
+    const fn new(stream: UnixStream) -> Self {
         Self {
             stream,
             _s: PhantomData,
@@ -137,8 +136,7 @@ pub struct UnixLinkInitiator<S, R> {
 }
 
 impl<S, R> UnixLinkInitiator<S, R> {
-    #[inline]
-    pub const fn from(stream: UnixStream) -> Self {
+    const fn new(stream: UnixStream) -> Self {
         Self {
             stream,
             _s: PhantomData,
@@ -163,7 +161,7 @@ where
         }
         negotiation::confirm(&mut self.stream).await?;
 
-        Ok(UnixLink::from(self.stream))
+        Ok(UnixLink::new(self.stream))
     }
 }
 
@@ -200,7 +198,7 @@ where
 
     async fn accept(&self) -> ProtocolResult<(UnixLinkInitiator<S, R>, Self::ID)> {
         let (stream, addr) = self.listener.accept().await?;
-        Ok((UnixLinkInitiator::from(stream), addr))
+        Ok((UnixLinkInitiator::new(stream), addr))
     }
 
     fn id(&self) -> ProtocolResult<Self::ID> {

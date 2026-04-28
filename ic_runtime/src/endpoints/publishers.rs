@@ -13,13 +13,6 @@ enum PublisherState<T> {
     Ready(Option<T>),
 }
 
-impl<T> PublisherState<T> {
-    #[inline]
-    fn discriminant_eq(&self, other: &Self) -> bool {
-        core::mem::discriminant(self) == core::mem::discriminant(other)
-    }
-}
-
 struct PublisherData<T> {
     next: AtomicU32,
     cycle: AtomicU32,
@@ -148,27 +141,26 @@ impl<T> Publishers<T> {
     }
 
     pub(crate) fn acquire(&self) -> Option<Publisher<'_, T>> {
-        let mut current_free = self.free.lock();
+        let mut free_lock = self.free.lock();
 
-        let current_index = *current_free;
+        let free_index = *free_lock;
 
-        if current_index == Self::INVALID_INDEX {
+        if free_index == Self::INVALID_INDEX {
             return None;
         }
 
-        let current_pub = &self.publishers[current_index as usize];
+        let selected_pub = &self.publishers[free_index as usize];
 
-        let acquired_state = unsafe { &mut *current_pub.state.get() };
-        debug_assert!(acquired_state.discriminant_eq(&PublisherState::Unused));
+        let publisher_state = unsafe { &mut *selected_pub.state.get() };
 
-        *acquired_state = PublisherState::Acquired;
+        *publisher_state = PublisherState::Acquired;
 
-        *current_free = current_pub.next.load(Relaxed);
+        *free_lock = selected_pub.next.load(Relaxed);
 
         // Bind the current cycle to the index for cycle-detection when publishing.
-        let acquired = Self::combine(current_index, current_pub.cycle.load(Relaxed));
+        let acquired = Self::combine(free_index, selected_pub.cycle.load(Relaxed));
 
-        Some(Publisher::new(acquired, current_pub, self))
+        Some(Publisher::new(acquired, selected_pub, self))
     }
 
     /// Tries to published the value to an identified publisher.
@@ -254,9 +246,7 @@ mod tests {
 
             let pub_state = unsafe { &*publisher.state.get() };
 
-            if !pub_state.discriminant_eq(&PublisherState::Unused) {
-                panic!("Reserved publisher detected");
-            }
+            assert!(matches!(pub_state, PublisherState::Unused));
 
             count += 1;
             index = publisher.next.load(Relaxed);

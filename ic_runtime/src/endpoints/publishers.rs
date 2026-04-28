@@ -35,7 +35,7 @@ impl<T> PublisherData<T> {
 
 /// Publisher is released on drop.
 pub(crate) struct Publisher<'a, T> {
-    pub(crate) id: u64,
+    id: u64,
     pub_data: &'a PublisherData<T>,
     publishers: &'a Publishers<T>,
 }
@@ -54,6 +54,11 @@ impl<'a, T> Publisher<'a, T> {
             pub_data,
             publishers,
         }
+    }
+
+    #[inline(always)]
+    pub(crate) const fn id(&self) -> u64 {
+        self.id
     }
 
     #[inline(always)]

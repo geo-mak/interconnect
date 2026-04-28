@@ -126,7 +126,7 @@ where
         // TODO: Generate ID according to id-rules.
         if let Some(publisher) = &self.state.publishers.acquire() {
             if let Some(mut segment) = self.state.provider.acquire_send() {
-                TypeMessageHeader::encode_header(publisher.id, op, &mut segment)?;
+                TypeMessageHeader::encode_header(publisher.id(), op, &mut segment)?;
 
                 segment.encode_next(message, ())?;
 
@@ -169,7 +169,7 @@ where
     {
         if let Some(publisher) = &self.state.publishers.acquire() {
             if let Some(mut segment) = self.state.provider.acquire_send() {
-                TypeMessageHeader::encode_header(publisher.id, op, &mut segment)?;
+                TypeMessageHeader::encode_header(publisher.id(), op, &mut segment)?;
 
                 self.state.sender.lock().await.send(&mut segment).await?;
 

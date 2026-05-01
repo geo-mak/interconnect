@@ -297,9 +297,26 @@ For better reliability and explicitness, explicit tagging **might** get added to
 
 **Definition**: Compiler directives that add extra context to the defined element.
 
-**Syntax**: `@attr`, `@attr(value)`.
+**Syntax**: 
+  - Zero-modifier attribute: `@attribute`.
+  - Single-modifier attribute: `@attribute(modifier)`.
+  - Multi-modifier attribute: `@attribute(modifier, modifier, ...)`.
 
 **Constraints**: Each definition accepts specific set of attributes only.
+
+**Example**:
+
+```rust
+interface ServiceA {
+  // Annotate the call as deprecated while maintaining full support for older versions.
+  @deprecated
+  call_a(): MessageDef;
+
+  // Annotate the call as deprecated with error returned when called.
+  @deprecated(error)
+  call_b(param: MessageDef): MessageDef;
+}
+```
 
 ## 6. Namespaces
 

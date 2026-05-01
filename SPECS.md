@@ -30,7 +30,7 @@ Collections serve grouping multiple elements of the **same** type.
 
 ### Vector
 
-**Definition**: Variable-length sized group of elements.
+**Description**: Variable-length sized group of elements.
 
 **Representation**: The length and sequence of values of the storage type.
 
@@ -42,7 +42,7 @@ Collections serve grouping multiple elements of the **same** type.
 
 ### Array
 
-**Definition**: A fixed-length group of elements.
+**Description**: A fixed-length group of elements.
 
 **Representation**: Sequence of values of the storage type.
 
@@ -52,7 +52,7 @@ Collections serve grouping multiple elements of the **same** type.
 
 ### UTF-8 Vector
 
-**Definition**: Variable-length sequence of UTF-8-encoded bytes.
+**Description**: Variable-length sequence of UTF-8-encoded bytes.
 
 **Representation**: The length and a sequence of UTF-8-encoded bytes.
 
@@ -64,7 +64,7 @@ Collections serve grouping multiple elements of the **same** type.
 
 ### UTF-8 Array
 
-**Definition**: Fixed-length sequence of UTF-8-encoded bytes.
+**Description**: Fixed-length sequence of UTF-8-encoded bytes.
 
 **Representation**: Sequence of UTF-8-encoded bytes.
 
@@ -78,7 +78,7 @@ Compound types aggregate multiple fields or variants.
 
 ### Enums
 
-**Definition**: A group of named constants.
+**Description**: A group of named constants.
 
 **Representation**: Integer-value with representation depends on the specified integer-type (e.g. `u8`).
 
@@ -112,7 +112,7 @@ enum EnumA: u8 {
 
 ### Union
 
-**Definition**: A tagged union with multiple members.
+**Description**: A tagged union with multiple members.
 
 **Representation**: A Tag, size and the data of the active member.
 
@@ -149,7 +149,7 @@ union UnionA {
 
 ### Struct
 
-**Definition**: A fixed-layout collection of named fields.
+**Description**: A fixed-layout collection of named fields.
 
 **Representation**: Array of bytes with layout aligned to the alignment of the largest scalar member.
 
@@ -197,7 +197,7 @@ struct StructB {
 
 ### Message
 
-**Definition**: User-defined transactional unit of data exchanged between the two sides of the interface-boundary.
+**Description**: User-defined transactional unit of data exchanged between the two sides of the interface-boundary.
 
 **Representation**: Represented as `struct` with identical layout-rules.
 
@@ -231,7 +231,7 @@ Both regions are aligned to **8-bytes**, this implies that the allocated encodin
 
 ## 4. Interfaces
 
-**Definition**: A collection of IPC functions.
+**Description**: A collection of IPC functions.
 
 **Syntax**:
 
@@ -295,7 +295,7 @@ For better reliability and explicitness, explicit tagging **might** get added to
 
 ## 5. Attributes
 
-**Definition**: Compiler directives that add extra context to the defined element.
+**Description**: Compiler directives that add extra context to the defined element.
 
 **Syntax**: 
   - Zero-modifier attribute: `@attribute`.
@@ -320,7 +320,7 @@ interface ServiceA {
 
 ## 6. Namespaces
 
-**Definition**: A grouping namespace for the generated code.
+**Description**: A grouping namespace for the generated code.
 
 **Syntax**: `namespace name`.
 

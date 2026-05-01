@@ -238,20 +238,15 @@ Both regions are aligned to **8-bytes**, this implies that the allocated encodin
 ```rust
 interface InterfaceIdent {
   // Niladic one-way call.
-  @attr
   ident();
 
   // Niladic two-way call.
-  // `: MessageDef` is equivalent to `-> MessageDef`.
-  @attr
   ident(): MessageDef;
           
   // Monadic one-way call.
-  @attr
   ident(param: MessageDef);
 
   // Monadic two-way call.
-  @attr
   ident(param: MessageDef): MessageDef;
 }
 ```

@@ -10,7 +10,7 @@ The following details have implementation version, but its current purpose is to
 
 | Type       | Description                     |
 |------------|---------------------------------|
-| `bool`     | Boolean value (`true`, `false`) |
+| `bool`     | Unsigned 8-bit integer with two values: <br> - `0x00`: `false`  <br> - `0x01`: `true` |
 | `u8`       | Unsigned 8-bit integer          |
 | `i8`       | Signed 8-bit integer            |
 | `u16`      | Unsigned 16-bit integer         |

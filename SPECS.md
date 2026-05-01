@@ -229,7 +229,7 @@ The out-of-line data blocks are appended after the inline-layout in **traversal 
 
 Both regions are aligned to **8-bytes**, this implies that the allocated encoding/decoding memory must be aligned to 8-bytes.
 
-## 4. Interface
+## 4. Interfaces
 
 **Definition**: A collection of IPC functions.
 
@@ -277,9 +277,21 @@ Interfaces are the **only** means of managing the evolution of the service.
 
 In order to change/update a message or any of its members, a new message is required with a **new function** that takes that message as parameter or returns that message as a response. The old message and its function must be kept **unchanged** and the old function shall be annotated as `deprecated`. This will prevent the deprecated function from being accessible by the client in newer systems, while allowing the service provider to handle older systems gracefully.
 
-Dynamic messages and other types that allow non-breaking modifications like deprecation and addition of fields have been implemented and removed, because they add complexity and they have mediocre performance. 
+Dynamic messages and other types that allow non-breaking modifications like deprecation and addition of fields have been implemented and removed, because they add complexity and they have mediocre performance. Basically, all fields in such setup have to be made optional, where each access to a field has to be a checked access (think tables of Flatbuffers and FIDL).
 
-Centralizing change-management around interfaces is a simpler and more performant approach.
+Centralizing change-management around interfaces is a simpler and more performant approach, because there is a typical fixed cost of matching calls anyway, where calls can get special handling if their parameters or return types have been changed.
+
+The behavior in the deprecation case on client-side is simply to never generate the function or any of its dependencies.
+On the server-side the behavior is not yet fixed, but there are two options floating around:
+- No generation of dependencies and no processing of the call, just returning an error on arrival.
+- Maintaining full support of older clients before making the call an error later. 
+
+One thing is settled, no dynamic or tables-like types will be used for the service-evolution ever.
+
+Depending on the transport-model, the defined functions are typically identified using `u64` value derived from passing the function's
+signature to a special hash-function at compile-time.
+
+For better reliability and explicitness, explicit tagging **might** get added to the syntax, where the each function would be identified by its specified tag (like unions) instead of hashing its signature. This would make manual implementation also easier.
 
 ## 5. Attributes
 

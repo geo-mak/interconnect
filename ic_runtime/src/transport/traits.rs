@@ -77,13 +77,13 @@ pub trait TransportServer: Sized {
 
     type Parameter;
 
-    type ID;
+    type Info;
 
     fn create(parameter: &Self::Parameter) -> impl Future<Output = ProtocolResult<Self>>;
 
-    fn accept(&self) -> impl Future<Output = ProtocolResult<(Self::Initiator, Self::ID)>> + Send;
+    fn accept(&self) -> impl Future<Output = ProtocolResult<(Self::Initiator, Self::Info)>> + Send;
 
-    fn id(&self) -> ProtocolResult<Self::ID>;
+    fn info(&self) -> ProtocolResult<Self::Info>;
 
     fn terminate(&mut self) -> impl Future<Output = ProtocolResult<()>> + Send;
 }

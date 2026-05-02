@@ -316,7 +316,7 @@ where
 
     type Parameter = SocketAddr;
 
-    type ID = SocketAddr;
+    type Info = SocketAddr;
 
     async fn create(id: &SocketAddr) -> ProtocolResult<Self>
     where
@@ -336,7 +336,7 @@ where
         Ok((IPLinkInitiator::new(stream), addr))
     }
 
-    fn id(&self) -> ProtocolResult<SocketAddr> {
+    fn info(&self) -> ProtocolResult<SocketAddr> {
         Ok(self.listener.local_addr()?)
     }
 
@@ -404,7 +404,7 @@ where
 
     type Parameter = SocketAddr;
 
-    type ID = SocketAddr;
+    type Info = SocketAddr;
 
     async fn create(id: &SocketAddr) -> ProtocolResult<Self>
     where
@@ -424,7 +424,7 @@ where
         Ok((IPLinkSecureInitiator::new(stream), addr))
     }
 
-    fn id(&self) -> ProtocolResult<SocketAddr> {
+    fn info(&self) -> ProtocolResult<SocketAddr> {
         Ok(self.listener.local_addr()?)
     }
 

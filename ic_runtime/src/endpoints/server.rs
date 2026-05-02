@@ -338,7 +338,7 @@ where
     P: MemoryProvider<ReceiveSegment = <S::Transport as Transport>::ReceiveSegment>,
     P::SendSegment: Encoder + Send,
     P::ReceiveSegment: Decoder + Send,
-    S::ID: Debug + Send + Sync,
+    S::Info: Debug + Send + Sync,
     H: Service + Send + Sync + Clone + 'static,
     R: Reporter + Send + Sync + 'static,
 {
@@ -429,7 +429,7 @@ where
     async fn session(
         task: &AttachedTask<'_>,
         state: &ServerState<E, P, H, R>,
-        peer_id: &S::ID,
+        peer_id: &S::Info,
         transport: &mut S::Transport,
     ) {
         let reporter = &state.reporter;

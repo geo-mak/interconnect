@@ -182,7 +182,7 @@ where
 
     type Parameter = &'static str;
 
-    type ID = SocketAddr;
+    type Info = SocketAddr;
 
     async fn create(parameters: &Self::Parameter) -> ProtocolResult<Self>
     where
@@ -196,12 +196,12 @@ where
         })
     }
 
-    async fn accept(&self) -> ProtocolResult<(UnixLinkInitiator<S, R>, Self::ID)> {
+    async fn accept(&self) -> ProtocolResult<(UnixLinkInitiator<S, R>, Self::Info)> {
         let (stream, addr) = self.listener.accept().await?;
         Ok((UnixLinkInitiator::new(stream), addr))
     }
 
-    fn id(&self) -> ProtocolResult<Self::ID> {
+    fn info(&self) -> ProtocolResult<Self::Info> {
         Ok(self.listener.local_addr()?)
     }
 

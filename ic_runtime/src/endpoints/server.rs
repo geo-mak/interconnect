@@ -507,7 +507,7 @@ where
 mod tests {
     use super::*;
     use crate::codec::types::core::TypeU64;
-    use crate::coop::executors::TokioServer;
+    use crate::coop::tasks::TokioServer;
     use crate::mem::{IOPool, IOSegment};
     use crate::transport::stream::uds::{UnixLink, UnixLinkServer};
     use crate::transport::traits::Transport;

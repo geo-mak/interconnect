@@ -11,7 +11,7 @@ use crate::codec::encode::Encode;
 use crate::codec::encoder::Encoder;
 use crate::codec::types::core::ProtocolType;
 use crate::codec::types::message::TypeMessageHeader;
-use crate::coop::traits::{ControlHandle, Executor, Timer};
+use crate::coop::traits::{ControlHandle, TaskServer, Timer};
 use crate::endpoints::publishers::Publishers;
 use crate::error::{ErrKind, ProtocolError, ProtocolResult};
 use crate::mem::MemoryProvider;
@@ -48,7 +48,7 @@ where
 pub struct CoreClient<T, E, P, R>
 where
     T: Transport,
-    E: Executor,
+    E: TaskServer,
     P: MemoryProvider,
 {
     state: Arc<ClientState<T::Sender, E, P, R>>,
@@ -58,7 +58,7 @@ where
 impl<T, E, P, R> CoreClient<T, E, P, R>
 where
     T: Transport,
-    E: Executor + Send + Sync + 'static,
+    E: TaskServer + Send + Sync + 'static,
     R: Reporter + Send + Sync + 'static,
     P: MemoryProvider<SendSegment = T::SendSegment> + Send + Sync,
     P: MemoryProvider<ReceiveSegment = T::ReceiveSegment> + Send + Sync + 'static,
@@ -81,7 +81,7 @@ where
         let state = Arc::new(ClientState::new(capacity, sender, provider, reporter));
         let client_state = Arc::clone(&state);
 
-        let recv_task = executor.spawn(async move {
+        let recv_task = executor.create(async move {
             let reporter = &client_state.reporter;
             let provider = &client_state.provider;
 
@@ -221,7 +221,7 @@ mod tests {
     use super::*;
     use crate::codec::types::core::TypeU64;
     use crate::codec::types::message::TypeMessageHeader;
-    use crate::coop::executors::TokioExecutor;
+    use crate::coop::executors::TokioServer;
     use crate::mem::{IOPool, IOPoolSegment, IOSegment};
     use crate::transport::stream::uds::{UnixLink, UnixLinkServer};
     use crate::transport::traits::{TransportInitiator, TransportServer};
@@ -233,7 +233,7 @@ mod tests {
 
         let capacity = 2;
         let pool = IOPool::new(3, 32);
-        let executor = TokioExecutor;
+        let executor = TokioServer;
         let reporter = ();
 
         let server = UnixLinkServer::create(&path).await.unwrap();

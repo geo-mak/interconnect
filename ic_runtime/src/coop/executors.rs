@@ -3,7 +3,7 @@ use core::time::Duration;
 use tokio::task::{JoinError, JoinHandle};
 use tokio::time::Instant;
 
-use crate::coop::traits::{ControlHandle, Executor, TimeInstant, Timer};
+use crate::coop::traits::{ControlHandle, TaskServer, TimeInstant, Timer};
 use crate::error::ProtocolError;
 
 impl TimeInstant for tokio::time::Instant {
@@ -63,15 +63,15 @@ where
 }
 
 #[derive(Clone)]
-pub struct TokioExecutor;
+pub struct TokioServer;
 
-impl Executor for TokioExecutor {
+impl TaskServer for TokioServer {
     type ControlHandle<T: Send + 'static> = JoinHandle<T>;
 
     type Timer = TokioTimer;
 
     #[inline]
-    fn spawn<F>(&self, future: F) -> Self::ControlHandle<F::Output>
+    fn create<F>(&self, future: F) -> Self::ControlHandle<F::Output>
     where
         F: Future + Send + 'static,
         F::Output: Send + 'static,

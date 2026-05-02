@@ -35,11 +35,11 @@ pub trait ControlHandle<T: Send> {
     fn result(self) -> impl Future<Output = Result<T, Self::Error>> + Send;
 }
 
-pub trait Executor {
+pub trait TaskServer {
     type ControlHandle<T: Send + 'static>: ControlHandle<T>;
     type Timer: Timer;
 
-    fn spawn<F>(&self, future: F) -> Self::ControlHandle<F::Output>
+    fn create<F>(&self, future: F) -> Self::ControlHandle<F::Output>
     where
         F: Future + Send + 'static,
         F::Output: Send + 'static;

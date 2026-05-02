@@ -18,7 +18,7 @@ use crate::codec::encoder::Encoder;
 use crate::codec::types::core::ProtocolType;
 use crate::codec::types::message::TypeMessageHeader;
 use crate::coop::sync::{DynamicLatch, IList, INode, NOOP_WAKER};
-use crate::coop::traits::{ControlHandle, Executor, Timer};
+use crate::coop::traits::{ControlHandle, TaskServer, Timer};
 use crate::endpoints::service::{CallContext, Service, Session};
 use crate::error::{ErrKind, ProtocolError, ProtocolResult};
 use crate::mem::MemoryProvider;
@@ -291,13 +291,13 @@ struct ServerState<E, M, S, R> {
     service: S,
     reporter: R,
     timeout: Duration,
-    executor: E,
+    task_server: E,
 }
 
 impl<E, P, H, R> ServerState<E, P, H, R> {
     #[inline]
     fn new(
-        executor: E,
+        task_server: E,
         provider: P,
         service: H,
         reporter: R,
@@ -310,7 +310,7 @@ impl<E, P, H, R> ServerState<E, P, H, R> {
             service,
             reporter,
             timeout,
-            executor,
+            task_server,
         }
     }
 }
@@ -318,7 +318,7 @@ impl<E, P, H, R> ServerState<E, P, H, R> {
 /// A multi-client server implementation.
 pub struct MultiClientServer<S, E, P, H, R>
 where
-    E: Executor,
+    E: TaskServer,
 {
     state: Arc<ServerState<E, P, H, R>>,
     listener: E::ControlHandle<()>,
@@ -341,20 +341,20 @@ where
     M: MemoryProvider<ReceiveSegment = <T::Transport as Transport>::ReceiveSegment>,
     M::SendSegment: Encoder + Send,
     M::ReceiveSegment: Decoder + Send,
-    E: Executor + Send + Sync + 'static + Clone,
+    E: TaskServer + Send + Sync + 'static + Clone,
     R: Reporter + Send + Sync + 'static,
 {
     pub async fn start(
         transport_server: T,
         service: S,
         provider: M,
-        executor: E,
+        task_server: E,
         reporter: R,
         shards: usize,
         connection_timeout: Duration,
     ) -> ProtocolResult<Self> {
         let state = Arc::new(ServerState::new(
-            executor,
+            task_server,
             provider,
             service,
             reporter,
@@ -363,12 +363,12 @@ where
         ));
 
         let server_state = state.clone();
-        let listener = state.executor.spawn(async move {
+        let listener = state.task_server.create(async move {
             loop {
                 match transport_server.accept().await {
                     Ok((initiator, peer_info)) => {
                         let state = server_state.clone();
-                        server_state.executor.spawn(async move {
+                        server_state.task_server.create(async move {
                             // Safety:
                             // - The task and its control state are stored on the future and valid only as long
                             //   the future is still alive.
@@ -507,7 +507,7 @@ where
 mod tests {
     use super::*;
     use crate::codec::types::core::TypeU64;
-    use crate::coop::executors::TokioExecutor;
+    use crate::coop::executors::TokioServer;
     use crate::mem::{IOPool, IOSegment};
     use crate::transport::stream::uds::{UnixLink, UnixLinkServer};
     use crate::transport::traits::Transport;
@@ -561,7 +561,7 @@ mod tests {
         let memory_provider = IOPool::new(2, 32);
         let transport_server = UnixLinkServer::create(&path).await.unwrap();
         let service = TestService;
-        let executor = TokioExecutor;
+        let executor = TokioServer;
         let reporter = ();
 
         let memory_server = memory_provider.clone();

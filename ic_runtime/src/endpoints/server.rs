@@ -364,7 +364,7 @@ where
         let listener = state.executor.spawn(async move {
             loop {
                 match transport_server.accept().await {
-                    Ok((initiator, peer_id)) => {
+                    Ok((initiator, peer_info)) => {
                         let state = server_state.clone();
                         server_state.executor.spawn(async move {
                             // Safety:
@@ -384,19 +384,19 @@ where
                                             Self::session(
                                                 &attached,
                                                 &state,
-                                                &peer_id,
+                                                &peer_info,
                                                 &mut transport,
                                             )
                                             .await
                                         }
                                         Err(err) => state.reporter.error(
                                             "Failed to start session",
-                                            &format_args!("{err}. Peer: {peer_id:?}"),
+                                            &format_args!("{err}. Peer: {peer_info:?}"),
                                         ),
                                     },
                                     Err(_) => state.reporter.info(
                                         "Connection timeout",
-                                        &format_args!("Peer: {peer_id:?}"),
+                                        &format_args!("Peer: {peer_info:?}"),
                                     ),
                                 }
 
@@ -406,7 +406,7 @@ where
                                     attached.release_undetached();
                                     state.reporter.trace(
                                         "Session canceled by shutdown",
-                                        &format_args!("Peer: {peer_id:?}"),
+                                        &format_args!("Peer: {peer_info:?}"),
                                     );
                                 }
                             }
@@ -429,7 +429,7 @@ where
     async fn session(
         task: &AttachedTask<'_>,
         state: &ServerState<E, P, H, R>,
-        peer_id: &S::Info,
+        peer_info: &S::Info,
         transport: &mut S::Transport,
     ) {
         let reporter = &state.reporter;
@@ -441,7 +441,7 @@ where
             let Some(mut recv_segment) = provider.acquire_receive() else {
                 reporter.error(
                     "Failed to get memory for receiving",
-                    &format_args!("Peer: {peer_id:?}"),
+                    &format_args!("Peer: {peer_info:?}"),
                 );
                 return;
             };
@@ -461,7 +461,7 @@ where
                     if let Err(err) = service.call(directive, recv_segment, &mut context).await {
                         reporter.error(
                             "Service failed to process the message",
-                            &format_args!("{err}. Peer: {peer_id:?}"),
+                            &format_args!("{err}. Peer: {peer_info:?}"),
                         );
                         return;
                     }
@@ -469,7 +469,7 @@ where
                 Err(err) => {
                     reporter.error(
                         "Failed to decode the header of received message",
-                        &format_args!("{err}. Peer: {peer_id:?}"),
+                        &format_args!("{err}. Peer: {peer_info:?}"),
                     );
                     return;
                 }

@@ -181,3 +181,28 @@ Interconnect's design defines three categories of security:
 - **Access control**: Enabling operations according to adequate privileges.
 
   Access control is the responsibility of the service implementation.
+
+  This can be achieved **without** any special support from the runtime-library, especially that Interconnect's services are designed
+  as **stateful** servers that require explicit termination. 
+  
+  For example the service can be defined with authentication methods as the following:
+
+  ```rust
+  interface ProtectedService {
+    // Explicit authentication call.
+    // Since services are stateful, the service will keep this stored until logout,
+    // or until dropping the connection (variety of policies may apply).
+    login(LoginMessage): LoginResult;
+
+    // This call is open to everybody. 
+    open_call(): ResultA;
+
+    // This call needs authentication and possibly checks for account's capabilities.
+    authenticated_call(): ResultB;
+
+    // Explicit logout, although logout can be executed automatically when dropping connections. 
+    logout();
+  }
+  ```
+
+  The above example achieves the goal efficiently without baking special metadata into each message, and without any `clunky` middleware like interceptors..etc.

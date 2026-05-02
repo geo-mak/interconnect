@@ -435,8 +435,8 @@ where
         transport: &mut T::Transport,
     ) {
         let reporter = &state.reporter;
-        let service = state.service.create(());
         let provider = &state.provider;
+        let session = state.service.create(());
 
         loop {
             // TODO: Refine the allocation strategy server-wide.
@@ -460,7 +460,7 @@ where
                 Ok((id, directive)) => {
                     let mut context = ServerContext::new(provider, transport, id);
 
-                    if let Err(err) = service.call(directive, recv_segment, &mut context).await {
+                    if let Err(err) = session.call(directive, recv_segment, &mut context).await {
                         reporter.error(
                             "Service failed to process the message",
                             &format_args!("{err}. Peer: {peer_info:?}"),

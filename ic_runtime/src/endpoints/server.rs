@@ -19,7 +19,7 @@ use crate::codec::types::core::ProtocolType;
 use crate::codec::types::message::TypeMessageHeader;
 use crate::coop::sync::{DynamicLatch, IList, INode, NOOP_WAKER};
 use crate::coop::traits::{ControlHandle, Executor, Timer};
-use crate::endpoints::service::{CallContext, Service};
+use crate::endpoints::service::{CallContext, Service, Session};
 use crate::error::{ErrKind, ProtocolError, ProtocolResult};
 use crate::mem::MemoryProvider;
 use crate::reports::traits::Reporter;
@@ -285,10 +285,10 @@ where
     }
 }
 
-struct ServerState<E, P, H, R> {
-    provider: P,
+struct ServerState<E, M, S, R> {
+    provider: M,
     tasks: Tasks,
-    service: H,
+    service: S,
     reporter: R,
     timeout: Duration,
     executor: E,
@@ -325,28 +325,30 @@ where
     _s: PhantomData<S>,
 }
 
-impl<S, E, P, H, R> MultiClientServer<S, E, P, H, R>
+impl<T, E, M, S, R> MultiClientServer<T, E, M, S, R>
 where
-    S: TransportServer + Send + 'static,
-    S::Initiator: Send,
-    S::Transport: Send,
-    E: Executor + Send + Sync + 'static + Clone,
-    P: MemoryProvider<SendSegment = <S::Transport as Transport>::SendSegment>
+    T: TransportServer + Send + 'static,
+    T::Initiator: Send,
+    T::Transport: Send,
+    T::Info: Debug + Send + Sync,
+    // Note: ID = () because identification is unsupported currently.
+    S: Service<()> + Send + Sync + 'static,
+    S::Session: Send,
+    M: MemoryProvider<SendSegment = <T::Transport as Transport>::SendSegment>
         + Send
         + Sync
         + 'static,
-    P: MemoryProvider<ReceiveSegment = <S::Transport as Transport>::ReceiveSegment>,
-    P::SendSegment: Encoder + Send,
-    P::ReceiveSegment: Decoder + Send,
-    S::Info: Debug + Send + Sync,
-    H: Service + Send + Sync + Clone + 'static,
+    M: MemoryProvider<ReceiveSegment = <T::Transport as Transport>::ReceiveSegment>,
+    M::SendSegment: Encoder + Send,
+    M::ReceiveSegment: Decoder + Send,
+    E: Executor + Send + Sync + 'static + Clone,
     R: Reporter + Send + Sync + 'static,
 {
     pub async fn start(
-        transport_server: S,
+        transport_server: T,
+        service: S,
+        provider: M,
         executor: E,
-        service: H,
-        provider: P,
         reporter: R,
         shards: usize,
         connection_timeout: Duration,
@@ -428,12 +430,12 @@ where
 
     async fn session(
         task: &AttachedTask<'_>,
-        state: &ServerState<E, P, H, R>,
-        peer_info: &S::Info,
-        transport: &mut S::Transport,
+        state: &ServerState<E, M, S, R>,
+        peer_info: &T::Info,
+        transport: &mut T::Transport,
     ) {
         let reporter = &state.reporter;
-        let service = state.service.clone();
+        let service = state.service.create(());
         let provider = &state.provider;
 
         loop {
@@ -510,10 +512,9 @@ mod tests {
     use crate::transport::stream::uds::{UnixLink, UnixLinkServer};
     use crate::transport::traits::Transport;
 
-    #[derive(Clone)]
-    struct TestService;
+    struct TestSession;
 
-    impl Service for TestService {
+    impl Session for TestSession {
         async fn call<E, M, C>(&self, op: u64, message: M, context: &mut C) -> ProtocolResult<()>
         where
             E: Encoder,
@@ -536,6 +537,16 @@ mod tests {
         {
             Err(ProtocolError::error(ErrKind::Unimplemented))
         }
+    }
+
+    struct TestService;
+
+    impl<T> Service<T> for TestService {
+        type Session = TestSession;
+
+        fn create(&self, _id: T) -> Self::Session {
+            TestSession {}
+        }
 
         async fn terminate(&self) -> ProtocolResult<()> {
             Ok(())
@@ -547,18 +558,19 @@ mod tests {
         let path = "/tmp/test_multi_client_server.sock";
         let _ = std::fs::remove_file(path);
 
-        let pool = IOPool::new(2, 32);
+        let memory_provider = IOPool::new(2, 32);
+        let transport_server = UnixLinkServer::create(&path).await.unwrap();
         let service = TestService;
         let executor = TokioExecutor;
         let reporter = ();
-        let transport_server = UnixLinkServer::create(&path).await.unwrap();
-        let server_provider = pool.clone();
+
+        let memory_server = memory_provider.clone();
 
         let mut server = MultiClientServer::start(
             transport_server,
-            executor,
             service,
-            server_provider,
+            memory_server,
+            executor,
             reporter,
             1,
             Duration::from_secs(1),
@@ -568,7 +580,7 @@ mod tests {
 
         let mut client_transport = UnixLink::connect(&path).await.unwrap();
 
-        let mut segment = pool.acquire().unwrap();
+        let mut segment = memory_provider.acquire().unwrap();
 
         TypeMessageHeader::encode_header(123, 1, &mut segment).unwrap();
         segment.encode_next(&TypeU64(100), ()).unwrap();

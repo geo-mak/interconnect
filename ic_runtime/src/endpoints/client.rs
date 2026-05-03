@@ -45,7 +45,7 @@ where
     }
 }
 
-pub struct CoreClient<T, E, P, R>
+pub struct CoreClient<T, P, E, R>
 where
     T: Transport,
     E: TaskServer,
@@ -55,27 +55,27 @@ where
     recv_task: E::ControlHandle<()>,
 }
 
-impl<T, E, P, R> CoreClient<T, E, P, R>
+impl<T, P, E, R> CoreClient<T, P, E, R>
 where
     T: Transport,
-    E: TaskServer + Send + Sync + 'static,
-    R: Reporter + Send + Sync + 'static,
-    P: MemoryProvider<SendSegment = T::SendSegment> + Send + Sync,
-    P: MemoryProvider<ReceiveSegment = T::ReceiveSegment> + Send + Sync + 'static,
     T::SendSegment: Send,
     T::Sender: Send + 'static,
     T::ReceiveSegment: Send,
     T::Receiver: Send + 'static,
+    P: MemoryProvider<SendSegment = T::SendSegment>,
+    P: MemoryProvider<ReceiveSegment = T::ReceiveSegment> + Send + Sync + 'static,
     P::SendSegment: Encoder,
     P::ReceiveSegment: Decoder,
+    E: TaskServer + Send + Sync + 'static,
+    R: Reporter + Send + Sync + 'static,
 {
     pub async fn start(
         capacity: usize,
         transport: T,
-        task_server: &E,
         provider: P,
+        task_server: &E,
         reporter: R,
-    ) -> ProtocolResult<CoreClient<T, E, P, R>> {
+    ) -> ProtocolResult<CoreClient<T, P, E, R>> {
         let (sender, mut receiver) = transport.split();
 
         let state = Arc::new(ClientState::new(capacity, sender, provider, reporter));
@@ -83,11 +83,11 @@ where
 
         let recv_task = task_server.create(async move {
             let reporter = &client_state.reporter;
-            let provider = &client_state.provider;
+            let memory = &client_state.provider;
 
             // TODO: Refine error-handling, the current implementation is too rigid regarding errors.
             loop {
-                let Some(mut recv_segment) = provider.acquire_receive() else {
+                let Some(mut recv_segment) = memory.acquire_receive() else {
                     reporter.error("Failed to get memory for receiving", &NoContent);
                     break;
                 };
@@ -232,13 +232,13 @@ mod tests {
         let _ = std::fs::remove_file(path);
 
         let capacity = 2;
-        let pool = IOPool::new(3, 32);
+        let memory_provider = IOPool::new(3, 32);
         let task_server = TokioServer;
         let reporter = ();
 
         let server = UnixLinkServer::create(&path).await.unwrap();
 
-        let server_pool = pool.clone();
+        let server_pool = memory_provider.clone();
 
         let server_handle = tokio::spawn(async move {
             let (initiator, _) = server.accept().await.unwrap();
@@ -261,9 +261,10 @@ mod tests {
 
         let transport = UnixLink::connect(&path).await.unwrap();
 
-        let client = CoreClient::start(capacity, transport, &task_server, pool, reporter)
-            .await
-            .unwrap();
+        let client =
+            CoreClient::start(capacity, transport, memory_provider, &task_server, reporter)
+                .await
+                .unwrap();
 
         let decoded: Decoded<TypeU64, IOPoolSegment> =
             client.send(10, &TypeU64(100)).await.unwrap();

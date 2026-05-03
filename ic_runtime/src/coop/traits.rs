@@ -53,4 +53,12 @@ pub trait TaskServer {
     where
         F: Future + Send + 'static,
         F::Output: Send + 'static;
+
+    /// Creates a new non-cooperative task and **schedules** it immediately.
+    ///
+    /// The task will run on a dedicated thread.
+    fn create_dedicated<F, R>(&self, f: F) -> Self::ControlHandle<R>
+    where
+        F: FnOnce() -> R + Send + 'static,
+        R: Send + 'static;
 }

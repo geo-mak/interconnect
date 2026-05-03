@@ -76,6 +76,15 @@ impl TaskServer for TokioServer {
         F: Future + Send + 'static,
         F::Output: Send + 'static,
     {
-        tokio::spawn(future)
+        tokio::task::spawn(future)
+    }
+
+    #[inline]
+    fn create_dedicated<F, R>(&self, f: F) -> Self::ControlHandle<R>
+    where
+        F: FnOnce() -> R + Send + 'static,
+        R: Send + 'static,
+    {
+        tokio::task::spawn_blocking(f)
     }
 }

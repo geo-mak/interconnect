@@ -321,7 +321,7 @@ where
     E: TaskServer,
 {
     state: Arc<ServerState<E, P, H, R>>,
-    listener: E::ControlHandle<()>,
+    server_task: E::ControlHandle<()>,
     _s: PhantomData<S>,
 }
 
@@ -362,19 +362,19 @@ where
             connection_timeout,
         ));
 
-        let listener = state
+        let server_task = state
             .task_server
-            .create(Self::serve_task(state.clone(), transport_server));
+            .create(Self::server_task(state.clone(), transport_server));
 
         Ok(Self {
             state,
-            listener,
+            server_task,
             _s: PhantomData,
         })
     }
 
     #[inline]
-    async fn serve_task(state: Arc<ServerState<E, M, S, R>>, transport_server: T) {
+    async fn server_task(state: Arc<ServerState<E, M, S, R>>, transport_server: T) {
         loop {
             match transport_server.accept().await {
                 Ok((initiator, peer_info)) => {
@@ -496,7 +496,7 @@ where
     /// because it allows active sessions to complete processing the current received message.
     pub async fn terminate(&mut self) -> ProtocolResult<()> {
         self.state.tasks.observer.open();
-        self.listener.abort();
+        self.server_task.abort();
 
         for shard in &self.state.tasks.shards {
             shard.lock().drain(|task| task.cancel());

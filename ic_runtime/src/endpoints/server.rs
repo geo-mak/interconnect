@@ -333,7 +333,7 @@ where
     T::Info: Debug + Send + Sync,
     // Note: ID = () because identification is unsupported currently.
     S: Service<()> + Send + Sync + 'static,
-    S::Session: Send,
+    for<'a> S::Session<'a>: Send,
     M: MemoryProvider<SendSegment = <T::Transport as Transport>::SendSegment>
         + Send
         + Sync
@@ -519,7 +519,7 @@ mod tests {
 
     struct TestSession;
 
-    impl Session for TestSession {
+    impl<'a> Session<'a> for TestSession {
         async fn call<E, M, C>(&self, op: u64, message: M, context: &mut C) -> ProtocolResult<()>
         where
             E: Encoder,
@@ -547,9 +547,9 @@ mod tests {
     struct TestService;
 
     impl<T> Service<T> for TestService {
-        type Session = TestSession;
+        type Session<'a> = TestSession;
 
-        fn create(&self, _id: T) -> Self::Session {
+        fn create<'a>(&'a self, _id: T) -> Self::Session<'a> {
             TestSession {}
         }
 

@@ -23,7 +23,7 @@ pub trait CallContext<E: Encoder> {
         &'c M: Encode<P, E>;
 }
 
-pub trait Session {
+pub trait Session<'a> {
     fn call<E, M, C>(
         &self,
         op: u64,
@@ -46,14 +46,17 @@ pub trait Session {
 }
 
 // TODO: Session's ID and the identity-component.
+// TODO: Solving the identity-problem will solve the last puzzle in the chain.
 pub trait Service<I> {
-    type Session: Session;
+    type Session<'a>: Session<'a>
+    where
+        Self: 'a;
 
     // Creates new session.
     //
     // The returned session will be associated with the provided ID,
     // if the implementation support resumption.
-    fn create(&self, id: I) -> Self::Session;
+    fn create<'a>(&'a self, id: I) -> Self::Session<'a>;
 
     /// Informs the service to terminate its state machines and waits for completion.
     fn terminate(&self) -> impl Future<Output = ProtocolResult<()>> + Send;

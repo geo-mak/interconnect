@@ -561,7 +561,7 @@ mod tests {
         let memory_provider = IOPool::new(2, 32);
         let transport_server = UnixLinkServer::create(&path).await.unwrap();
         let service = TestService;
-        let executor = TokioServer;
+        let task_server = TokioServer;
         let reporter = ();
 
         let memory_server = memory_provider.clone();
@@ -570,7 +570,7 @@ mod tests {
             transport_server,
             service,
             memory_server,
-            executor,
+            task_server,
             reporter,
             1,
             Duration::from_secs(1),

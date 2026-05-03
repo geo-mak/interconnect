@@ -26,7 +26,7 @@ where
     sender: Mutex<S>,
     provider: P,
     reporter: R,
-    _executor: PhantomData<E>,
+    _task_server: PhantomData<E>,
 }
 
 impl<S, E, P, R> ClientState<S, E, P, R>
@@ -40,7 +40,7 @@ where
             sender: Mutex::const_new(sender),
             provider,
             reporter,
-            _executor: PhantomData,
+            _task_server: PhantomData,
         }
     }
 }
@@ -72,7 +72,7 @@ where
     pub async fn start(
         capacity: usize,
         transport: T,
-        executor: &E,
+        task_server: &E,
         provider: P,
         reporter: R,
     ) -> ProtocolResult<CoreClient<T, E, P, R>> {
@@ -81,7 +81,7 @@ where
         let state = Arc::new(ClientState::new(capacity, sender, provider, reporter));
         let client_state = Arc::clone(&state);
 
-        let recv_task = executor.create(async move {
+        let recv_task = task_server.create(async move {
             let reporter = &client_state.reporter;
             let provider = &client_state.provider;
 
@@ -233,7 +233,7 @@ mod tests {
 
         let capacity = 2;
         let pool = IOPool::new(3, 32);
-        let executor = TokioServer;
+        let task_server = TokioServer;
         let reporter = ();
 
         let server = UnixLinkServer::create(&path).await.unwrap();
@@ -261,7 +261,7 @@ mod tests {
 
         let transport = UnixLink::connect(&path).await.unwrap();
 
-        let client = CoreClient::start(capacity, transport, &executor, pool, reporter)
+        let client = CoreClient::start(capacity, transport, &task_server, pool, reporter)
             .await
             .unwrap();
 

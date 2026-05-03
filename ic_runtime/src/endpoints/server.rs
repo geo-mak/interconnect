@@ -362,70 +362,75 @@ where
             connection_timeout,
         ));
 
-        let server_state = state.clone();
-        let listener = state.task_server.create(async move {
-            loop {
-                match transport_server.accept().await {
-                    Ok((initiator, peer_info)) => {
-                        let state = server_state.clone();
-                        server_state.task_server.create(async move {
-                            // Safety:
-                            // - The task and its control state are stored on the future and valid only as long
-                            //   the future is still alive.
-                            // - The address of the task is "assumed" to be stable,
-                            //   because futures are constructed as "pinned" state machines.
-                            // - Updating the task's node and accessing its data can be concurrent.
-                            // - The state is atomic, updating and canceling can be concurrent.
-                            let mut pinned_task = Task::new();
-
-                            // Detached on drop with release effect.
-                            if let Some(attached) = state.tasks.attach(&mut pinned_task) {
-                                match E::Timer::timeout(state.timeout, initiator.initiate()).await {
-                                    Ok(init_result) => match init_result {
-                                        Ok(mut transport) => {
-                                            Self::session(
-                                                &attached,
-                                                &state,
-                                                &peer_info,
-                                                &mut transport,
-                                            )
-                                            .await
-                                        }
-                                        Err(err) => state.reporter.error(
-                                            "Failed to start session",
-                                            &format_args!("{err}. Peer: {peer_info:?}"),
-                                        ),
-                                    },
-                                    Err(_) => state.reporter.info(
-                                        "Connection timeout",
-                                        &format_args!("Peer: {peer_info:?}"),
-                                    ),
-                                }
-
-                                // Detaching again is safe, but we try to avoid the "thundering herd" problem.
-                                // This allows shutdown to access locks smoothly without contention.
-                                if attached.task.node.is_canceled() {
-                                    attached.release_undetached();
-                                    state.reporter.trace(
-                                        "Session canceled by shutdown",
-                                        &format_args!("Peer: {peer_info:?}"),
-                                    );
-                                }
-                            }
-                        });
-                    }
-                    Err(err) => server_state
-                        .reporter
-                        .error("Failed to accept connection", &err),
-                }
-            }
-        });
+        let listener = state
+            .task_server
+            .create(Self::serve_task(state.clone(), transport_server));
 
         Ok(Self {
             state,
             listener,
             _s: PhantomData,
         })
+    }
+
+    #[inline]
+    async fn serve_task(state: Arc<ServerState<E, M, S, R>>, transport_server: T) {
+        loop {
+            match transport_server.accept().await {
+                Ok((initiator, peer_info)) => {
+                    state.task_server.create(Self::connection_task(
+                        state.clone(),
+                        initiator,
+                        peer_info,
+                    ));
+                }
+                Err(err) => state.reporter.error("Failed to accept connection", &err),
+            }
+        }
+    }
+
+    #[inline]
+    async fn connection_task(
+        state: Arc<ServerState<E, M, S, R>>,
+        initiator: T::Initiator,
+        peer_info: T::Info,
+    ) {
+        // Safety:
+        // - The task and its control state are stored on the future and valid only as long
+        //   the future is still alive.
+        // - The address of the task is "assumed" to be stable,
+        //   because futures are constructed as "pinned" state machines.
+        // - Updating the task's node and accessing its data can be concurrent.
+        // - The state is atomic, updating and canceling can be concurrent.
+        let mut pinned_task = Task::new();
+
+        // Detached on drop with release effect.
+        if let Some(attached) = state.tasks.attach(&mut pinned_task) {
+            match E::Timer::timeout(state.timeout, initiator.initiate()).await {
+                Ok(init_result) => match init_result {
+                    Ok(mut transport) => {
+                        Self::session(&attached, &state, &peer_info, &mut transport).await
+                    }
+                    Err(err) => state.reporter.error(
+                        "Failed to start session",
+                        &format_args!("{err}. Peer: {peer_info:?}"),
+                    ),
+                },
+                Err(_) => state
+                    .reporter
+                    .info("Connection timeout", &format_args!("Peer: {peer_info:?}")),
+            }
+
+            // Detaching again is safe, but we try to avoid the "thundering herd" problem.
+            // This allows shutdown to access locks smoothly without contention.
+            if attached.task.node.is_canceled() {
+                attached.release_undetached();
+                state.reporter.trace(
+                    "Session canceled by shutdown",
+                    &format_args!("Peer: {peer_info:?}"),
+                );
+            }
+        }
     }
 
     async fn session(

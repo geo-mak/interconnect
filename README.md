@@ -2,7 +2,7 @@
 
 High performance inter-process communication protocol.
 
-> **⚠️ This project is in early development stage.**
+> **⚠️ This project is in early development stage.<br><br>Hosted on my personal git until it grows strong wings, then it will fly as an independent project.**
 
 ## Features
 - Compositional design with high efficiency components and clear semantics.

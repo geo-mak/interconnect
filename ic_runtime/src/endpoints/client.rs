@@ -11,7 +11,7 @@ use crate::codec::encode::Encode;
 use crate::codec::encoder::Encoder;
 use crate::codec::types::core::ProtocolType;
 use crate::codec::types::message::TypeMessageHeader;
-use crate::coop::server::traits::{ControlHandle, TaskServer, Timer};
+use crate::concurrency::server::traits::{ControlHandle, TaskServer, Timer};
 use crate::endpoints::publishers::Publishers;
 use crate::error::{ErrKind, ProtocolError, ProtocolResult};
 use crate::mem::MemoryProvider;
@@ -221,7 +221,7 @@ mod tests {
     use super::*;
     use crate::codec::types::core::TypeU64;
     use crate::codec::types::message::TypeMessageHeader;
-    use crate::coop::server::tokio::TokioServer;
+    use crate::concurrency::server::tokio::TokioServer;
     use crate::mem::{IOPool, IOPoolSegment, IOSegment};
     use crate::transport::stream::uds::{UnixLink, UnixLinkServer};
     use crate::transport::traits::{TransportInitiator, TransportServer};

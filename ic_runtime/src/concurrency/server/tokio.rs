@@ -3,7 +3,7 @@ use core::time::Duration;
 use tokio::task::{JoinError, JoinHandle};
 use tokio::time::Instant;
 
-use crate::coop::server::traits::{ControlHandle, TaskServer, TimeInstant, Timer};
+use crate::concurrency::server::traits::{ControlHandle, TaskServer, TimeInstant, Timer};
 use crate::error::ProtocolError;
 
 impl TimeInstant for tokio::time::Instant {

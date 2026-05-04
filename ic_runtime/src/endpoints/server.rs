@@ -17,8 +17,8 @@ use crate::codec::encode::Encode;
 use crate::codec::encoder::Encoder;
 use crate::codec::types::core::ProtocolType;
 use crate::codec::types::message::TypeMessageHeader;
-use crate::coop::server::traits::{ControlHandle, TaskServer, Timer};
-use crate::coop::sync::{DynamicLatch, IList, INode, NOOP_WAKER};
+use crate::concurrency::server::traits::{ControlHandle, TaskServer, Timer};
+use crate::concurrency::sync::{DynamicLatch, IList, INode, NOOP_WAKER};
 use crate::endpoints::service::{CallContext, Service, Session};
 use crate::error::{ErrKind, ProtocolError, ProtocolResult};
 use crate::mem::MemoryProvider;
@@ -512,7 +512,7 @@ where
 mod tests {
     use super::*;
     use crate::codec::types::core::TypeU64;
-    use crate::coop::server::tokio::TokioServer;
+    use crate::concurrency::server::tokio::TokioServer;
     use crate::mem::{IOPool, IOSegment};
     use crate::transport::stream::uds::{UnixLink, UnixLinkServer};
     use crate::transport::traits::Transport;

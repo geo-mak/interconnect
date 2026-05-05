@@ -34,7 +34,9 @@ pub trait Task<T> {
     /// Sends abort signal to scheduler.
     ///
     /// Abort might not have an immediate effect and
-    /// may take effect after the task yield control to the scheduler.
+    /// may take effect after the task yields control to the scheduler.
+    /// 
+    /// **Note**: Tasks created with dedicated thread **can't** be aborted by the scheduler.
     fn abort(&self);
 
     /// Returns the result of the task **after** it finishes

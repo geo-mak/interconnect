@@ -19,7 +19,7 @@ use crate::codec::types::core::ProtocolType;
 use crate::codec::types::message::TypeMessageHeader;
 use crate::concurrency::server::traits::{ControlHandle, TaskServer, Timer};
 use crate::concurrency::sync::{DynamicLatch, IList, INode, NOOP_WAKER};
-use crate::endpoints::service::{CallContext, Service, Session};
+use crate::endpoints::service::{CallContext, ServiceController, Session};
 use crate::error::{ErrKind, ProtocolError, ProtocolResult};
 use crate::mem::MemoryProvider;
 use crate::reports::traits::Reporter;
@@ -332,7 +332,7 @@ where
     T::Transport: Send,
     T::Info: Debug + Send + Sync,
     // Note: ID = () because identification is unsupported currently.
-    S: Service<()> + Send + Sync + 'static,
+    S: ServiceController<()> + Send + Sync + 'static,
     for<'a> S::Session<'a>: Send,
     M: MemoryProvider<SendSegment = <T::Transport as Transport>::SendSegment>
         + Send
@@ -546,7 +546,7 @@ mod tests {
 
     struct TestService;
 
-    impl<T> Service<T> for TestService {
+    impl<T> ServiceController<T> for TestService {
         type Session<'a> = TestSession;
 
         fn create<'a>(&'a self, _id: T) -> Self::Session<'a> {

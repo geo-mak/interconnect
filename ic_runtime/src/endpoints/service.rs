@@ -47,7 +47,7 @@ pub trait Session<'a> {
 
 // TODO: Session's ID and the identity-component.
 // TODO: Solving the identity-problem will solve the last puzzle in the chain.
-pub trait Service<I> {
+pub trait ServiceController<I> {
     type Session<'a>: Session<'a>
     where
         Self: 'a;

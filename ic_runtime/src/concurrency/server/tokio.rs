@@ -3,7 +3,7 @@ use core::time::Duration;
 use tokio::task::{JoinError, JoinHandle};
 use tokio::time::Instant;
 
-use crate::concurrency::server::traits::{ControlHandle, TaskServer, TimeInstant, Timer};
+use crate::concurrency::server::traits::{Task, TaskServer, TimeInstant, Timer};
 use crate::error::ProtocolError;
 
 impl TimeInstant for tokio::time::Instant {
@@ -45,20 +45,19 @@ impl Timer for TokioTimer {
     }
 }
 
-impl<T> ControlHandle<T> for JoinHandle<T>
-where
-    T: Send,
-{
+pub struct TokioTask<T>(JoinHandle<T>);
+
+impl<T> Task<T> for TokioTask<T> {
     type Error = JoinError;
 
     #[inline]
     fn abort(&self) {
-        self.abort();
+        self.0.abort();
     }
 
     #[inline]
     async fn result(self) -> Result<T, JoinError> {
-        self.await
+        self.0.await
     }
 }
 
@@ -66,25 +65,25 @@ where
 pub struct TokioServer;
 
 impl TaskServer for TokioServer {
-    type ControlHandle<T: Send + 'static> = JoinHandle<T>;
+    type Task<T> = TokioTask<T>;
 
     type Timer = TokioTimer;
 
     #[inline]
-    fn create<F>(&self, future: F) -> Self::ControlHandle<F::Output>
+    fn create<F>(&self, future: F) -> Self::Task<F::Output>
     where
         F: Future + Send + 'static,
         F::Output: Send + 'static,
     {
-        tokio::task::spawn(future)
+        TokioTask(tokio::task::spawn(future))
     }
 
     #[inline]
-    fn create_dedicated<F, R>(&self, f: F) -> Self::ControlHandle<R>
+    fn create_dedicated<F, R>(&self, f: F) -> Self::Task<R>
     where
         F: FnOnce() -> R + Send + 'static,
         R: Send + 'static,
     {
-        tokio::task::spawn_blocking(f)
+        TokioTask(tokio::task::spawn_blocking(f))
     }
 }

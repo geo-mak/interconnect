@@ -28,7 +28,7 @@ pub trait Timer {
         F: Future<Output = T> + Send;
 }
 
-pub trait ControlHandle<T: Send> {
+pub trait Task<T> {
     type Error;
 
     /// Sends abort signal to scheduler.
@@ -39,17 +39,18 @@ pub trait ControlHandle<T: Send> {
 
     /// Returns the result of the task **after** it finishes
     /// either normally or as a consequence of aborting.
-    fn result(self) -> impl Future<Output = Result<T, Self::Error>> + Send;
+    fn result(self) -> impl Future<Output = Result<T, Self::Error>>;
 }
 
 pub trait TaskServer {
-    type ControlHandle<T: Send + 'static>: ControlHandle<T>;
+    type Task<T>: Task<T>;
+
     type Timer: Timer;
 
     /// Creates a new task and **schedules** it immediately.
     ///
     /// The task might end up being running immediately.
-    fn create<F>(&self, future: F) -> Self::ControlHandle<F::Output>
+    fn create<F>(&self, future: F) -> Self::Task<F::Output>
     where
         F: Future + Send + 'static,
         F::Output: Send + 'static;
@@ -57,7 +58,7 @@ pub trait TaskServer {
     /// Creates a new non-cooperative task and **schedules** it immediately.
     ///
     /// The task will run on a dedicated thread.
-    fn create_dedicated<F, R>(&self, f: F) -> Self::ControlHandle<R>
+    fn create_dedicated<F, R>(&self, f: F) -> Self::Task<R>
     where
         F: FnOnce() -> R + Send + 'static,
         R: Send + 'static;

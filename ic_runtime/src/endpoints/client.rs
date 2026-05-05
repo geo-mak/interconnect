@@ -11,7 +11,7 @@ use crate::codec::encode::Encode;
 use crate::codec::encoder::Encoder;
 use crate::codec::types::core::ProtocolType;
 use crate::codec::types::message::TypeMessageHeader;
-use crate::concurrency::server::traits::{ControlHandle, TaskServer, Timer};
+use crate::concurrency::server::traits::{Task, TaskServer, Timer};
 use crate::endpoints::publishers::Publishers;
 use crate::error::{ErrKind, ProtocolError, ProtocolResult};
 use crate::mem::MemoryProvider;
@@ -52,7 +52,7 @@ where
     P: MemoryProvider,
 {
     state: Arc<ClientState<T::Sender, E, P, R>>,
-    recv_task: E::ControlHandle<()>,
+    recv_task: E::Task<()>,
 }
 
 impl<T, P, E, R> CoreClient<T, P, E, R>

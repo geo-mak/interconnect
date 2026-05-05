@@ -17,7 +17,7 @@ use crate::codec::encode::Encode;
 use crate::codec::encoder::Encoder;
 use crate::codec::types::core::ProtocolType;
 use crate::codec::types::message::TypeMessageHeader;
-use crate::concurrency::server::traits::{ControlHandle, TaskServer, Timer};
+use crate::concurrency::server::traits::{Task, TaskServer, Timer};
 use crate::concurrency::sync::{DynamicLatch, IList, INode, NOOP_WAKER};
 use crate::endpoints::service::{CallContext, ServiceController, Session};
 use crate::error::{ErrKind, ProtocolError, ProtocolResult};
@@ -72,7 +72,7 @@ impl Tasks {
         })
     }
 
-    fn attach<'a>(&'a self, task: &'a mut Task) -> Option<AttachedTask<'a>> {
+    fn attach<'a>(&'a self, task: &'a mut TaskControl) -> Option<AttachedTask<'a>> {
         if !self.observer.acquire_manual() {
             return None;
         };
@@ -193,14 +193,14 @@ where
     }
 }
 
-struct Task {
+struct TaskControl {
     node: INode<TaskControlState>,
 }
 
-unsafe impl Send for Task {}
-unsafe impl Sync for Task {}
+unsafe impl Send for TaskControl {}
+unsafe impl Sync for TaskControl {}
 
-impl Task {
+impl TaskControl {
     #[inline(always)]
     const fn new() -> Self {
         Self {
@@ -211,7 +211,7 @@ impl Task {
 
 struct AttachedTask<'a> {
     tasks: &'a Tasks,
-    task: &'a mut Task,
+    task: &'a mut TaskControl,
     shard: usize,
 }
 
@@ -321,7 +321,7 @@ where
     E: TaskServer,
 {
     state: Arc<ServerState<E, P, H, R>>,
-    server_task: E::ControlHandle<()>,
+    server_task: E::Task<()>,
     _s: PhantomData<S>,
 }
 
@@ -402,7 +402,7 @@ where
         //   because futures are constructed as "pinned" state machines.
         // - Updating the task's node and accessing its data can be concurrent.
         // - The state is atomic, updating and canceling can be concurrent.
-        let mut pinned_task = Task::new();
+        let mut pinned_task = TaskControl::new();
 
         // Detached on drop with release effect.
         if let Some(attached) = state.tasks.attach(&mut pinned_task) {

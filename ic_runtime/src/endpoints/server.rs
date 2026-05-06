@@ -594,9 +594,9 @@ mod tests {
         }
     }
 
-    struct TestServiceController;
+    struct TestSessionServer;
 
-    impl<T> SessionServer<T> for TestServiceController {
+    impl<T> SessionServer<T> for TestSessionServer {
         type Session<'a> = TestSession<'a, ()>;
 
         fn create<'a>(&'a self, _id: T) -> Self::Session<'a> {
@@ -615,7 +615,7 @@ mod tests {
 
         let memory_provider = IOPool::new(2, 32);
         let transport_server = UnixLinkServer::create(&path).await.unwrap();
-        let session_server = TestServiceController;
+        let session_server = TestSessionServer;
         let task_server = TokioServer;
         let reporter = ();
 

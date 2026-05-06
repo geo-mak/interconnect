@@ -19,7 +19,7 @@ use crate::codec::types::core::ProtocolType;
 use crate::codec::types::message::TypeMessageHeader;
 use crate::concurrency::server::traits::{Task, TaskServer, Timer};
 use crate::concurrency::sync::{DynamicLatch, IList, INode, NOOP_WAKER};
-use crate::endpoints::service::{CallContext, ServiceController, Session};
+use crate::endpoints::service::{CallContext, Session, SessionServer};
 use crate::error::{ErrKind, ProtocolError, ProtocolResult};
 use crate::mem::MemoryProvider;
 use crate::reports::traits::Reporter;
@@ -288,7 +288,7 @@ where
 struct ServerState<E, M, S, R> {
     provider: M,
     tasks: Tasks,
-    svc_controller: S,
+    session_server: S,
     reporter: R,
     timeout: Duration,
     task_server: E,
@@ -299,7 +299,7 @@ impl<E, P, H, R> ServerState<E, P, H, R> {
     fn new(
         task_server: E,
         provider: P,
-        svc_controller: H,
+        session_server: H,
         reporter: R,
         shards: usize,
         timeout: Duration,
@@ -307,7 +307,7 @@ impl<E, P, H, R> ServerState<E, P, H, R> {
         ServerState {
             provider,
             tasks: Tasks::new(shards),
-            svc_controller,
+            session_server,
             reporter,
             timeout,
             task_server,
@@ -332,7 +332,7 @@ where
     T::Transport: Send,
     T::Info: Debug + Send + Sync,
     // Note: ID = () because identification is unsupported currently.
-    S: ServiceController<()> + Send + Sync + 'static,
+    S: SessionServer<()> + Send + Sync + 'static,
     for<'a> S::Session<'a>: Send,
     M: MemoryProvider<SendSegment = <T::Transport as Transport>::SendSegment>
         + Send
@@ -346,7 +346,7 @@ where
 {
     pub async fn start(
         transport_server: T,
-        service_controller: S,
+        session_server: S,
         provider: M,
         task_server: E,
         reporter: R,
@@ -356,7 +356,7 @@ where
         let state = Arc::new(ServerState::new(
             task_server,
             provider,
-            service_controller,
+            session_server,
             reporter,
             shards,
             connection_timeout,
@@ -441,7 +441,7 @@ where
     ) {
         let reporter = &state.reporter;
         let provider = &state.provider;
-        let session = state.svc_controller.create(());
+        let session = state.session_server.create(());
 
         loop {
             // TODO: Refine the allocation strategy server-wide.
@@ -504,7 +504,7 @@ where
 
         self.state.tasks.observer.wait().await;
 
-        self.state.svc_controller.terminate().await
+        self.state.session_server.terminate().await
     }
 }
 
@@ -596,7 +596,7 @@ mod tests {
 
     struct TestServiceController;
 
-    impl<T> ServiceController<T> for TestServiceController {
+    impl<T> SessionServer<T> for TestServiceController {
         type Session<'a> = TestSession<'a, ()>;
 
         fn create<'a>(&'a self, _id: T) -> Self::Session<'a> {
@@ -615,7 +615,7 @@ mod tests {
 
         let memory_provider = IOPool::new(2, 32);
         let transport_server = UnixLinkServer::create(&path).await.unwrap();
-        let svc_controller = TestServiceController;
+        let session_server = TestServiceController;
         let task_server = TokioServer;
         let reporter = ();
 
@@ -623,7 +623,7 @@ mod tests {
 
         let mut server = MultiClientServer::start(
             transport_server,
-            svc_controller,
+            session_server,
             memory_server,
             task_server,
             reporter,

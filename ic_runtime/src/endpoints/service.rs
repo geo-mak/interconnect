@@ -47,7 +47,8 @@ pub trait Session<'a> {
 
 // TODO: Session's ID and the identity-component.
 // TODO: Solving the identity-problem will solve the last puzzle in the chain.
-pub trait ServiceController<I> {
+/// A type that stores the components of the service implementation and creates service's sessions.
+pub trait SessionServer<I> {
     type Session<'a>: Session<'a>
     where
         Self: 'a;

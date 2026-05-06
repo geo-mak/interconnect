@@ -288,7 +288,7 @@ where
 struct ServerState<E, M, S, R> {
     provider: M,
     tasks: Tasks,
-    service: S,
+    svc_controller: S,
     reporter: R,
     timeout: Duration,
     task_server: E,
@@ -299,7 +299,7 @@ impl<E, P, H, R> ServerState<E, P, H, R> {
     fn new(
         task_server: E,
         provider: P,
-        service: H,
+        svc_controller: H,
         reporter: R,
         shards: usize,
         timeout: Duration,
@@ -307,7 +307,7 @@ impl<E, P, H, R> ServerState<E, P, H, R> {
         ServerState {
             provider,
             tasks: Tasks::new(shards),
-            service,
+            svc_controller,
             reporter,
             timeout,
             task_server,
@@ -346,7 +346,7 @@ where
 {
     pub async fn start(
         transport_server: T,
-        service: S,
+        service_controller: S,
         provider: M,
         task_server: E,
         reporter: R,
@@ -356,7 +356,7 @@ where
         let state = Arc::new(ServerState::new(
             task_server,
             provider,
-            service,
+            service_controller,
             reporter,
             shards,
             connection_timeout,
@@ -441,7 +441,7 @@ where
     ) {
         let reporter = &state.reporter;
         let provider = &state.provider;
-        let session = state.service.create(());
+        let session = state.svc_controller.create(());
 
         loop {
             // TODO: Refine the allocation strategy server-wide.
@@ -504,7 +504,7 @@ where
 
         self.state.tasks.observer.wait().await;
 
-        self.state.service.terminate().await
+        self.state.svc_controller.terminate().await
     }
 }
 
@@ -517,9 +517,56 @@ mod tests {
     use crate::transport::stream::uds::{UnixLink, UnixLinkServer};
     use crate::transport::traits::Transport;
 
-    struct TestSession;
+    /// Theoretical definition:
+    ///  ```
+    /// message TestMessage {
+    ///     value: u64
+    /// }
+    ///
+    /// interface TestService {
+    ///   increment_one(TestMessage): TestMessage;
+    /// }
+    /// ```
+    struct TestMessage {
+        value: TypeU64,
+    }
 
-    impl<'a> Session<'a> for TestSession {
+    impl TestMessage {
+        fn new(value: u64) -> Self {
+            Self {
+                value: TypeU64(value),
+            }
+        }
+    }
+
+    trait TestService {
+        fn increment_one(&self, message: TestMessage) -> impl Future<Output = TestMessage> + Send;
+    }
+
+    impl TestService for () {
+        async fn increment_one(&self, message: TestMessage) -> TestMessage {
+            TestMessage::new(message.value + 1)
+        }
+    }
+
+    struct TestSession<'a, S: TestService> {
+        svc_def: S,
+        _svc_lt: PhantomData<&'a ()>,
+    }
+
+    impl<'a, S: TestService> TestSession<'a, S> {
+        fn new(svc_def: S) -> Self {
+            Self {
+                svc_def,
+                _svc_lt: PhantomData,
+            }
+        }
+    }
+
+    impl<'a, S> Session<'a> for TestSession<'a, S>
+    where
+        S: TestService + Sync,
+    {
         async fn call<E, M, C>(&self, op: u64, message: M, context: &mut C) -> ProtocolResult<()>
         where
             E: Encoder,
@@ -529,7 +576,10 @@ mod tests {
             match op {
                 1 => {
                     let value = message.decode::<TypeU64>(())?.0;
-                    context.respond_with(1, &TypeU64(value + 1)).await
+
+                    let svc_response = self.svc_def.increment_one(TestMessage::new(value)).await;
+
+                    context.respond_with(1, &svc_response.value).await
                 }
                 _ => Err(ProtocolError::error(ErrKind::Unimplemented)),
             }
@@ -544,13 +594,13 @@ mod tests {
         }
     }
 
-    struct TestService;
+    struct TestServiceController;
 
-    impl<T> ServiceController<T> for TestService {
-        type Session<'a> = TestSession;
+    impl<T> ServiceController<T> for TestServiceController {
+        type Session<'a> = TestSession<'a, ()>;
 
         fn create<'a>(&'a self, _id: T) -> Self::Session<'a> {
-            TestSession {}
+            TestSession::new(())
         }
 
         async fn terminate(&self) -> ProtocolResult<()> {
@@ -565,7 +615,7 @@ mod tests {
 
         let memory_provider = IOPool::new(2, 32);
         let transport_server = UnixLinkServer::create(&path).await.unwrap();
-        let service = TestService;
+        let svc_controller = TestServiceController;
         let task_server = TokioServer;
         let reporter = ();
 
@@ -573,7 +623,7 @@ mod tests {
 
         let mut server = MultiClientServer::start(
             transport_server,
-            service,
+            svc_controller,
             memory_server,
             task_server,
             reporter,

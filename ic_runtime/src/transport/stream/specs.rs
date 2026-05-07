@@ -16,14 +16,14 @@ const SPECS_PROTO_SIG_0: &[u8; 4] = b"ICS0";
 #[derive(Debug, Clone, Copy)]
 pub struct ConnectionSpecs {
     /// Announced ABI version.
-    pub abi: u8,
+    pub version: u8,
     pub encrypted: bool,
 }
 
 impl ConnectionSpecs {
     #[inline(always)]
-    pub const fn new(abi: u8, encrypted: bool) -> Self {
-        Self { abi, encrypted }
+    pub const fn new(version: u8, encrypted: bool) -> Self {
+        Self { version, encrypted }
     }
 }
 
@@ -167,7 +167,10 @@ pub mod negotiation {
         let flags = destination[5];
         let encrypted = (flags & 0x01) != 0;
 
-        Ok(ConnectionSpecs { abi, encrypted })
+        Ok(ConnectionSpecs {
+            version: abi,
+            encrypted,
+        })
     }
 
     pub async fn send_specs<T>(transport: &mut T, specs: &ConnectionSpecs) -> ProtocolResult<()>
@@ -176,7 +179,7 @@ pub mod negotiation {
     {
         let mut source = [0u8; SPECS_FRAME_LEN];
         source[0..4].copy_from_slice(SPECS_PROTO_SIG_0);
-        source[4] = specs.abi;
+        source[4] = specs.version;
         source[5] = specs.encrypted as u8;
         source[6..8].copy_from_slice(&0u16.to_le_bytes());
         transport.send(&source).await
@@ -351,7 +354,7 @@ mod test {
         let mut transport = TcpStream::connect(&addr).await.unwrap();
 
         let capability = ConnectionSpecs {
-            abi: 1,
+            version: 1,
             encrypted: true,
         };
 

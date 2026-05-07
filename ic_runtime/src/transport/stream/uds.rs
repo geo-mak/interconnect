@@ -155,7 +155,7 @@ where
     async fn initiate(mut self) -> ProtocolResult<UnixLink<S, R>> {
         let specs = negotiation::receive_specs(&mut self.stream).await?;
         // TODO: Hardcoded because config are not accepted currently.
-        if specs.abi != 1 {
+        if specs.version != 1 {
             negotiation::reject(&mut self.stream).await?;
             return Err(ProtocolError::error(ErrKind::SpecsMismatch));
         }

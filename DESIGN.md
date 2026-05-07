@@ -17,6 +17,10 @@ From design perspective, components are **viewed** as **micro-servers** offering
 Interconnect's design favours variety of optimized components over common ones with complex configurations in general.
 Diversity with optimized internals and simple setup is considered a better strategy than uniformity with wide set of configuration options.
 
+Interconnect's has main layers with specific responsibilities, allowing flexible composition without sacrificing coherence and efficiency.
+
+These layers are typically combined and orchestrated by role-based components like client and server that specify the requirements in order to make these layers work well together as a single whole.
+
 Interconnect's main layers are:
 
 **Transport Layer**:

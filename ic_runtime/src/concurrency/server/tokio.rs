@@ -51,7 +51,7 @@ impl<T> Task<T> for TokioTask<T> {
     type Error = JoinError;
 
     #[inline]
-    fn abort(&self) {
+    fn cancel(&self) {
         self.0.abort();
     }
 

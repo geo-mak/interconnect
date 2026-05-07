@@ -211,7 +211,7 @@ where
         // TODO:
         // Task can be canceled blindly because it doesn't currently delegate to external processors.
         // This will not be the case later.
-        self.recv_task.abort();
+        self.recv_task.cancel();
         self.state.sender.lock().await.terminate().await
     }
 }

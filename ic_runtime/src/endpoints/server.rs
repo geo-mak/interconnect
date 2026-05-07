@@ -496,7 +496,7 @@ where
     /// because it allows active sessions to complete processing the current received message.
     pub async fn terminate(&mut self) -> ProtocolResult<()> {
         self.state.tasks.observer.open();
-        self.server_task.abort();
+        self.server_task.cancel();
 
         for shard in &self.state.tasks.shards {
             shard.lock().drain(|task| task.cancel());

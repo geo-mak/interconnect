@@ -31,13 +31,13 @@ pub trait Timer {
 pub trait Task<T> {
     type Error;
 
-    /// Sends abort signal to scheduler.
+    /// Sends cancellation signal to scheduler.
     ///
-    /// Abort might not have an immediate effect and
-    /// may take effect after the task yields control to the scheduler.
+    /// Cancellation might not have an immediate effect, it may take effect after the task
+    /// yields control to the scheduler.
     ///
-    /// **Note**: Tasks created with dedicated thread **can't** be aborted by the scheduler.
-    fn abort(&self);
+    /// **Note**: Tasks created with dedicated thread **can't** be canceled by the scheduler.
+    fn cancel(&self);
 
     /// Returns the result of the task **after** it finishes
     /// either normally or as a consequence of aborting.

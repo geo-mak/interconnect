@@ -55,7 +55,7 @@ However, received messages allow conversion to owned types when borrowing can be
 **Service Layer**:
 Service layer serves constructing of user-defined messages and processing of received user-defined messages.
 
-Interconnect's services are designed be stateful when needed with ability to manage their own sessions.
+Interconnect's services are designed to be stateful when needed with the ability to manage their own sessions.
 
 ## Data exchange
 Interconnect's unit of exchange is "message".

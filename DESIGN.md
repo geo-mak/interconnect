@@ -129,15 +129,9 @@ Error-reporting is performed via a reporting subsystem exposed via a reporting-c
 
 ## Memory allocation
 
-Memory management is a difficult thing to implement without compromises and where design choices are accompanied with tradeoffs.
+Memory management is a **major** performance and stability factor.
 
-The common approach is to let components allocate memory unconstrained on-demand at multiple places via the global general-purpose allocator, and to deallocate that memory when the work with it ends. This common approach is very flexible but it has major disadvantages like:
-- It is inefficient in terms of performance.
-- It is non-deterministic in terms of failure points.
-- It is non-transparent in terms of allocation points.
-- It leads to high memory fragmentation.
-
-Memory management is a major performance and stability factor, therefore Interconnect's design embraces determinism and transparency regarding dynamic memory-allocation to a larger degree while allowing exceptions to take place. 
+The common approach in this regard is to let components allocate memory unconstrained on-demand at multiple places via the global general-purpose allocator, and to deallocate that memory when the work with it ends. This common approach is very flexible but it is inefficient in terms of performance, and can lead to high memory fragmentation.
 
 From design perspective, memory is considered a **service**, provisioned via **memory servers**.
 

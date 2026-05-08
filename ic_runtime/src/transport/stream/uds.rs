@@ -180,11 +180,11 @@ where
 
     type Initiator = UnixLinkInitiator<S, R>;
 
-    type Parameter = &'static str;
+    type Parameters = &'static str;
 
     type Info = SocketAddr;
 
-    async fn create(parameters: &Self::Parameter) -> ProtocolResult<Self>
+    async fn create(parameters: &Self::Parameters) -> ProtocolResult<Self>
     where
         Self: Sized,
     {

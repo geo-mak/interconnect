@@ -314,7 +314,7 @@ where
 
     type Initiator = IPLinkInitiator<S, R>;
 
-    type Parameter = SocketAddr;
+    type Parameters = SocketAddr;
 
     type Info = SocketAddr;
 
@@ -402,7 +402,7 @@ where
 
     type Initiator = IPLinkSecureInitiator<S, R>;
 
-    type Parameter = SocketAddr;
+    type Parameters = SocketAddr;
 
     type Info = SocketAddr;
 

@@ -8,5 +8,5 @@ rust-version = "1.95.0"
 edition = "2024"
 
 [workspace]
-members = ["runtime", "ic_compiler"]
+members = ["runtime", "compiler"]
 resolver = "2"

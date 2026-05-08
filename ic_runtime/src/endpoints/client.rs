@@ -57,7 +57,7 @@ where
 
 impl<T, P, E, R> CoreClient<T, P, E, R>
 where
-    T: Transport,
+    T: Transport + 'static,
     T::SendSegment: Send,
     T::Sender: Send + 'static,
     T::ReceiveSegment: Send,
@@ -76,41 +76,46 @@ where
         task_server: &E,
         reporter: R,
     ) -> ProtocolResult<CoreClient<T, P, E, R>> {
-        let (sender, mut receiver) = transport.split();
+        let (sender, receiver) = transport.split();
 
         let state = Arc::new(ClientState::new(capacity, sender, provider, reporter));
-        let client_state = Arc::clone(&state);
 
-        let recv_task = task_server.create(async move {
-            let reporter = &client_state.reporter;
-            let memory = &client_state.provider;
-
-            // TODO: Refine error-handling, the current implementation is too rigid regarding errors.
-            loop {
-                let Some(mut recv_segment) = memory.acquire_receive() else {
-                    reporter.error("Failed to get memory for receiving", &NoContent);
-                    break;
-                };
-
-                if let Err(err) = receiver.receive(&mut recv_segment).await {
-                    reporter.error("Receiving error", &err);
-                    break;
-                };
-
-                match TypeMessageHeader::decode_header(&mut recv_segment) {
-                    Ok((id, _directive)) => {
-                        // TODO: Directive matching according to directive-rules.
-                        client_state.publishers.publish(id, Ok(recv_segment));
-                    }
-                    Err(err) => {
-                        reporter.error("Failed to decode header", &err);
-                        break;
-                    }
-                }
-            }
-        });
+        let recv_task = task_server.create(Self::receiving_task(state.clone(), receiver));
 
         Ok(Self { state, recv_task })
+    }
+
+    #[inline]
+    async fn receiving_task(
+        state: Arc<ClientState<T::Sender, E, P, R>>,
+        mut receiver: T::Receiver,
+    ) {
+        let reporter = &state.reporter;
+        let memory = &state.provider;
+
+        // TODO: Refine error-handling, the current implementation is too rigid regarding errors.
+        loop {
+            let Some(mut recv_segment) = memory.acquire_receive() else {
+                reporter.error("Failed to get memory for receiving", &NoContent);
+                break;
+            };
+
+            if let Err(err) = receiver.receive(&mut recv_segment).await {
+                reporter.error("Receiving error", &err);
+                break;
+            };
+
+            match TypeMessageHeader::decode_header(&mut recv_segment) {
+                Ok((id, _directive)) => {
+                    // TODO: Directive matching according to directive-rules.
+                    state.publishers.publish(id, Ok(recv_segment));
+                }
+                Err(err) => {
+                    reporter.error("Failed to decode header", &err);
+                    break;
+                }
+            }
+        }
     }
 
     async fn send<'a, I, M, O>(
@@ -193,7 +198,7 @@ where
     ///
     /// This call is untracked, if the target operation returns response,
     /// the response will be discarded.
-    async fn send_nullary_one_way(&self, op: u64) -> ProtocolResult<()> {
+    pub async fn send_nullary_one_way(&self, op: u64) -> ProtocolResult<()> {
         let Some(mut segment) = self.state.provider.acquire_send() else {
             return Err(ProtocolError::error(ErrKind::CapacityLimit));
         };
@@ -207,7 +212,7 @@ where
     /// Buffered data will be sent followed by "FIN" message.
     ///
     /// Any attempts to send messages after this call will return `Broken pipe` I/O error.
-    async fn terminate(&mut self) -> ProtocolResult<()> {
+    pub async fn terminate(&mut self) -> ProtocolResult<()> {
         // TODO:
         // Task can be canceled blindly because it doesn't currently delegate to external processors.
         // This will not be the case later.

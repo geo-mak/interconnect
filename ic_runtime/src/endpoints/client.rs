@@ -118,7 +118,7 @@ where
         }
     }
 
-    async fn send<'a, I, M, O>(
+    pub async fn send<'a, I, M, O>(
         &self,
         op: u64,
         message: &'a M,
@@ -154,7 +154,7 @@ where
         Err(ProtocolError::error(ErrKind::CapacityLimit))
     }
 
-    async fn send_one_way<'a, I, M>(&self, op: u64, message: &'a M) -> ProtocolResult<()>
+    pub async fn send_one_way<'a, I, M>(&self, op: u64, message: &'a M) -> ProtocolResult<()>
     where
         I: ProtocolType<Limits = ()>,
         &'a M: Encode<I, P::SendSegment>,
@@ -168,7 +168,7 @@ where
         self.state.sender.lock().await.send(&mut segment).await
     }
 
-    async fn send_nullary<O>(&self, op: u64) -> ProtocolResult<Decoded<O, P::ReceiveSegment>>
+    pub async fn send_nullary<O>(&self, op: u64) -> ProtocolResult<Decoded<O, P::ReceiveSegment>>
     where
         O: ProtocolType<Limits = ()> + Decode<P::ReceiveSegment>,
     {

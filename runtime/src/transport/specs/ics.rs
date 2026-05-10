@@ -272,14 +272,14 @@ pub mod negotiation {
     where
         T: BytesTransport,
     {
-        let mut client_pub_bytes = [0u8; 32];
-        transport.receive(&mut client_pub_bytes).await?;
-        let client_public = PublicKey::from(client_pub_bytes);
-
         let server_secret = EphemeralSecret::random_from_rng(OsRng);
 
         let server_public = PublicKey::from(&server_secret);
         transport.send(server_public.as_bytes()).await?;
+
+        let mut client_pub_bytes = [0u8; 32];
+        transport.receive(&mut client_pub_bytes).await?;
+        let client_public = PublicKey::from(client_pub_bytes);
 
         let shared_secret = server_secret.diffie_hellman(&client_public);
         let (send_key, recv_key, nonce_base) = derive_session_keys(shared_secret.as_bytes())?;

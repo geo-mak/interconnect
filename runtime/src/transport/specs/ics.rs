@@ -112,7 +112,8 @@ impl EncryptionProvider {
 ///
 /// # Protocol Variant
 ///
-/// This implementation works according to the variant `0`:
+/// This implementation works according to the variant `0` with `ICS0` as signature.
+/// The `ICS0` signature defines the security mechanisms and the semantics of the associated data.
 ///
 /// - Protocol signature (fixed parameters):
 ///   - Security level: 128-bit.
@@ -122,12 +123,11 @@ impl EncryptionProvider {
 ///
 /// - Protocol data:
 ///   - Byte at 4: ABI version.
-///   - Byte at 5: Encryption flags:
+///   - Byte at 5: Encryption options:
 ///     - `0x00` = Unencrypted.
 ///     - `0x01` = Encrypted.
-///   - Byte at 6: Reserved.
-///   - Byte at 7: Reserved.
-///
+///   - Byte at 6: Identity options (Reserved, not implemented).
+///   - Byte at 7: Resumption options (Reserved, not implemented).
 ///
 /// This entire recipe is represented by the protocol header.
 ///

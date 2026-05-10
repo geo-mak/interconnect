@@ -1,3 +1,4 @@
+//! Interconnect Connection Specification Protocol.
 use aead::{AeadInPlace, Buffer, Key, KeyInit, Nonce, OsRng};
 use aes_gcm::Aes128Gcm;
 use hkdf::Hkdf;

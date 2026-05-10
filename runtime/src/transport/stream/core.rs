@@ -3,7 +3,7 @@ use aead::{Buffer, Error};
 use crate::error::{ErrKind, ProtocolError, ProtocolResult};
 use crate::mem::IOSegment;
 use crate::opt::branch_hints::unlikely;
-use crate::transport::stream::specs::EncryptionProvider;
+use crate::transport::specs::ics::EncryptionProvider;
 use crate::transport::traits::{BytesReceiver, BytesSender};
 
 pub const MAX_MESSAGE_SIZE: u32 = 4 * 1024 * 1024;

@@ -6,8 +6,8 @@ use tokio::net::{UnixListener, UnixStream};
 
 use crate::error::{ErrKind, ProtocolError, ProtocolResult};
 use crate::mem::IOSegment;
+use crate::transport::specs::ics::{ConnectionSpecs, negotiation};
 use crate::transport::stream;
-use crate::transport::stream::specs::{ConnectionSpecs, negotiation};
 use crate::transport::traits::{
     Transport, TransportInitiator, TransportReceiver, TransportSender, TransportServer,
 };

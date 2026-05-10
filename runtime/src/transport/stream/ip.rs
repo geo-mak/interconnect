@@ -7,8 +7,8 @@ use tokio::net::{TcpListener, TcpStream};
 
 use crate::error::{ErrKind, ProtocolError, ProtocolResult};
 use crate::mem::IOSegment;
+use crate::transport::specs::ics::{ConnectionSpecs, EncryptionProvider, negotiation};
 use crate::transport::stream;
-use crate::transport::stream::specs::{ConnectionSpecs, EncryptionProvider, negotiation};
 use crate::transport::traits::{
     Transport, TransportInitiator, TransportReceiver, TransportSender, TransportServer,
 };

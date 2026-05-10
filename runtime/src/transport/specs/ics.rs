@@ -11,7 +11,7 @@ use crate::opt::branch_hints::unlikely;
 const SPECS_FRAME_LEN: usize = 8;
 
 /// Protocol signature.
-/// `ICS0` = Interconnect Connection Specification Version 0.
+/// `ICS0` = Interconnect Connection Specification Variant 0.
 const SPECS_PROTO_SIG_0: &[u8; 4] = b"ICS0";
 
 #[derive(Debug, Clone, Copy)]
@@ -102,22 +102,41 @@ impl EncryptionProvider {
     }
 }
 
-/// This modules contains the functions used to establish connections according to specifications.
+/// This module contains the functions used to establish connections.
 ///
-/// Initiation starts by sending `specification-frame` that is 8-bytes in size and its bytes
-/// represent the following:
+/// ICS uses a specification frame which is 8-bytes in size, and it has two sections:
+/// - Protocol signature (header): The first 4 bytes of the frame encode the fixed parameters
+///   used to identify the protocol's predefined set of parameters.
+/// - Associated data: The last 4 bytes of the frame encode the relative parameters
+///   as associated data that can be used to extend the behavior.
 ///
-/// - `[0-4]`   Protocol signature.
+/// # Protocol Variant
 ///
-/// - `[4]`      ABI version.
+/// This implementation works according to the variant `0`:
 ///
-/// - `[5]`      Encryption flags:
-///            - `0x00` = Unencrypted.
-///            - `0x01` = Encrypted.
+/// - Protocol signature (fixed parameters):
+///   - Security level: 128-bit.
+///   - Key Exchange: DH-X25519.
+///   - KDF: HKDF-SHA256.
+///   - Cipher: AES128GCM.
 ///
-/// - `[6-8]`   Reserved.
+/// - Protocol data:
+///   - Byte at 4: ABI version.
+///   - Byte at 5: Encryption flags:
+///     - `0x00` = Unencrypted.
+///     - `0x01` = Encrypted.
+///   - Byte at 6: Reserved.
+///   - Byte at 7: Reserved.
+///
+///
+/// This entire recipe is represented by the protocol header.
+///
+/// Different protocol header implies different set of parameters and semantics of the associated data.
+///
+/// # Negotiation.
 ///
 /// The client-side is the side that initiates the negotiation using the `initiate` function.
+/// Initiation starts by sending `specification-frame`.
 ///
 /// The server-side waits for the `specification-frame` to arrive and compares the announced
 /// specifications with its configurations.

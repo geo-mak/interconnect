@@ -8,11 +8,11 @@ use crate::error::ProtocolResult;
 use crate::error::{ErrKind, ProtocolError};
 use crate::opt::branch_hints::unlikely;
 
-const SPECS_FRAME_LEN: usize = 8;
+const ICS_FRAME_LEN: usize = 8;
 
 /// Protocol signature.
 /// `ICS0` = Interconnect Connection Specification Variant 0.
-const SPECS_PROTO_SIG_0: &[u8; 4] = b"ICS0";
+const ICS_SIG_0: &[u8; 4] = b"ICS0";
 
 #[derive(Debug, Clone, Copy)]
 pub struct ConnectionSpecs {
@@ -176,10 +176,10 @@ pub mod negotiation {
     where
         T: BytesReceiver,
     {
-        let mut destination = [0u8; SPECS_FRAME_LEN];
+        let mut destination = [0u8; ICS_FRAME_LEN];
         transport.receive(&mut destination).await?;
 
-        if &destination[0..4] != SPECS_PROTO_SIG_0 {
+        if &destination[0..4] != ICS_SIG_0 {
             return Err(ProtocolError::error(ErrKind::InvalidNegotiation));
         }
 
@@ -197,8 +197,8 @@ pub mod negotiation {
     where
         T: BytesSender,
     {
-        let mut source = [0u8; SPECS_FRAME_LEN];
-        source[0..4].copy_from_slice(SPECS_PROTO_SIG_0);
+        let mut source = [0u8; ICS_FRAME_LEN];
+        source[0..4].copy_from_slice(ICS_SIG_0);
         source[4] = specs.version;
         source[5] = specs.encrypted as u8;
         source[6..8].copy_from_slice(&0u16.to_le_bytes());

@@ -175,7 +175,8 @@ Interconnect's design defines three categories of security:
   This can be achieved **without** any special protocol-level support, especially that Interconnect's services are designed
   as **stateful servers** that require explicit termination. 
   
-  The defined service-methods are accessible via session's instances returned by the service instance, and they **can** operate in full awareness of the connected peer, if the service-implementation takes advantage of this feature. If the service doesn't need access control, it can return peer-agnostic sessions without any added overhead.
+  The defined service-methods are accessible via session's instances returned by the service instance, and they **can** operate in full awareness of the connected peer, if the service-implementation takes advantage of this feature. If the service doesn't need access control, it can return peer-agnostic sessions without any added overhead. That is to say that there is no fixed cost, and
+  the runtime cost is always relative to what is being used.
   
   For example, the service can be defined with authentication methods as the following:
 

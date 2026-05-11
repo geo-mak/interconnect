@@ -14,9 +14,8 @@ use crate::opt::branch_hints::unlikely;
 
 const ICS_FRAME_LEN: usize = 8;
 
-/// Protocol signature.
-/// Variant 0.
-const ICS_VAR_0: &[u8; 4] = b"ICS0";
+/// ICS Dynamic Version 00.
+const ICS_DY_00: &[u8; 4] = b"DY00";
 
 #[derive(Debug, Clone, Copy)]
 pub struct ConnectionSpecs {
@@ -184,7 +183,7 @@ pub mod negotiation {
         let mut destination = [0u8; ICS_FRAME_LEN];
         transport.receive(&mut destination).await?;
 
-        if &destination[0..4] != ICS_VAR_0 {
+        if &destination[0..4] != ICS_DY_00 {
             return Err(ProtocolError::error(ErrKind::InvalidNegotiation));
         }
 
@@ -203,7 +202,7 @@ pub mod negotiation {
         T: BytesSender,
     {
         let mut source = [0u8; ICS_FRAME_LEN];
-        source[0..4].copy_from_slice(ICS_VAR_0);
+        source[0..4].copy_from_slice(ICS_DY_00);
         source[4] = specs.version;
         source[5] = specs.encrypted as u8;
         source[6..8].copy_from_slice(&0u16.to_le_bytes());

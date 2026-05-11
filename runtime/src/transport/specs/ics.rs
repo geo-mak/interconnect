@@ -252,16 +252,16 @@ pub mod negotiation {
     where
         T: BytesTransport,
     {
-        let client_secret = EphemeralSecret::random_from_rng(OsRng);
+        let client_private = EphemeralSecret::random_from_rng(OsRng);
 
-        let client_public = PublicKey::from(&client_secret);
+        let client_public = PublicKey::from(&client_private);
         transport.send(client_public.as_bytes()).await?;
 
         let mut server_pub_bytes = [0u8; 32];
         transport.receive(&mut server_pub_bytes).await?;
         let server_public = PublicKey::from(server_pub_bytes);
 
-        let shared_secret = client_secret.diffie_hellman(&server_public);
+        let shared_secret = client_private.diffie_hellman(&server_public);
         let (recv_key, send_key, nonce_base) = derive_session_keys(shared_secret.as_bytes())?;
 
         let sender_state = EncryptionProvider::new(send_key, nonce_base);
@@ -277,16 +277,16 @@ pub mod negotiation {
     where
         T: BytesTransport,
     {
-        let server_secret = EphemeralSecret::random_from_rng(OsRng);
+        let server_private = EphemeralSecret::random_from_rng(OsRng);
 
-        let server_public = PublicKey::from(&server_secret);
+        let server_public = PublicKey::from(&server_private);
         transport.send(server_public.as_bytes()).await?;
 
         let mut client_pub_bytes = [0u8; 32];
         transport.receive(&mut client_pub_bytes).await?;
         let client_public = PublicKey::from(client_pub_bytes);
 
-        let shared_secret = server_secret.diffie_hellman(&client_public);
+        let shared_secret = server_private.diffie_hellman(&client_public);
         let (send_key, recv_key, nonce_base) = derive_session_keys(shared_secret.as_bytes())?;
 
         let sender_state = EncryptionProvider::new(send_key, nonce_base);

@@ -1,4 +1,8 @@
 //! Interconnect Connection Specification Protocol.
+//!
+//! ICS is low-level protocol intended to be integrated into transport components
+//! as a lower level of the transport itself to manage compatibility per-connection,
+//! and it should not be exposed to upper layers.
 use aead::{AeadInPlace, Buffer, Key, KeyInit, Nonce, OsRng};
 use aes_gcm::Aes128Gcm;
 use hkdf::Hkdf;
@@ -11,8 +15,8 @@ use crate::opt::branch_hints::unlikely;
 const ICS_FRAME_LEN: usize = 8;
 
 /// Protocol signature.
-/// `ICS0` = Interconnect Connection Specification Variant 0.
-const ICS_SIG_0: &[u8; 4] = b"ICS0";
+/// Variant 0.
+const ICS_VAR_0: &[u8; 4] = b"ICS0";
 
 #[derive(Debug, Clone, Copy)]
 pub struct ConnectionSpecs {
@@ -131,9 +135,10 @@ impl EncryptionProvider {
 ///
 /// This entire recipe is represented by the protocol header.
 ///
-/// Different protocol header implies different set of parameters and semantics of the associated data.
+/// Different protocol header implies different set of parameters and semantics of the associated data,
+/// and signals different flow of actions.
 ///
-/// # Negotiation.
+/// # Negotiation Flow.
 ///
 /// The client-side is the side that initiates the negotiation using the `initiate` function.
 /// Initiation starts by sending `specification-frame`.
@@ -179,7 +184,7 @@ pub mod negotiation {
         let mut destination = [0u8; ICS_FRAME_LEN];
         transport.receive(&mut destination).await?;
 
-        if &destination[0..4] != ICS_SIG_0 {
+        if &destination[0..4] != ICS_VAR_0 {
             return Err(ProtocolError::error(ErrKind::InvalidNegotiation));
         }
 
@@ -198,7 +203,7 @@ pub mod negotiation {
         T: BytesSender,
     {
         let mut source = [0u8; ICS_FRAME_LEN];
-        source[0..4].copy_from_slice(ICS_SIG_0);
+        source[0..4].copy_from_slice(ICS_VAR_0);
         source[4] = specs.version;
         source[5] = specs.encrypted as u8;
         source[6..8].copy_from_slice(&0u16.to_le_bytes());

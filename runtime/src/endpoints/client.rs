@@ -45,6 +45,21 @@ where
     }
 }
 
+// TODO:
+//   The current implementation helps with testing internals,
+//   but there are several issues that need addressing in safe and efficient manner:
+//
+// - Cancellation-safety: The challenge here is that stream transports are not safe to cancel,
+//   because they send fragments and they yield when the underlying device can't take more.
+//   Cancelling midway will deliver faulty messages and will end up terminating the connection.
+//   On the other hand, other local transports that are atomic per-message, would not require extra support.
+//   Adding channel will add channel over "channel" if the transport is not stream-oriented.
+//
+// - Owned message as arg: The current implementation requires an owned "encodable" message.
+//   This implies that a complete message has to be constructed and then copied to the segment.
+//   This is not what it was in mind, messages have their own type in the syntax, because they are supposed
+//   to be the pre-allocated destination for all of their fragments, and constructing new message means writing
+//   fragments to the defined message via special-per-message accessors.
 pub struct CoreClient<T, P, E, R>
 where
     T: Transport,
@@ -135,7 +150,6 @@ where
 
                 segment.encode_next(message, ())?;
 
-                // TODO: Async-strategy regarding cancellation.
                 self.state.sender.lock().await.send(&mut segment).await?;
 
                 let result = E::Timer::timeout(Duration::from_secs(30), publisher.wait());

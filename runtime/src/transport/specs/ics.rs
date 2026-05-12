@@ -325,14 +325,16 @@ mod test {
     use super::*;
     use std::time::Duration;
 
-    use tokio::net::{TcpListener, TcpStream};
+    use tokio::net::{UnixListener, UnixStream};
 
     use crate::transport::traits::{BytesReceiver, BytesSender};
 
     #[tokio::test]
     async fn test_negotiation_with_encryption() {
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let addr = listener.local_addr().unwrap();
+        let path = "/tmp/test_ics.sock";
+        let _ = std::fs::remove_file(path);
+
+        let listener = UnixListener::bind(path).unwrap();
 
         let server = tokio::spawn(async move {
             let (mut transport, _) = listener.accept().await.expect("accept failed");
@@ -377,7 +379,7 @@ mod test {
 
         tokio::time::sleep(Duration::from_millis(10)).await;
 
-        let mut transport = TcpStream::connect(&addr).await.unwrap();
+        let mut transport = UnixStream::connect(&path).await.unwrap();
 
         let capability = ConnectionSpecs {
             version: 1,
@@ -409,5 +411,7 @@ mod test {
         transport.send(&buffer).await.unwrap();
 
         server.await.unwrap();
+
+        let _ = std::fs::remove_file(path);
     }
 }

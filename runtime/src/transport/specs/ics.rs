@@ -51,6 +51,9 @@ pub struct EncryptionProvider {
 }
 
 impl EncryptionProvider {
+    /// The tag's size in bytes added to the message's size after encryption.
+    pub const TAG_SIZE: usize = 16;
+
     pub fn new(key: [u8; 16], nonce_base: [u8; 4]) -> Self {
         let aes_key = Key::<Aes128Gcm>::from(key);
         let cipher = Aes128Gcm::new(&aes_key);

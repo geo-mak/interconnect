@@ -14,106 +14,66 @@ pub type ProtocolResult<T> = Result<T, ProtocolError>;
 #[repr(u8)]
 pub enum ErrKind {
     /// Unmapped transport-error.
-    Transport = 0,
+    Transport,
 
-    PeerClosed = 1,
+    PeerClosed,
 
-    Canceled = 2,
+    Canceled,
 
-    InvalidNegotiation = 3,
+    InvalidNegotiation,
 
-    SpecsMismatch = 4,
+    SpecsMismatch,
 
-    KeyDerivation = 5,
+    KeyDerivation,
 
-    InvalidKey = 6,
+    InvalidKey,
 
-    Encryption = 7,
+    Encryption,
 
-    Decryption = 8,
+    Decryption,
 
-    Encoding = 9,
+    Encoding,
 
-    Decoding = 10,
+    Decoding,
 
-    MemoryAllocation = 11,
+    MemoryAllocation,
 
-    RoundLimit = 12,
+    RoundLimit,
 
-    CapacityLimit = 13,
+    CapacityLimit,
 
-    SendSizeLimit = 14,
+    SendSizeLimit,
 
-    RecvSizeLimit = 15,
+    RecvSizeLimit,
 
-    Timeout = 16,
+    Timeout,
 
-    UnexpectedMsg = 17,
+    UnexpectedMsg,
 
-    DroppedMessage = 18,
+    DroppedMessage,
 
-    Unidentified = 19,
+    Unidentified,
 
-    Unimplemented = 20,
+    Unimplemented,
 
-    Validation = 21,
+    Validation,
 
-    NotEnoughData = 22,
+    NotEnoughData,
 
-    InvalidPadding = 23,
+    InvalidPadding,
 
-    InvalidPtrTag = 24,
+    InvalidPtrTag,
 }
 
-impl ErrKind {
-    #[inline]
-    pub fn from_byte(byte: u8) -> Option<Self> {
-        use ErrKind::*;
-        Some(match byte {
-            0 => Transport,
-            1 => PeerClosed,
-            2 => Canceled,
-            3 => InvalidNegotiation,
-            4 => SpecsMismatch,
-            5 => KeyDerivation,
-            6 => InvalidKey,
-            7 => Encryption,
-            8 => Decryption,
-            9 => Encoding,
-            10 => Decoding,
-            11 => MemoryAllocation,
-            12 => RoundLimit,
-            13 => CapacityLimit,
-            14 => SendSizeLimit,
-            15 => RecvSizeLimit,
-            16 => Timeout,
-            17 => UnexpectedMsg,
-            18 => DroppedMessage,
-            19 => Unidentified,
-            20 => Unimplemented,
-            21 => Validation,
-            22 => NotEnoughData,
-            23 => InvalidPadding,
-            24 => InvalidPtrTag,
-            _ => return None,
-        })
-    }
-}
-
-// TODO: Specify the scope of its role. Implementation as protocol type is required in case of adoption.
-//
-/// Error type of protocol operations.
+/// Error type of common runtime operations.
 ///
 /// This type is designed to be very lightweight with the following scheme:
 ///
 /// - Error: A representative error that can be direct or indirect/categorical.
 /// - Reference: An extra context to the error as reference. `0` as value means `N/A` or `None`.
 ///
-/// This design allows efficient matching of errors, at the same time it keeps
-/// the error type simple and small to be used internally and over the wire.
-///
-/// For example, for returning an application-specific error, the kind can be set to `Application`
-/// as category, and the actual error can be provided as reference to application-specific error's member.
+/// This design allows efficient matching of errors, at the same time it keeps the error type simple
+/// and small.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ProtocolError {
     pub kind: ErrKind,

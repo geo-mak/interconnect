@@ -115,8 +115,7 @@ impl EncryptionProvider {
 ///
 /// # Protocol Variant
 ///
-/// This implementation works according to the variant `0` with `ICS0` as signature.
-/// The `ICS0` signature defines the security mechanisms and the semantics of the associated data.
+/// This implementation works according `DY00` as signature.
 ///
 /// - Protocol signature (fixed parameters):
 ///   - Security level: 128-bit.

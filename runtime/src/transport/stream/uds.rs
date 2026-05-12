@@ -215,15 +215,13 @@ mod tests {
     use super::*;
 
     use crate::mem::IOPool;
-    use crate::mem::IOPoolSegment;
 
     #[tokio::test]
     async fn test_unix_link_send_receive() {
         let path = "/tmp/test_interconnect_uds.sock";
         let _ = std::fs::remove_file(path);
-        let server = UnixLinkServer::<IOPoolSegment, IOPoolSegment>::create(&path)
-            .await
-            .unwrap();
+
+        let server = UnixLinkServer::create(&path).await.unwrap();
 
         let pool = IOPool::new(4, 1024);
 
@@ -245,9 +243,7 @@ mod tests {
         });
 
         // Client side.
-        let mut link = UnixLink::<IOPoolSegment, IOPoolSegment>::connect(&path)
-            .await
-            .unwrap();
+        let mut link = UnixLink::connect(&path).await.unwrap();
 
         // Send.
         let mut segment = pool.acquire().unwrap();

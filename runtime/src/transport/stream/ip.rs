@@ -438,14 +438,11 @@ mod tests {
     use super::*;
 
     use crate::mem::IOPool;
-    use crate::mem::IOPoolSegment;
 
     #[tokio::test]
     async fn test_ip_link_send_receive() {
         let addr = "127.0.0.1:0".parse().unwrap();
-        let server = IPLinkServer::<IOPoolSegment, IOPoolSegment>::create(&addr)
-            .await
-            .unwrap();
+        let server = IPLinkServer::create(&addr).await.unwrap();
 
         let server_addr = server.listener.local_addr().unwrap();
         let pool = IOPool::new(4, 1024);
@@ -468,9 +465,7 @@ mod tests {
         });
 
         // Client side.
-        let mut link = IPLink::<IOPoolSegment, IOPoolSegment>::connect(&server_addr)
-            .await
-            .unwrap();
+        let mut link = IPLink::connect(&server_addr).await.unwrap();
 
         let mut segment = pool.acquire().unwrap();
         segment.store(b"hello from client");
@@ -487,9 +482,7 @@ mod tests {
     #[tokio::test]
     async fn test_ip_link_secure_send_receive() {
         let addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
-        let server = IPLinkSecureServer::<IOPoolSegment, IOPoolSegment>::create(&addr)
-            .await
-            .unwrap();
+        let server = IPLinkSecureServer::create(&addr).await.unwrap();
 
         let server_addr = server.listener.local_addr().unwrap();
 
@@ -513,9 +506,7 @@ mod tests {
         });
 
         // Client side.
-        let mut link = IPLinkSecure::<IOPoolSegment, IOPoolSegment>::connect(&server_addr)
-            .await
-            .unwrap();
+        let mut link = IPLinkSecure::connect(&server_addr).await.unwrap();
 
         // Send.
         let mut segment = pool.acquire().unwrap();

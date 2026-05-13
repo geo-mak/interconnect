@@ -1,6 +1,6 @@
 [workspace.package]
 name = "interconnect"
-description = "High performance inter-process communication protocol"
+description = "High-performance inter-process communication framework"
 repository = "https://github.com/geo-mak/interconnect"
 license-file = "LICENSE"
 

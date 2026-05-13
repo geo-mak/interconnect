@@ -8,8 +8,6 @@ Interconnect's design aims at providing a framework for bridging the interaction
 
 Interconnect has a dataflow-oriented architecture where data availability drives computation.
 
-Interconnect's design is layered with modular components and makes heavy use of static parametric polymorphism.
-
 Interconnect's design utilizes a **meta-system** that uses `server` as a universal abstraction to describe its model of composition. According to this **meta-system**, the software is a network and the hardware is a network, and all components on all levels are `servers`.
 
 From design perspective, components are **viewed** as **micro-servers** offering **services** that can be static, dynamic, local and remote.
@@ -17,7 +15,7 @@ From design perspective, components are **viewed** as **micro-servers** offering
 Interconnect's design favours variety of optimized components over common ones with complex configurations in general.
 Diversity with optimized internals and simple setup is considered a better strategy than uniformity with wide set of configuration options.
 
-Interconnect's has main layers with specific responsibilities, allowing flexible composition without sacrificing coherence and efficiency.
+Interconnect's design is layered with modular components where each layer has specific responsibilities, allowing flexible composition without sacrificing coherence and efficiency.
 
 These layers are typically combined and orchestrated by role-based components like client and server that specify the requirements in order to make these layers work well together as a single whole.
 

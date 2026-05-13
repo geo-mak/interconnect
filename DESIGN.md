@@ -21,7 +21,23 @@ Interconnect's has main layers with specific responsibilities, allowing flexible
 
 These layers are typically combined and orchestrated by role-based components like client and server that specify the requirements in order to make these layers work well together as a single whole.
 
-Interconnect's main layers are:
+Interconnect's **main** layers are from upper to lower:
+
+**Service Layer**:
+Service layer serves constructing of user-defined messages and processing of received user-defined messages.
+
+Interconnect's services are designed to be stateful when needed with the ability to manage their own sessions.
+
+**Transaction Layer**: 
+Transaction layer adds and interprets the control metadata of the passed messages and performs dispatch via the transport components. 
+
+Moreover, it implements the machinery to safely and correctly encode and decode the **defined message** for the **target method**.
+
+By default, messages are passed carrying borrowed data, and get returned after receiving carrying borrowed data.
+
+Thanks to the custom-layout and strict alignment rules, all types in a message can be accessed borrowed without conversion to owned types and with the lifetime-bound as the only restriction applied, something that would be very limited, not possible or recklessly unsafe in the "naïve" common world of encoding and decoding out there.
+
+However, received messages allow conversion to owned types when borrowing can be restrictive.
 
 **Transport Layer**:
 Transport components implement the actual mechanics of delivering data from I/O devices to decoders, and from encoders to I/O devices.
@@ -40,22 +56,6 @@ Each transport model offers optimizations and tradeoffs for particular use-case.
 
 Designing and implementing transport models is an **essential** part of the project, where new transport components may get
 added.
-
-**Transaction Layer**: 
-Transaction layer adds and interprets the control metadata of the passed messages and performs dispatch via the transport components. 
-
-Moreover, it implements the machinery to safely and correctly encode and decode the **defined message** for the **target method**.
-
-By default, messages are passed carrying borrowed data, and get returned after receiving carrying borrowed data.
-
-Thanks to the custom-layout and strict alignment rules, all types in a message can be accessed borrowed without conversion to owned types and with the lifetime-bound as the only restriction applied, something that would be very limited, not possible or recklessly unsafe in the "naïve" common world of encoding and decoding out there.
-
-However, received messages allow conversion to owned types when borrowing can be restrictive.
-
-**Service Layer**:
-Service layer serves constructing of user-defined messages and processing of received user-defined messages.
-
-Interconnect's services are designed to be stateful when needed with the ability to manage their own sessions.
 
 ## Data exchange
 Interconnect's unit of exchange is "message".

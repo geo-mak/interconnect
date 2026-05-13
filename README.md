@@ -1,6 +1,8 @@
 # Interconnect
 
-High performance inter-process communication protocol.
+High performance inter-process communication framework.
+
+**Your** service is **your** protocol, and everything else is to make it work.
 
 > **⚠️ This project is in early development stage.<br><br>Hosted on my personal git until it grows strong wings, then it will fly as an independent project.**
 

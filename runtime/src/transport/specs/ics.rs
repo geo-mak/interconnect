@@ -3,6 +3,40 @@
 //! ICS is low-level protocol intended to be integrated into transport components
 //! as a lower level of the transport itself to manage compatibility per-connection,
 //! and it should not be exposed to upper layers.
+//!
+//! ICS doesn't manage active sessions, and it doesn't implement its own system messages.
+//! ICS is designed to cooperate with the hosting transport component on the course of actions.
+//!
+//! ICS's main purpose is to offer shared mechanisms for transport components to establish
+//! connections based on specifications. After successful negotiation it supplies the
+//! transport component the components it needs and it transfers control back to it.
+//!
+//! ICS has a deterministic TVV (Type-Version-Value) scheme where:
+//!
+//! - Type: defines the protocol variant.
+//!
+//! - Version: specifies the version of that variant.
+//!
+//! - Value: the associated data of that variant.
+//!
+//! The deterministic part means that a specific type of a specific version determines:
+//!
+//! - Fixed parameters.
+//!
+//! - The size, the structure and the semantics of the value.
+//!
+//! - The flow of actions to be taken.
+//!
+//! ICS's initial frame is 8-bytes in size where:
+//!
+//! - The first 2 bytes specify the variant.
+//!
+//! - The next 2 bytes specify the version.
+//!
+//! - The last 4 bytes are immediate value.
+//!
+//! The immediate value enables some variants to store parameters that are loaded in single call,
+//! or they might be used as flags for extra context.
 use aead::{AeadInPlace, Buffer, Key, KeyInit, Nonce, OsRng};
 use aes_gcm::Aes128Gcm;
 use hkdf::Hkdf;

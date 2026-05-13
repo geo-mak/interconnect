@@ -38,7 +38,3 @@ The project's internal contribution's policy specifies the following:
 - All documentations and publications made available by this project **must** be **fully** written and audited by humans.
 
 Contributors are free to use LLMs for anything else, as long the internal policy remains respected.
-
-Regarding used tools and dependencies, all of them are **expected** to declare a public policy in this regard. If there is no public policy available, a **request for comment** with **deadline** shall be sent for clarification. In case there was no response to the RFC after the deadline, the dependency or tool shall be flagged for **removal** in planned mode. The removal and substitution protocol will be provided later.
-
-Conflict between project's policies and the declared policies of dependencies is still an **open case** and subject to attention in the meantime.

@@ -11,8 +11,6 @@ High performance inter-process communication framework.
 - Lightweight message format.
 - Out-of-the-box support for IP and Unix domain sockets.
 
-This project aims at providing the best possible usability and performance compared to an application-specific protocol.
-
 For details about the design's aspects, please refer to [DESIGN](DESIGN.md), where in-depth design's details are documented and updated regularly.
 
 For details about the specifications, please refer to [SPECS](SPECS.md), where the specifications' details are documented and updated regularly.

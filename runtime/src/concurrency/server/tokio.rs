@@ -4,7 +4,7 @@ use tokio::task::{JoinError, JoinHandle};
 use tokio::time::Instant;
 
 use crate::concurrency::server::traits::{Task, TaskServer, TimeInstant, Timer};
-use crate::error::ProtocolError;
+use crate::error::ICError;
 
 impl TimeInstant for tokio::time::Instant {
     #[inline]
@@ -29,7 +29,7 @@ impl Timer for TokioTimer {
     }
 
     #[inline]
-    async fn timeout<F, T>(duration: std::time::Duration, future: F) -> Result<T, ProtocolError>
+    async fn timeout<F, T>(duration: std::time::Duration, future: F) -> Result<T, ICError>
     where
         F: Future<Output = T> + Send,
     {
@@ -37,7 +37,7 @@ impl Timer for TokioTimer {
     }
 
     #[inline]
-    async fn timeout_at<F, T>(deadline: Self::TimeInstant, future: F) -> Result<T, ProtocolError>
+    async fn timeout_at<F, T>(deadline: Self::TimeInstant, future: F) -> Result<T, ICError>
     where
         F: Future<Output = T>,
     {

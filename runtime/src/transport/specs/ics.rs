@@ -8,8 +8,8 @@ use aes_gcm::Aes128Gcm;
 use hkdf::Hkdf;
 use sha2::Sha256;
 
-use crate::error::ProtocolResult;
-use crate::error::{ErrKind, ProtocolError};
+use crate::error::ICResult;
+use crate::error::{ErrKind, ICError};
 use crate::opt::branch_hints::unlikely;
 
 const ICS_FRAME_LEN: usize = 8;
@@ -76,35 +76,27 @@ impl EncryptionProvider {
 
     /// Encrypts the data in the buffer in-place.
     /// The buffer will be resized if needed.
-    pub fn encrypt<E: Buffer>(
-        &mut self,
-        data: &mut E,
-        associated_data: &[u8],
-    ) -> ProtocolResult<()> {
+    pub fn encrypt<E: Buffer>(&mut self, data: &mut E, associated_data: &[u8]) -> ICResult<()> {
         // TODO: Make limit configurable.
         if unlikely(self.sequence == u64::MAX) {
-            return Err(ProtocolError::error(ErrKind::RoundLimit));
+            return Err(ICError::error(ErrKind::RoundLimit));
         }
         let next = self.next_nonce();
         let nonce = Nonce::<Aes128Gcm>::from_slice(&next);
         self.cipher
             .encrypt_in_place(nonce, associated_data, data)
-            .map_err(|_| ProtocolError::error(ErrKind::Encryption))
+            .map_err(|_| ICError::error(ErrKind::Encryption))
     }
 
     /// Decrypts the message in-place to its original format.
     /// The buffer will be truncated to the length of the original data upon success.
-    pub fn decrypt<D: Buffer>(
-        &mut self,
-        data: &mut D,
-        associated_data: &[u8],
-    ) -> ProtocolResult<()> {
+    pub fn decrypt<D: Buffer>(&mut self, data: &mut D, associated_data: &[u8]) -> ICResult<()> {
         // TODO: Resigned the interface without requiring `Buffer` trait.
         let next = self.next_nonce();
         let nonce = Nonce::<Aes128Gcm>::from_slice(&next);
         self.cipher
             .decrypt_in_place(nonce, associated_data, data)
-            .map_err(|_| ProtocolError::error(ErrKind::Decryption))
+            .map_err(|_| ICError::error(ErrKind::Decryption))
     }
 }
 
@@ -175,10 +167,10 @@ pub mod negotiation {
 
     use x25519_dalek::{EphemeralSecret, PublicKey};
 
-    use crate::error::{ErrKind, ProtocolError, ProtocolResult};
+    use crate::error::{ErrKind, ICError, ICResult};
     use crate::transport::traits::{BytesReceiver, BytesSender, BytesTransport};
 
-    pub async fn receive_specs<T>(transport: &mut T) -> ProtocolResult<ConnectionSpecs>
+    pub async fn receive_specs<T>(transport: &mut T) -> ICResult<ConnectionSpecs>
     where
         T: BytesReceiver,
     {
@@ -186,7 +178,7 @@ pub mod negotiation {
         transport.receive(&mut destination).await?;
 
         if &destination[0..4] != ICS_DY_00 {
-            return Err(ProtocolError::error(ErrKind::InvalidNegotiation));
+            return Err(ICError::error(ErrKind::InvalidNegotiation));
         }
 
         let abi = destination[4];
@@ -199,7 +191,7 @@ pub mod negotiation {
         })
     }
 
-    pub async fn send_specs<T>(transport: &mut T, specs: &ConnectionSpecs) -> ProtocolResult<()>
+    pub async fn send_specs<T>(transport: &mut T, specs: &ConnectionSpecs) -> ICResult<()>
     where
         T: BytesSender,
     {
@@ -213,7 +205,7 @@ pub mod negotiation {
 
     /// Send a confirmation (0x01) to the transport.
     #[inline(always)]
-    pub async fn confirm<T>(transport: &mut T) -> ProtocolResult<()>
+    pub async fn confirm<T>(transport: &mut T) -> ICResult<()>
     where
         T: BytesSender,
     {
@@ -222,7 +214,7 @@ pub mod negotiation {
 
     /// Send a rejection (0x00) to the transport.
     #[inline(always)]
-    pub async fn reject<T>(transport: &mut T) -> ProtocolResult<()>
+    pub async fn reject<T>(transport: &mut T) -> ICResult<()>
     where
         T: BytesSender,
     {
@@ -230,7 +222,7 @@ pub mod negotiation {
     }
 
     /// Initiates a capability negotiation.
-    pub async fn initiate<T>(transport: &mut T, capability: ConnectionSpecs) -> ProtocolResult<()>
+    pub async fn initiate<T>(transport: &mut T, capability: ConnectionSpecs) -> ICResult<()>
     where
         T: BytesTransport,
     {
@@ -241,15 +233,15 @@ pub mod negotiation {
 
         match response[0] {
             0x01 => Ok(()),
-            0x00 => Err(ProtocolError::error(ErrKind::SpecsMismatch)),
-            _ => Err(ProtocolError::error(ErrKind::InvalidNegotiation)),
+            0x00 => Err(ICError::error(ErrKind::SpecsMismatch)),
+            _ => Err(ICError::error(ErrKind::InvalidNegotiation)),
         }
     }
 
     /// Initiates an expected cryptographic key-exchange session.
     pub async fn initiate_key_exchange<T>(
         transport: &mut T,
-    ) -> ProtocolResult<(SenderState, ReceiverState)>
+    ) -> ICResult<(SenderState, ReceiverState)>
     where
         T: BytesTransport,
     {
@@ -272,9 +264,7 @@ pub mod negotiation {
     }
 
     /// Accepts an expected cryptographic key-exchange session.
-    pub async fn accept_key_exchange<T>(
-        transport: &mut T,
-    ) -> ProtocolResult<(SenderState, ReceiverState)>
+    pub async fn accept_key_exchange<T>(transport: &mut T) -> ICResult<(SenderState, ReceiverState)>
     where
         T: BytesTransport,
     {
@@ -297,16 +287,14 @@ pub mod negotiation {
     }
 
     /// HMAC-based key-derivation function.
-    fn derive_session_keys(
-        shared_secret: &[u8],
-    ) -> ProtocolResult<(SenderKey, ReceiverKey, NonceBase)> {
+    fn derive_session_keys(shared_secret: &[u8]) -> ICResult<(SenderKey, ReceiverKey, NonceBase)> {
         let hkdf = Hkdf::<Sha256>::new(Some(b"ics-session"), shared_secret);
 
         let mut send_key = [0u8; 16];
         let mut recv_key = [0u8; 16];
         let mut nonce_base = [0u8; 4];
 
-        let map_err = |_| ProtocolError::error(ErrKind::KeyDerivation);
+        let map_err = |_| ICError::error(ErrKind::KeyDerivation);
 
         hkdf.expand(b"ics-send", &mut send_key).map_err(map_err)?;
 

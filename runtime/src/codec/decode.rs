@@ -2,25 +2,21 @@ use crate::codec::reference::TypeRef;
 use crate::codec::types::core::{
     ProtocolType, TypeF32, TypeF64, TypeI16, TypeI32, TypeI64, TypeU16, TypeU32, TypeU64,
 };
-use crate::error::{ErrKind, ProtocolError, ProtocolResult};
+use crate::error::{ErrKind, ICError, ICResult};
 
 /// A type that can construct itself as protocol type from bytes.
 pub unsafe trait Decode<D: ?Sized>: ProtocolType {
     /// Decodes a the type into the provided value.
     ///
     /// This call checks for valid memory-representation and conformance to the defined limits.
-    fn decode(
-        value: TypeRef<'_, Self>,
-        decoder: &mut D,
-        limits: Self::Limits,
-    ) -> ProtocolResult<()>;
+    fn decode(value: TypeRef<'_, Self>, decoder: &mut D, limits: Self::Limits) -> ICResult<()>;
 }
 
 macro_rules! impl_decode_for {
     ($ty:ty) => {
         unsafe impl<D: ?Sized> Decode<D> for $ty {
             #[inline]
-            fn decode(_: TypeRef<'_, Self>, _: &mut D, _: ()) -> ProtocolResult<()> {
+            fn decode(_: TypeRef<'_, Self>, _: &mut D, _: ()) -> ICResult<()> {
                 Ok(())
             }
         }
@@ -31,11 +27,11 @@ impl_decode_for!(());
 
 unsafe impl<D: ?Sized> Decode<D> for bool {
     #[inline]
-    fn decode(value: TypeRef<'_, Self>, _: &mut D, _: ()) -> ProtocolResult<()> {
+    fn decode(value: TypeRef<'_, Self>, _: &mut D, _: ()) -> ICResult<()> {
         let value = unsafe { value.as_ptr().cast::<u8>().read() };
         match value {
             0 | 1 => Ok(()),
-            _ => Err(ProtocolError::error(ErrKind::Decoding)),
+            _ => Err(ICError::error(ErrKind::Decoding)),
         }
     }
 }
@@ -52,11 +48,7 @@ impl_decode_for!(TypeF32);
 impl_decode_for!(TypeF64);
 
 unsafe impl<D: ?Sized, T: Decode<D>, const N: usize> Decode<D> for [T; N] {
-    fn decode(
-        mut value: TypeRef<'_, Self>,
-        decoder: &mut D,
-        limits: T::Limits,
-    ) -> ProtocolResult<()> {
+    fn decode(mut value: TypeRef<'_, Self>, decoder: &mut D, limits: T::Limits) -> ICResult<()> {
         for i in 0..N {
             T::decode(value.index(i), decoder, limits)?;
         }

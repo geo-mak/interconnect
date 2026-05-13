@@ -2,7 +2,7 @@ use crate::codec::reference::TypeRef;
 use crate::codec::types::core::{
     TypeF32, TypeF64, TypeI16, TypeI32, TypeI64, TypeU16, TypeU32, TypeU64,
 };
-use crate::error::ProtocolResult;
+use crate::error::ICResult;
 
 /// Types implementing this trait can be checked against satisfying their limits.
 ///
@@ -11,7 +11,7 @@ pub trait TypeLimits {
     type Limits: Copy;
 
     /// Checks the type for satisfying its limits.
-    fn check_limits(value: TypeRef<'_, Self>, limits: Self::Limits) -> ProtocolResult<()>;
+    fn check_limits(value: TypeRef<'_, Self>, limits: Self::Limits) -> ICResult<()>;
 }
 
 macro_rules! impl_unlimited_for {
@@ -20,7 +20,7 @@ macro_rules! impl_unlimited_for {
             type Limits = ();
 
             #[inline]
-            fn check_limits(_: TypeRef<'_, Self>, _: ()) -> ProtocolResult<()> {
+            fn check_limits(_: TypeRef<'_, Self>, _: ()) -> ICResult<()> {
                 Ok(())
             }
         }
@@ -46,7 +46,7 @@ where
 {
     type Limits = T::Limits;
 
-    fn check_limits(mut value: TypeRef<'_, Self>, limits: Self::Limits) -> ProtocolResult<()> {
+    fn check_limits(mut value: TypeRef<'_, Self>, limits: Self::Limits) -> ICResult<()> {
         // RT_ASSERT.
         // Safety: All values must have been initialized.
         let slice = unsafe { (value.as_ptr_mut() as *mut [T]).as_mut() }.unwrap();

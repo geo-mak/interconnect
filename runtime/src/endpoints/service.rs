@@ -4,7 +4,7 @@ use crate::codec::decoder::Decoder;
 use crate::codec::encode::Encode;
 use crate::codec::encoder::Encoder;
 use crate::codec::types::core::ProtocolType;
-use crate::error::ProtocolResult;
+use crate::error::ICResult;
 
 // TODO: Support unsolicited server events?
 pub trait CallContext<E: Encoder> {
@@ -16,7 +16,7 @@ pub trait CallContext<E: Encoder> {
         &mut self,
         op: u64,
         message: &'c M,
-    ) -> impl Future<Output = ProtocolResult<()>> + Send
+    ) -> impl Future<Output = ICResult<()>> + Send
     where
         P: ProtocolType<Limits = ()>,
         M: Sync,
@@ -29,7 +29,7 @@ pub trait Session<'a> {
         op: u64,
         message: M,
         context: &mut C,
-    ) -> impl Future<Output = ProtocolResult<()>> + Send
+    ) -> impl Future<Output = ICResult<()>> + Send
     where
         E: Encoder,
         M: Decoder + Send,
@@ -39,7 +39,7 @@ pub trait Session<'a> {
         &self,
         op: u64,
         context: &mut C,
-    ) -> impl Future<Output = ProtocolResult<()>> + Send
+    ) -> impl Future<Output = ICResult<()>> + Send
     where
         E: Encoder,
         C: CallContext<E> + Send;
@@ -60,5 +60,5 @@ pub trait SessionServer<I> {
     fn create<'a>(&'a self, id: I) -> Self::Session<'a>;
 
     /// Informs the service to terminate its state machines and waits for completion.
-    fn terminate(&self) -> impl Future<Output = ProtocolResult<()>> + Send;
+    fn terminate(&self) -> impl Future<Output = ICResult<()>> + Send;
 }

@@ -6,7 +6,7 @@ use crate::codec::types::core::{
     ProtocolType, TypeF32, TypeF64, TypeI16, TypeI32, TypeI64, TypeU16, TypeU32, TypeU64,
 };
 use crate::codec::types::limits::TypeLimits;
-use crate::error::ProtocolResult;
+use crate::error::ICResult;
 
 pub unsafe trait Encode<P, E>: Sized
 where
@@ -22,7 +22,7 @@ where
         encoder: &mut E,
         storage: &mut MaybeUninit<P>,
         limits: P::Limits,
-    ) -> ProtocolResult<()>;
+    ) -> ICResult<()>;
 }
 
 macro_rules! impl_encode_for {
@@ -37,7 +37,7 @@ macro_rules! impl_encode_for {
                 encoder: &mut E,
                 storage: &mut MaybeUninit<$p_type>,
                 limits: <$p_type as TypeLimits>::Limits,
-            ) -> ProtocolResult<()> {
+            ) -> ICResult<()> {
                 Encode::encode(&self, encoder, storage, limits)
             }
         }
@@ -49,7 +49,7 @@ macro_rules! impl_encode_for {
                 _: &mut E,
                 storage: &mut MaybeUninit<$p_type>,
                 _: <$p_type as TypeLimits>::Limits,
-            ) -> ProtocolResult<()> {
+            ) -> ICResult<()> {
                 storage.write(<$p_type>::from(*self));
                 Ok(())
             }
@@ -81,7 +81,7 @@ where
         encoder: &mut E,
         storage: &mut MaybeUninit<P>,
         limits: P::Limits,
-    ) -> ProtocolResult<()> {
+    ) -> ICResult<()> {
         T::encode(*self, encoder, storage, limits)
     }
 }
@@ -97,7 +97,7 @@ where
         encoder: &mut E,
         storage: &mut MaybeUninit<P>,
         limits: P::Limits,
-    ) -> ProtocolResult<()> {
+    ) -> ICResult<()> {
         <&'a T>::encode(self, encoder, storage, limits)
     }
 }
@@ -107,7 +107,7 @@ fn encode_into_array<A, P, E, T, const N: usize>(
     encoder: &mut E,
     storage: &mut MaybeUninit<[P; N]>,
     limits: P::Limits,
-) -> ProtocolResult<()>
+) -> ICResult<()>
 where
     A: AsRef<[T]> + IntoIterator,
     P: ProtocolType,
@@ -139,7 +139,7 @@ where
         encoder: &mut E,
         storage: &mut MaybeUninit<[P; N]>,
         limits: P::Limits,
-    ) -> ProtocolResult<()> {
+    ) -> ICResult<()> {
         encode_into_array(self, encoder, storage, limits)
     }
 }
@@ -156,7 +156,7 @@ where
         encoder: &mut E,
         storage: &mut MaybeUninit<[P; N]>,
         limits: P::Limits,
-    ) -> ProtocolResult<()> {
+    ) -> ICResult<()> {
         encode_into_array(self, encoder, storage, limits)
     }
 }
@@ -172,7 +172,7 @@ where
         encoder: &mut E,
         storage: &mut MaybeUninit<P>,
         limits: P::Limits,
-    ) -> ProtocolResult<()> {
+    ) -> ICResult<()> {
         T::encode_option(self, encoder, storage, limits)
     }
 }
@@ -188,7 +188,7 @@ where
         encoder: &mut E,
         storage: &mut MaybeUninit<P>,
         limits: P::Limits,
-    ) -> ProtocolResult<()> {
+    ) -> ICResult<()> {
         self.as_ref().encode(encoder, storage, limits)
     }
 }
@@ -204,7 +204,7 @@ where
         encoder: &mut E,
         storage: &mut MaybeUninit<P>,
         limits: P::Limits,
-    ) -> ProtocolResult<()>;
+    ) -> ICResult<()>;
 }
 
 unsafe impl<P, E, T> EncodeOption<P, E> for Box<T>
@@ -218,7 +218,7 @@ where
         encoder: &mut E,
         storage: &mut MaybeUninit<P>,
         limits: P::Limits,
-    ) -> ProtocolResult<()> {
+    ) -> ICResult<()> {
         T::encode_option(instance.map(|value| *value), encoder, storage, limits)
     }
 }
@@ -234,7 +234,7 @@ where
         encoder: &mut E,
         storage: &mut MaybeUninit<P>,
         limits: P::Limits,
-    ) -> ProtocolResult<()> {
+    ) -> ICResult<()> {
         <&'a T>::encode_option(instance.map(|value| &**value), encoder, storage, limits)
     }
 }

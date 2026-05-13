@@ -11,7 +11,7 @@ use std::sync::Arc;
 use crate::codec::decoder::Decoder;
 use crate::codec::encoder::Encoder;
 use crate::codec::types::core::TypeU64;
-use crate::error::{ErrKind, ProtocolError, ProtocolResult};
+use crate::error::{ErrKind, ICError, ICResult};
 
 /// A memory segment with 8 bytes in size and alignment.
 pub type BasicBlock = TypeU64;
@@ -328,7 +328,7 @@ impl Encoder for IOPoolSegment {
 
 unsafe impl Decoder for IOPoolSegment {
     #[inline]
-    fn get_blocks_pointer(&mut self, count: usize) -> ProtocolResult<NonNull<BasicBlock>> {
+    fn get_blocks_pointer(&mut self, count: usize) -> ICResult<NonNull<BasicBlock>> {
         let segment_len = self.len;
         let read_offset = self.read_offset;
 
@@ -337,7 +337,7 @@ unsafe impl Decoder for IOPoolSegment {
         let required_bytes = count << BASIC_BLOCK_SHIFT;
 
         if remaining_bytes < required_bytes {
-            return Err(ProtocolError::error(ErrKind::NotEnoughData));
+            return Err(ICError::error(ErrKind::NotEnoughData));
         }
 
         unsafe {

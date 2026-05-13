@@ -4,7 +4,7 @@ use tokio::io::AsyncWriteExt;
 use tokio::net::unix::{OwnedReadHalf, OwnedWriteHalf, SocketAddr};
 use tokio::net::{UnixListener, UnixStream};
 
-use crate::error::{ErrKind, ProtocolError, ProtocolResult};
+use crate::error::{ErrKind, ICError, ICResult};
 use crate::mem::IOSegment;
 use crate::transport::specs::ics::{ConnectionSpecs, negotiation};
 use crate::transport::stream;
@@ -32,11 +32,11 @@ where
 {
     type SendSegment = T;
 
-    async fn send(&mut self, source: &mut T) -> ProtocolResult<()> {
+    async fn send(&mut self, source: &mut T) -> ICResult<()> {
         stream::core::send(&mut self.writer, source).await
     }
 
-    async fn terminate(&mut self) -> ProtocolResult<()> {
+    async fn terminate(&mut self) -> ICResult<()> {
         self.writer.shutdown().await?;
         Ok(())
     }
@@ -62,7 +62,7 @@ where
 {
     type ReceiveSegment = T;
 
-    async fn receive(&mut self, destination: &mut T) -> ProtocolResult<()> {
+    async fn receive(&mut self, destination: &mut T) -> ICResult<()> {
         stream::core::receive(&mut self.reader, destination).await
     }
 }
@@ -98,7 +98,7 @@ where
 
     type Receiver = UnixLinkReceiver<R>;
 
-    async fn connect(parameters: &Self::Parameters) -> ProtocolResult<Self> {
+    async fn connect(parameters: &Self::Parameters) -> ICResult<Self> {
         let mut stream = UnixStream::connect(parameters).await?;
 
         negotiation::initiate(&mut stream, ConnectionSpecs::new(1, false)).await?;
@@ -110,15 +110,15 @@ where
         })
     }
 
-    async fn send(&mut self, source: &mut S) -> ProtocolResult<()> {
+    async fn send(&mut self, source: &mut S) -> ICResult<()> {
         stream::core::send(&mut self.stream, source).await
     }
 
-    async fn receive(&mut self, destination: &mut R) -> ProtocolResult<()> {
+    async fn receive(&mut self, destination: &mut R) -> ICResult<()> {
         stream::core::receive(&mut self.stream, destination).await
     }
 
-    async fn terminate(&mut self) -> ProtocolResult<()> {
+    async fn terminate(&mut self) -> ICResult<()> {
         self.stream.shutdown().await?;
         Ok(())
     }
@@ -152,12 +152,12 @@ where
 {
     type Transport = UnixLink<S, R>;
 
-    async fn initiate(mut self) -> ProtocolResult<UnixLink<S, R>> {
+    async fn initiate(mut self) -> ICResult<UnixLink<S, R>> {
         let specs = negotiation::receive_specs(&mut self.stream).await?;
         // TODO: Hardcoded because config are not accepted currently.
         if specs.version != 1 {
             negotiation::reject(&mut self.stream).await?;
-            return Err(ProtocolError::error(ErrKind::SpecsMismatch));
+            return Err(ICError::error(ErrKind::SpecsMismatch));
         }
         negotiation::confirm(&mut self.stream).await?;
 
@@ -184,7 +184,7 @@ where
 
     type Info = SocketAddr;
 
-    async fn create(parameters: &Self::Parameters) -> ProtocolResult<Self>
+    async fn create(parameters: &Self::Parameters) -> ICResult<Self>
     where
         Self: Sized,
     {
@@ -196,17 +196,17 @@ where
         })
     }
 
-    async fn accept(&self) -> ProtocolResult<(UnixLinkInitiator<S, R>, Self::Info)> {
+    async fn accept(&self) -> ICResult<(UnixLinkInitiator<S, R>, Self::Info)> {
         let (stream, addr) = self.listener.accept().await?;
         Ok((UnixLinkInitiator::new(stream), addr))
     }
 
-    fn info(&self) -> ProtocolResult<Self::Info> {
+    fn info(&self) -> ICResult<Self::Info> {
         Ok(self.listener.local_addr()?)
     }
 
-    async fn terminate(&mut self) -> ProtocolResult<()> {
-        Err(ProtocolError::error(ErrKind::Unimplemented))
+    async fn terminate(&mut self) -> ICResult<()> {
+        Err(ICError::error(ErrKind::Unimplemented))
     }
 }
 

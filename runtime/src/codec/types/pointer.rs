@@ -5,7 +5,7 @@ use munge::munge;
 
 use crate::codec::reference::TypeRef;
 use crate::codec::types::core::TypeU64;
-use crate::error::{ErrKind, ProtocolError};
+use crate::error::{ErrKind, ICError};
 use crate::mem::BasicBlock;
 
 pub const PTR_TAG_NULL: u64 = 0;
@@ -44,13 +44,13 @@ unsafe impl<T: Send> Send for TypeTaggedPtr<'_, T> {}
 unsafe impl<T: Sync> Sync for TypeTaggedPtr<'_, T> {}
 
 impl<T> TypeTaggedPtr<'_, T> {
-    pub fn is_null(storage: TypeRef<'_, Self>) -> Result<bool, ProtocolError> {
+    pub fn is_null(storage: TypeRef<'_, Self>) -> Result<bool, ICError> {
         unsafe {
             munge!(let Self { ptr_tag } = storage);
             match **ptr_tag {
                 PTR_TAG_NULL => Ok(true),
                 PTR_TAG_SET => Ok(false),
-                _ => Err(ProtocolError::error(ErrKind::InvalidPtrTag)),
+                _ => Err(ICError::error(ErrKind::InvalidPtrTag)),
             }
         }
     }
@@ -109,7 +109,7 @@ mod tests_tagged_ptr {
             let ptr_ref_invalid = TypeRef::new_assume_init(&mut tagged_ptr);
             assert!(matches!(
                 TypeTaggedPtr::is_null(ptr_ref_invalid),
-                Err(ProtocolError {
+                Err(ICError {
                     kind: ErrKind::InvalidPtrTag,
                     ..
                 })

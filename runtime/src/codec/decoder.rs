@@ -10,7 +10,7 @@ use crate::codec::convert::into::IntoNative;
 use crate::codec::decode::Decode;
 use crate::codec::reference::TypeRef;
 use crate::codec::types::core::ProtocolType;
-use crate::error::{ErrKind, ProtocolError, ProtocolResult};
+use crate::error::{ErrKind, ICError, ICResult};
 use crate::mem::{BASIC_BLOCK_SIZE, BasicBlock};
 
 #[inline]
@@ -128,12 +128,12 @@ pub unsafe trait Decoder {
     /// Returns a pointer to a group of blocks backed by decoder's memory.
     ///
     /// Safety: The returned pointer must not outlive the decoder.
-    fn get_blocks_pointer(&mut self, blocks_count: usize) -> ProtocolResult<NonNull<BasicBlock>>;
+    fn get_blocks_pointer(&mut self, blocks_count: usize) -> ICResult<NonNull<BasicBlock>>;
 
     fn get_blocks<'de>(
         self: &mut &'de mut Self,
         blocks_count: usize,
-    ) -> Result<&'de mut [BasicBlock], ProtocolError> {
+    ) -> Result<&'de mut [BasicBlock], ICError> {
         let blocks_ptr = self.get_blocks_pointer(blocks_count)?;
 
         let blocks_slice = unsafe { from_raw_parts_mut(blocks_ptr.as_ptr(), blocks_count) };
@@ -141,7 +141,7 @@ pub unsafe trait Decoder {
         Ok(blocks_slice)
     }
 
-    fn ref_as<'de, T>(self: &mut &'de mut Self) -> ProtocolResult<TypeRef<'de, T>> {
+    fn ref_as<'de, T>(self: &mut &'de mut Self) -> ICResult<TypeRef<'de, T>> {
         assert_conform_to_alignment::<T>();
 
         let blocks_count = size_of::<T>().div_ceil(BASIC_BLOCK_SIZE);
@@ -153,10 +153,7 @@ pub unsafe trait Decoder {
         Ok(type_ref)
     }
 
-    fn slice_ref_as<'de, T>(
-        self: &mut &'de mut Self,
-        len: usize,
-    ) -> ProtocolResult<TypeRef<'de, [T]>> {
+    fn slice_ref_as<'de, T>(self: &mut &'de mut Self, len: usize) -> ICResult<TypeRef<'de, [T]>> {
         assert_conform_to_alignment::<T>();
 
         let items_bytes = size_of::<T>() * len;
@@ -175,7 +172,7 @@ pub unsafe trait Decoder {
         // RT_ASSERT.
         // Padding bytes must be zeros.
         if padding_bytes.iter().any(|byte| *byte != 0) {
-            return Err(ProtocolError::error(ErrKind::InvalidPadding));
+            return Err(ICError::error(ErrKind::InvalidPadding));
         }
 
         let type_ref = unsafe { TypeRef::new_slice_assume_init(blocks_ptr.cast(), len) };
@@ -188,10 +185,7 @@ pub unsafe trait Decoder {
     /// Returns a reference to the value after **advancing** the decoder.
     ///
     /// Advancing the decoder means that the bytes needed to construct `T::Type` will be skipped after this call.
-    fn decode_ref<'de, T>(
-        self: &mut &'de mut Self,
-        limits: T::Limits,
-    ) -> ProtocolResult<T::Type<'de>>
+    fn decode_ref<'de, T>(self: &mut &'de mut Self, limits: T::Limits) -> ICResult<T::Type<'de>>
     where
         T: Decode<Self>,
     {
@@ -208,7 +202,7 @@ pub unsafe trait Decoder {
     ///
     /// Consumes the instance and returns a decoded value as owned value,
     /// which can be accessed as value of type `T`.
-    fn decode<T>(mut self, limits: T::Limits) -> ProtocolResult<Decoded<T, Self>>
+    fn decode<T>(mut self, limits: T::Limits) -> ICResult<Decoded<T, Self>>
     where
         T: Decode<Self>,
         Self: Sized,
@@ -227,9 +221,9 @@ pub unsafe trait Decoder {
 
 unsafe impl Decoder for &mut [BasicBlock] {
     #[inline]
-    fn get_blocks_pointer(&mut self, count: usize) -> ProtocolResult<NonNull<BasicBlock>> {
+    fn get_blocks_pointer(&mut self, count: usize) -> ICResult<NonNull<BasicBlock>> {
         if count > self.len() {
-            return Err(ProtocolError::error(ErrKind::NotEnoughData));
+            return Err(ICError::error(ErrKind::NotEnoughData));
         }
 
         let blocks = mem::take(self);

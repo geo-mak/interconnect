@@ -8,7 +8,7 @@ use crate::codec::reference::TypeRef;
 use crate::codec::types::core::{ProtocolType, TypeU64};
 use crate::codec::types::limits::TypeLimits;
 use crate::codec::{decode::Decode, encode::Encode};
-use crate::error::ProtocolResult;
+use crate::error::ICResult;
 
 pub type MessageID = TypeU64;
 pub type MessageDirective = TypeU64;
@@ -40,12 +40,12 @@ impl TypeMessageHeader {
         message_id: u64,
         directive: u64,
         encoder: &mut E,
-    ) -> ProtocolResult<()> {
+    ) -> ICResult<()> {
         let header = Self::new(TypeU64(message_id), TypeU64(directive));
         encoder.encode_next(header, ())
     }
 
-    pub fn decode_header<D: Decoder>(mut decoder: &mut D) -> ProtocolResult<(u64, u64)> {
+    pub fn decode_header<D: Decoder>(mut decoder: &mut D) -> ICResult<(u64, u64)> {
         let header = decoder.decode_ref::<Self>(())?;
         Ok((*header.id, *header.directive))
     }
@@ -55,7 +55,7 @@ impl TypeLimits for TypeMessageHeader {
     type Limits = ();
 
     #[inline]
-    fn check_limits(_: TypeRef<'_, Self>, _: ()) -> ProtocolResult<()> {
+    fn check_limits(_: TypeRef<'_, Self>, _: ()) -> ICResult<()> {
         Ok(())
     }
 }
@@ -73,7 +73,7 @@ unsafe impl<E: ?Sized> Encode<TypeMessageHeader, E> for TypeMessageHeader {
         _: &mut E,
         storage: &mut MaybeUninit<TypeMessageHeader>,
         _: <TypeMessageHeader as TypeLimits>::Limits,
-    ) -> ProtocolResult<()> {
+    ) -> ICResult<()> {
         storage.write(self);
         Ok(())
     }
@@ -85,13 +85,13 @@ unsafe impl<E: ?Sized> Encode<TypeMessageHeader, E> for &TypeMessageHeader {
         encoder: &mut E,
         storage: &mut MaybeUninit<TypeMessageHeader>,
         limits: <TypeMessageHeader as TypeLimits>::Limits,
-    ) -> ProtocolResult<()> {
+    ) -> ICResult<()> {
         Encode::encode(*self, encoder, storage, limits)
     }
 }
 
 unsafe impl<D: ?Sized> Decode<D> for TypeMessageHeader {
-    fn decode(_: TypeRef<'_, Self>, _: &mut D, _: Self::Limits) -> ProtocolResult<()> {
+    fn decode(_: TypeRef<'_, Self>, _: &mut D, _: Self::Limits) -> ICResult<()> {
         Ok(())
     }
 }

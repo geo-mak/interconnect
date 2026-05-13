@@ -1,6 +1,6 @@
 use aead::{Buffer, Error};
 
-use crate::error::{ErrKind, ProtocolError, ProtocolResult};
+use crate::error::{ErrKind, ICError, ICResult};
 use crate::mem::IOSegment;
 use crate::opt::branch_hints::unlikely;
 use crate::transport::specs::ics::EncryptionProvider;
@@ -118,10 +118,7 @@ where
     }
 }
 
-pub async fn send<T: BytesSender, S: IOSegment>(
-    transport: &mut T,
-    source: &S,
-) -> ProtocolResult<()> {
+pub async fn send<T: BytesSender, S: IOSegment>(transport: &mut T, source: &S) -> ICResult<()> {
     // TODO: use protocol types.
     let len_u32 = source.len() as u32;
     // Note: We don't control the segment's layout, so it has to be two calls.
@@ -132,14 +129,14 @@ pub async fn send<T: BytesSender, S: IOSegment>(
 pub async fn receive<T: BytesReceiver, D: IOSegment>(
     transport: &mut T,
     destination: &mut D,
-) -> ProtocolResult<()> {
+) -> ICResult<()> {
     // TODO: use protocol types.
     let mut len_bytes = [0u8; 4];
     transport.receive(&mut len_bytes).await?;
     let len = u32::from_le_bytes(len_bytes);
 
     if unlikely(len > MAX_MESSAGE_SIZE) {
-        return Err(ProtocolError::error(ErrKind::RecvSizeLimit));
+        return Err(ICError::error(ErrKind::RecvSizeLimit));
     }
 
     let len = len as usize;
@@ -163,14 +160,14 @@ pub async fn receive<T: BytesReceiver, D: IOSegment>(
         return Ok(());
     }
 
-    Err(ProtocolError::error(ErrKind::MemoryAllocation))
+    Err(ICError::error(ErrKind::MemoryAllocation))
 }
 
 pub async fn send_encrypted<T: BytesSender, S: IOSegment>(
     transport: &mut T,
     source: &mut S,
     state: &mut EncryptionProvider,
-) -> ProtocolResult<()> {
+) -> ICResult<()> {
     let mut adapter_segment = EncryptionAdapter::new(source);
 
     state.encrypt(&mut adapter_segment, b"")?;
@@ -186,14 +183,14 @@ pub async fn receive_encrypted<T: BytesReceiver, D: IOSegment>(
     transport: &mut T,
     destination: &mut D,
     state: &mut EncryptionProvider,
-) -> ProtocolResult<()> {
+) -> ICResult<()> {
     // TODO: use protocol types.
     let mut len_bytes = [0u8; 4];
     transport.receive(&mut len_bytes).await?;
     let len = u32::from_le_bytes(len_bytes);
 
     if unlikely(len > MAX_MESSAGE_SIZE) {
-        return Err(ProtocolError::error(ErrKind::RecvSizeLimit));
+        return Err(ICError::error(ErrKind::RecvSizeLimit));
     }
 
     let len = len as usize;
@@ -219,5 +216,5 @@ pub async fn receive_encrypted<T: BytesReceiver, D: IOSegment>(
         return state.decrypt(&mut adapter_segment, b"");
     }
 
-    Err(ProtocolError::error(ErrKind::MemoryAllocation))
+    Err(ICError::error(ErrKind::MemoryAllocation))
 }

@@ -13,7 +13,7 @@ use crate::codec::types::core::ProtocolType;
 use crate::codec::types::message::TypeMessageHeader;
 use crate::concurrency::server::traits::{Task, TaskServer, Timer};
 use crate::endpoints::publishers::Publishers;
-use crate::error::{ErrKind, ProtocolError, ProtocolResult};
+use crate::error::{ErrKind, ICError, ICResult};
 use crate::mem::MemoryProvider;
 use crate::reports::traits::{NoContent, Reporter};
 use crate::transport::traits::{Transport, TransportReceiver, TransportSender};
@@ -22,7 +22,7 @@ struct ClientState<S, E, P, R>
 where
     P: MemoryProvider,
 {
-    publishers: Publishers<ProtocolResult<P::ReceiveSegment>>,
+    publishers: Publishers<ICResult<P::ReceiveSegment>>,
     sender: Mutex<S>,
     provider: P,
     reporter: R,
@@ -90,7 +90,7 @@ where
         provider: P,
         task_server: &E,
         reporter: R,
-    ) -> ProtocolResult<CoreClient<T, P, E, R>> {
+    ) -> ICResult<CoreClient<T, P, E, R>> {
         let (sender, receiver) = transport.split();
 
         let state = Arc::new(ClientState::new(capacity, sender, provider, reporter));
@@ -137,7 +137,7 @@ where
         &self,
         op: u64,
         message: &'a M,
-    ) -> ProtocolResult<Decoded<O, P::ReceiveSegment>>
+    ) -> ICResult<Decoded<O, P::ReceiveSegment>>
     where
         I: ProtocolType<Limits = ()>,
         &'a M: Encode<I, P::SendSegment>,
@@ -165,16 +165,16 @@ where
             }
         }
 
-        Err(ProtocolError::error(ErrKind::CapacityLimit))
+        Err(ICError::error(ErrKind::CapacityLimit))
     }
 
-    pub async fn send_one_way<'a, I, M>(&self, op: u64, message: &'a M) -> ProtocolResult<()>
+    pub async fn send_one_way<'a, I, M>(&self, op: u64, message: &'a M) -> ICResult<()>
     where
         I: ProtocolType<Limits = ()>,
         &'a M: Encode<I, P::SendSegment>,
     {
         let Some(mut segment) = self.state.provider.acquire_send() else {
-            return Err(ProtocolError::error(ErrKind::CapacityLimit));
+            return Err(ICError::error(ErrKind::CapacityLimit));
         };
 
         TypeMessageHeader::encode_header(0, op, &mut segment)?;
@@ -182,7 +182,7 @@ where
         self.state.sender.lock().await.send(&mut segment).await
     }
 
-    pub async fn send_nullary<O>(&self, op: u64) -> ProtocolResult<Decoded<O, P::ReceiveSegment>>
+    pub async fn send_nullary<O>(&self, op: u64) -> ICResult<Decoded<O, P::ReceiveSegment>>
     where
         O: ProtocolType<Limits = ()> + Decode<P::ReceiveSegment>,
     {
@@ -205,16 +205,16 @@ where
             }
         }
 
-        Err(ProtocolError::error(ErrKind::CapacityLimit))
+        Err(ICError::error(ErrKind::CapacityLimit))
     }
 
     /// Sends a one-way nullary call without response.
     ///
     /// This call is untracked, if the target operation returns response,
     /// the response will be discarded.
-    pub async fn send_nullary_one_way(&self, op: u64) -> ProtocolResult<()> {
+    pub async fn send_nullary_one_way(&self, op: u64) -> ICResult<()> {
         let Some(mut segment) = self.state.provider.acquire_send() else {
-            return Err(ProtocolError::error(ErrKind::CapacityLimit));
+            return Err(ICError::error(ErrKind::CapacityLimit));
         };
 
         TypeMessageHeader::encode_header(0, op, &mut segment)?;
@@ -226,7 +226,7 @@ where
     /// Buffered data will be sent followed by "FIN" message.
     ///
     /// Any attempts to send messages after this call will return `Broken pipe` I/O error.
-    pub async fn terminate(&mut self) -> ProtocolResult<()> {
+    pub async fn terminate(&mut self) -> ICResult<()> {
         // TODO:
         // Task can be canceled blindly because it doesn't currently delegate to external processors.
         // This will not be the case later.

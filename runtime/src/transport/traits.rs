@@ -1,16 +1,14 @@
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-use crate::error::ProtocolResult;
+use crate::error::ICResult;
 
 /// The sender of the transport-component.
 pub trait TransportSender {
     type SendSegment;
 
-    fn send(
-        &mut self,
-        source: &mut Self::SendSegment,
-    ) -> impl Future<Output = ProtocolResult<()>> + Send;
-    fn terminate(&mut self) -> impl Future<Output = ProtocolResult<()>> + Send;
+    fn send(&mut self, source: &mut Self::SendSegment)
+    -> impl Future<Output = ICResult<()>> + Send;
+    fn terminate(&mut self) -> impl Future<Output = ICResult<()>> + Send;
 }
 
 /// The receiver of the transport-component.
@@ -20,7 +18,7 @@ pub trait TransportReceiver {
     fn receive(
         &mut self,
         destination: &mut Self::ReceiveSegment,
-    ) -> impl Future<Output = ProtocolResult<()>> + Send;
+    ) -> impl Future<Output = ICResult<()>> + Send;
 }
 
 /// A type that can act as transport layer.
@@ -41,19 +39,17 @@ pub trait Transport: Sized {
 
     type Receiver: TransportReceiver<ReceiveSegment = Self::ReceiveSegment>;
 
-    fn connect(parameters: &Self::Parameters) -> impl Future<Output = ProtocolResult<Self>> + Send;
+    fn connect(parameters: &Self::Parameters) -> impl Future<Output = ICResult<Self>> + Send;
 
-    fn send(
-        &mut self,
-        source: &mut Self::SendSegment,
-    ) -> impl Future<Output = ProtocolResult<()>> + Send;
+    fn send(&mut self, source: &mut Self::SendSegment)
+    -> impl Future<Output = ICResult<()>> + Send;
 
     fn receive(
         &mut self,
         destination: &mut Self::ReceiveSegment,
-    ) -> impl Future<Output = ProtocolResult<()>> + Send;
+    ) -> impl Future<Output = ICResult<()>> + Send;
 
-    fn terminate(&mut self) -> impl Future<Output = ProtocolResult<()>> + Send;
+    fn terminate(&mut self) -> impl Future<Output = ICResult<()>> + Send;
 
     fn split(self) -> (Self::Sender, Self::Receiver);
 }
@@ -62,7 +58,7 @@ pub trait Transport: Sized {
 pub trait TransportInitiator: Sized {
     type Transport: Transport;
 
-    fn initiate(self) -> impl Future<Output = ProtocolResult<Self::Transport>> + Send;
+    fn initiate(self) -> impl Future<Output = ICResult<Self::Transport>> + Send;
 }
 
 /// A type that serves transport-components.
@@ -79,41 +75,38 @@ pub trait TransportServer: Sized {
 
     type Info;
 
-    fn create(parameters: &Self::Parameters) -> impl Future<Output = ProtocolResult<Self>>;
+    fn create(parameters: &Self::Parameters) -> impl Future<Output = ICResult<Self>>;
 
-    fn accept(&self) -> impl Future<Output = ProtocolResult<(Self::Initiator, Self::Info)>> + Send;
+    fn accept(&self) -> impl Future<Output = ICResult<(Self::Initiator, Self::Info)>> + Send;
 
-    fn info(&self) -> ProtocolResult<Self::Info>;
+    fn info(&self) -> ICResult<Self::Info>;
 
-    fn terminate(&mut self) -> impl Future<Output = ProtocolResult<()>> + Send;
+    fn terminate(&mut self) -> impl Future<Output = ICResult<()>> + Send;
 }
 
 pub trait BytesSender {
-    fn send(&mut self, source: &[u8]) -> impl Future<Output = ProtocolResult<()>> + Send;
+    fn send(&mut self, source: &[u8]) -> impl Future<Output = ICResult<()>> + Send;
 }
 
 impl<T> BytesSender for T
 where
     T: AsyncWriteExt + Send + Unpin,
 {
-    async fn send(&mut self, source: &[u8]) -> ProtocolResult<()> {
+    async fn send(&mut self, source: &[u8]) -> ICResult<()> {
         self.write_all(source).await?;
         Ok(())
     }
 }
 
 pub trait BytesReceiver {
-    fn receive(
-        &mut self,
-        destination: &mut [u8],
-    ) -> impl Future<Output = ProtocolResult<()>> + Send;
+    fn receive(&mut self, destination: &mut [u8]) -> impl Future<Output = ICResult<()>> + Send;
 }
 
 impl<T> BytesReceiver for T
 where
     T: AsyncReadExt + Send + Unpin,
 {
-    async fn receive(&mut self, destination: &mut [u8]) -> ProtocolResult<()> {
+    async fn receive(&mut self, destination: &mut [u8]) -> ICResult<()> {
         // TODO:
         // Passing "MaybeUninit" makes it safer, clear and more efficient.
         // Problem: "MaybeUninit" in arrays will transform the codebase into "casting-spaghetti".

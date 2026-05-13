@@ -1,7 +1,7 @@
 use core::future::Future;
 use core::time::Duration;
 
-use crate::error::ProtocolError;
+use crate::error::ICError;
 
 pub trait TimeInstant: Copy {
     fn now() -> Self;
@@ -16,14 +16,14 @@ pub trait Timer {
     fn timeout<F, T>(
         duration: Duration,
         future: F,
-    ) -> impl Future<Output = Result<T, ProtocolError>> + Send
+    ) -> impl Future<Output = Result<T, ICError>> + Send
     where
         F: Future<Output = T> + Send;
 
     fn timeout_at<F, T>(
         deadline: Self::TimeInstant,
         future: F,
-    ) -> impl Future<Output = Result<T, ProtocolError>> + Send
+    ) -> impl Future<Output = Result<T, ICError>> + Send
     where
         F: Future<Output = T> + Send;
 }

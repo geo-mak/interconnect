@@ -20,7 +20,7 @@ use crate::codec::types::message::TypeMessageHeader;
 use crate::concurrency::server::traits::{Task, TaskServer, Timer};
 use crate::concurrency::sync::{DynamicLatch, IList, INode, NOOP_WAKER};
 use crate::endpoints::service::{CallContext, Session, SessionServer};
-use crate::error::{ErrKind, ProtocolError, ProtocolResult};
+use crate::error::{ErrKind, ICError, ICResult};
 use crate::mem::MemoryProvider;
 use crate::reports::traits::Reporter;
 use crate::transport::traits::{Transport, TransportInitiator, TransportServer};
@@ -268,14 +268,14 @@ where
         &self.id
     }
 
-    async fn respond_with<'c, I, R>(&mut self, op: u64, response: &'c R) -> ProtocolResult<()>
+    async fn respond_with<'c, I, R>(&mut self, op: u64, response: &'c R) -> ICResult<()>
     where
         I: ProtocolType<Limits = ()>,
         R: Sync,
         &'c R: Encode<I, P::SendSegment>,
     {
         let Some(mut send_segment) = self.provider.acquire_send() else {
-            return Err(ProtocolError::error(ErrKind::CapacityLimit));
+            return Err(ICError::error(ErrKind::CapacityLimit));
         };
 
         TypeMessageHeader::encode_header(self.id, op, &mut send_segment)?;
@@ -352,7 +352,7 @@ where
         reporter: R,
         shards: usize,
         connection_timeout: Duration,
-    ) -> ProtocolResult<Self> {
+    ) -> ICResult<Self> {
         let state = Arc::new(ServerState::new(
             task_server,
             provider,
@@ -494,7 +494,7 @@ where
     ///
     /// This call doesn't have immediate effect and may take longer time,
     /// because it allows active sessions to complete processing the current received message.
-    pub async fn terminate(&mut self) -> ProtocolResult<()> {
+    pub async fn terminate(&mut self) -> ICResult<()> {
         self.state.tasks.observer.open();
         self.server_task.cancel();
 
@@ -567,7 +567,7 @@ mod tests {
     where
         S: TestService + Sync,
     {
-        async fn call<E, M, C>(&self, op: u64, message: M, context: &mut C) -> ProtocolResult<()>
+        async fn call<E, M, C>(&self, op: u64, message: M, context: &mut C) -> ICResult<()>
         where
             E: Encoder,
             M: Decoder + Send,
@@ -581,16 +581,16 @@ mod tests {
 
                     context.respond_with(1, &svc_response.value).await
                 }
-                _ => Err(ProtocolError::error(ErrKind::Unimplemented)),
+                _ => Err(ICError::error(ErrKind::Unimplemented)),
             }
         }
 
-        async fn call_nullary<E, C>(&self, _op: u64, _context: &mut C) -> ProtocolResult<()>
+        async fn call_nullary<E, C>(&self, _op: u64, _context: &mut C) -> ICResult<()>
         where
             E: Encoder,
             C: CallContext<E> + Send,
         {
-            Err(ProtocolError::error(ErrKind::Unimplemented))
+            Err(ICError::error(ErrKind::Unimplemented))
         }
     }
 
@@ -603,7 +603,7 @@ mod tests {
             TestSession::new(())
         }
 
-        async fn terminate(&self) -> ProtocolResult<()> {
+        async fn terminate(&self) -> ICResult<()> {
             Ok(())
         }
     }

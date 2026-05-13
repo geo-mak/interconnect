@@ -5,7 +5,7 @@ use tokio::io::AsyncWriteExt;
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::{TcpListener, TcpStream};
 
-use crate::error::{ErrKind, ProtocolError, ProtocolResult};
+use crate::error::{ErrKind, ICError, ICResult};
 use crate::mem::IOSegment;
 use crate::transport::specs::ics::{ConnectionSpecs, EncryptionProvider, negotiation};
 use crate::transport::stream;
@@ -33,11 +33,11 @@ where
 {
     type SendSegment = T;
 
-    async fn send(&mut self, source: &mut T) -> ProtocolResult<()> {
+    async fn send(&mut self, source: &mut T) -> ICResult<()> {
         stream::core::send(&mut self.writer, source).await
     }
 
-    async fn terminate(&mut self) -> ProtocolResult<()> {
+    async fn terminate(&mut self) -> ICResult<()> {
         self.writer.shutdown().await?;
         Ok(())
     }
@@ -63,7 +63,7 @@ where
 {
     type ReceiveSegment = T;
 
-    async fn receive(&mut self, destination: &mut T) -> ProtocolResult<()> {
+    async fn receive(&mut self, destination: &mut T) -> ICResult<()> {
         stream::core::receive(&mut self.reader, destination).await
     }
 }
@@ -99,7 +99,7 @@ where
 
     type Receiver = IPLinkReceiver<R>;
 
-    async fn connect(parameters: &Self::Parameters) -> ProtocolResult<Self> {
+    async fn connect(parameters: &Self::Parameters) -> ICResult<Self> {
         let mut stream = TcpStream::connect(parameters).await?;
 
         negotiation::initiate(&mut stream, ConnectionSpecs::new(1, false)).await?;
@@ -111,15 +111,15 @@ where
         })
     }
 
-    async fn send(&mut self, source: &mut S) -> ProtocolResult<()> {
+    async fn send(&mut self, source: &mut S) -> ICResult<()> {
         stream::core::send(&mut self.stream, source).await
     }
 
-    async fn receive(&mut self, destination: &mut R) -> ProtocolResult<()> {
+    async fn receive(&mut self, destination: &mut R) -> ICResult<()> {
         stream::core::receive(&mut self.stream, destination).await
     }
 
-    async fn terminate(&mut self) -> ProtocolResult<()> {
+    async fn terminate(&mut self) -> ICResult<()> {
         self.stream.shutdown().await?;
         Ok(())
     }
@@ -152,11 +152,11 @@ where
 {
     type SendSegment = T;
 
-    async fn send(&mut self, source: &mut T) -> ProtocolResult<()> {
+    async fn send(&mut self, source: &mut T) -> ICResult<()> {
         stream::core::send_encrypted(&mut self.writer, source, &mut self.state).await
     }
 
-    async fn terminate(&mut self) -> ProtocolResult<()> {
+    async fn terminate(&mut self) -> ICResult<()> {
         self.writer.shutdown().await?;
         Ok(())
     }
@@ -184,7 +184,7 @@ where
 {
     type ReceiveSegment = T;
 
-    async fn receive(&mut self, destination: &mut T) -> ProtocolResult<()> {
+    async fn receive(&mut self, destination: &mut T) -> ICResult<()> {
         stream::core::receive_encrypted(&mut self.reader, destination, &mut self.state).await
     }
 }
@@ -228,7 +228,7 @@ where
 
     type Receiver = IPLinkSecureReceiver<R>;
 
-    async fn connect(parameters: &Self::Parameters) -> ProtocolResult<Self> {
+    async fn connect(parameters: &Self::Parameters) -> ICResult<Self> {
         let mut stream = TcpStream::connect(parameters).await?;
 
         negotiation::initiate(&mut stream, ConnectionSpecs::new(1, true)).await?;
@@ -238,15 +238,15 @@ where
         Ok(Self::new(stream, send_state, recv_state))
     }
 
-    async fn send(&mut self, source: &mut S) -> ProtocolResult<()> {
+    async fn send(&mut self, source: &mut S) -> ICResult<()> {
         stream::core::send_encrypted(&mut self.stream, source, &mut self.send_state).await
     }
 
-    async fn receive(&mut self, destination: &mut R) -> ProtocolResult<()> {
+    async fn receive(&mut self, destination: &mut R) -> ICResult<()> {
         stream::core::receive_encrypted(&mut self.stream, destination, &mut self.recv_state).await
     }
 
-    async fn terminate(&mut self) -> ProtocolResult<()> {
+    async fn terminate(&mut self) -> ICResult<()> {
         self.stream.shutdown().await?;
         Ok(())
     }
@@ -283,7 +283,7 @@ where
 {
     type Transport = IPLink<S, R>;
 
-    async fn initiate(mut self) -> ProtocolResult<IPLink<S, R>> {
+    async fn initiate(mut self) -> ICResult<IPLink<S, R>> {
         let specs = negotiation::receive_specs(&mut self.stream).await?;
 
         // TODO: Hardcoded because config are not accepted currently.
@@ -295,7 +295,7 @@ where
 
         negotiation::reject(&mut self.stream).await?;
 
-        Err(ProtocolError::error(ErrKind::SpecsMismatch))
+        Err(ICError::error(ErrKind::SpecsMismatch))
     }
 }
 
@@ -318,7 +318,7 @@ where
 
     type Info = SocketAddr;
 
-    async fn create(id: &SocketAddr) -> ProtocolResult<Self>
+    async fn create(id: &SocketAddr) -> ICResult<Self>
     where
         Self: Sized,
     {
@@ -331,17 +331,17 @@ where
         })
     }
 
-    async fn accept(&self) -> ProtocolResult<(IPLinkInitiator<S, R>, SocketAddr)> {
+    async fn accept(&self) -> ICResult<(IPLinkInitiator<S, R>, SocketAddr)> {
         let (stream, addr) = self.listener.accept().await?;
         Ok((IPLinkInitiator::new(stream), addr))
     }
 
-    fn info(&self) -> ProtocolResult<SocketAddr> {
+    fn info(&self) -> ICResult<SocketAddr> {
         Ok(self.listener.local_addr()?)
     }
 
-    async fn terminate(&mut self) -> ProtocolResult<()> {
-        Err(ProtocolError::error(ErrKind::Unimplemented))
+    async fn terminate(&mut self) -> ICResult<()> {
+        Err(ICError::error(ErrKind::Unimplemented))
     }
 }
 
@@ -368,7 +368,7 @@ where
 {
     type Transport = IPLinkSecure<S, R>;
 
-    async fn initiate(mut self) -> ProtocolResult<IPLinkSecure<S, R>> {
+    async fn initiate(mut self) -> ICResult<IPLinkSecure<S, R>> {
         let specs = negotiation::receive_specs(&mut self.stream).await?;
 
         // TODO: Hardcoded because config are not accepted currently.
@@ -383,7 +383,7 @@ where
 
         negotiation::reject(&mut self.stream).await?;
 
-        Err(ProtocolError::error(ErrKind::SpecsMismatch))
+        Err(ICError::error(ErrKind::SpecsMismatch))
     }
 }
 
@@ -406,7 +406,7 @@ where
 
     type Info = SocketAddr;
 
-    async fn create(id: &SocketAddr) -> ProtocolResult<Self>
+    async fn create(id: &SocketAddr) -> ICResult<Self>
     where
         Self: Sized,
     {
@@ -419,17 +419,17 @@ where
         })
     }
 
-    async fn accept(&self) -> ProtocolResult<(IPLinkSecureInitiator<S, R>, SocketAddr)> {
+    async fn accept(&self) -> ICResult<(IPLinkSecureInitiator<S, R>, SocketAddr)> {
         let (stream, addr) = self.listener.accept().await?;
         Ok((IPLinkSecureInitiator::new(stream), addr))
     }
 
-    fn info(&self) -> ProtocolResult<SocketAddr> {
+    fn info(&self) -> ICResult<SocketAddr> {
         Ok(self.listener.local_addr()?)
     }
 
-    async fn terminate(&mut self) -> ProtocolResult<()> {
-        Err(ProtocolError::error(ErrKind::Unimplemented))
+    async fn terminate(&mut self) -> ICResult<()> {
+        Err(ICError::error(ErrKind::Unimplemented))
     }
 }
 

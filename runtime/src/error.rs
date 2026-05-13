@@ -5,8 +5,8 @@ use std::io;
 
 use tokio::time::error::Elapsed;
 
-/// Result type alias for protocol's operations.
-pub type ProtocolResult<T> = Result<T, ProtocolError>;
+/// Result type alias for runtime's operations.
+pub type ICResult<T> = Result<T, ICError>;
 
 /// The variant of protocol's error.
 #[non_exhaustive]
@@ -75,13 +75,13 @@ pub enum ErrKind {
 /// This design allows efficient matching of errors, at the same time it keeps the error type simple
 /// and small.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct ProtocolError {
+pub struct ICError {
     pub kind: ErrKind,
     // errno is i32.
     pub refer: i32,
 }
 
-impl ProtocolError {
+impl ICError {
     #[inline(always)]
     pub const fn new(kind: ErrKind, refer: i32) -> Self {
         Self { kind, refer }
@@ -93,22 +93,22 @@ impl ProtocolError {
     }
 }
 
-impl fmt::Display for ProtocolError {
+impl fmt::Display for ICError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "Error: {:?}. Reference: {}", self.kind, self.refer)
     }
 }
 
-impl From<io::Error> for ProtocolError {
+impl From<io::Error> for ICError {
     #[inline]
     fn from(err: io::Error) -> Self {
         if err.kind() == std::io::ErrorKind::UnexpectedEof {
-            ProtocolError {
+            ICError {
                 kind: ErrKind::PeerClosed,
                 refer: 0,
             }
         } else {
-            ProtocolError {
+            ICError {
                 kind: ErrKind::Transport,
                 refer: err.raw_os_error().unwrap_or(0),
             }
@@ -116,20 +116,20 @@ impl From<io::Error> for ProtocolError {
     }
 }
 
-impl From<Elapsed> for ProtocolError {
+impl From<Elapsed> for ICError {
     #[inline]
     fn from(_: Elapsed) -> Self {
-        ProtocolError {
+        ICError {
             kind: ErrKind::Timeout,
             refer: 0,
         }
     }
 }
 
-impl From<TryReserveError> for ProtocolError {
+impl From<TryReserveError> for ICError {
     #[inline]
     fn from(_: TryReserveError) -> Self {
-        ProtocolError {
+        ICError {
             kind: ErrKind::MemoryAllocation,
             refer: 0,
         }

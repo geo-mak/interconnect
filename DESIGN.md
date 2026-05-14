@@ -242,7 +242,7 @@ here:
 
   Both languages were betting on hardware implementation of their semantics with a programming model very foreign to what has come to be (today you live in RISC world). To better understand this point, this distinction **could** be viewed as two design approaches:
     
-    - Lisp's and SmallTalk's approach: The hardware is the main **platform** where the VM is a **tactically** emulated hardware and the **virtualized** part shall become **materialized** in silicone. This approach implies that the hardware incorporating a large part of the system-level API, leaving too little for the software to control and handle.
+    - Lisp's and SmallTalk's approach: The hardware is the main **platform** where the VM is a **tactically** emulated hardware and the **virtualized** part shall become **materialized** in silicone. This approach implies that the hardware incorporates a large part of the system-level API, leaving too little for the software to control and handle.
 
     - The RISC approach: The hardware is the **common** dominator that exposes its execution details as a set of simple instructions to compilers, which are supposed to know how to better optimize the execution code that gets fed into its processing elements (e.g multiple loads of the same data will be reduced to single pre-load into the register and subsequent loads will be eliminated).
 

@@ -218,7 +218,7 @@ Rust as a choice was not a random choice or out of hype, this decision has been 
 - Statically (AOT) compiled code with static typing and high level of optimization (No VM).
 
 While other languages like C/C++ satisfy these requirements, they carry a decades-long baggage and 
-they lack the syntactic constructs to constraint mutability and tracking of referencing/aliasing, so they fell out of the choice very quickly. Other languages in this league satisfy these requirements but they lack many of these features besides stability.
+they lack the syntactic constructs to constraint mutability and tracking of referencing/aliasing, so they fell out of the choice very quickly. Other languages in this league satisfy these requirements but they lack many of Rust's syntactic constraints besides stability.
 
 Rust in many ways not a new language, but its unique position lies in baking all of these stuff in a coherent and an elegant language, with very successful execution uppon ideas.
 

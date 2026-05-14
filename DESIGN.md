@@ -217,8 +217,7 @@ Rust as a choice was not a random choice or out of hype, this decision has been 
 
 - Statically (AOT) compiled code with static typing and high level of optimization (No VM).
 
-While other languages like C/C++ satisfy these requirements, they carry a decades-long baggage and 
-they lack the syntactic constructs to constraint mutability and tracking of referencing/aliasing, so they fell out of the choice very quickly. Other languages in this league satisfy these requirements but they lack many of Rust's syntactic constraints besides stability.
+While other languages like C/C++ satisfy these requirements, they carry a decades-long baggage and they lack the syntactic constructs to constraint mutability and tracking of referencing/aliasing, so they fell out of the choice very quickly. Other languages in this league satisfy these requirements but they lack many of Rust's syntactic constraints besides stability.
 
 Rust in many ways not a new language, but its unique position lies in baking all of these stuff in a coherent and an elegant language, with very successful execution uppon ideas.
 
@@ -250,7 +249,6 @@ here:
   Both approaches have interesting takes, but the VM approach was **never** about implementing dynamic interpreters in software, the interpreter is supposed to be the hardware itself and **virtual** machine is supposed to be **materialized** as an actual machine!
 
 - Garbage collector: Both Lisp and SmallTalk employed GC, but again, both languages were "lab" languages. Lisp was born at an AI-lab and SmallTalk was born at PARC for experimenting with UI and dynamic environments (SmallTalk is a language-environment combination actually without OS and it is the origin of the concept of **IDE**, because the **execution** environment **is** itself a **development** environment with global versioning and integrated versioning system, that is to say that changes are reflected in the running system, live. [More details from the creators](https://www.youtube.com/watch?v=PaOMiNku1_M)).
-
 
 The point of mentioning this little piece of a very ancient history is that tinkering and research lean toward flexibility and ignore
 control and efficiency, there is even a very high tolerance for low coding standards and quality in general.

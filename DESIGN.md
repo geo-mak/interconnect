@@ -239,7 +239,7 @@ Without going into the details of specific languages, most common languages with
 in **research**, with **Lisp** and **SmallTalk** as direct inspiration. Because of this I would like to elaborate on what went wrong
 here:
 
-- VM: In both Lisp and SmallTalk, the VM carried the "the future hardware emulated" ethos where the VM was either a **microcode** loaded into the processor or a **hardware** implementation or semi-implementation of the language itself later. None of these language promoted the idea of "write once run anywhere", where the VM is a software-based "third" platform on top of "abstracted" hardware and os platforms respectively. Both languages were betting on hardware implementation of their semantics with a programming model very foreign to what has came to be (today you live in RISC world).
+- VM: In both Lisp and SmallTalk, the VM carried the "the future hardware emulated" ethos where the VM was either a **microcode** loaded into the processor or a **hardware** implementation or semi-implementation of the language itself later. None of these language promoted the idea of "write once run anywhere", where the VM is a software-based "third" platform on top of "abstracted" hardware and os platforms respectively. Both languages were betting on hardware implementation of their semantics with a programming model very foreign to what has come to be (today you live in RISC world).
 
 - Garbage collector: Both Lisp and SmallTalk employed GC, but again, both languages were "lab" languages. Lisp was born at an AI-lab and SmallTalk was born at PARC for experimenting with UI and dynamic environments (SmallTalk is a language-environment combination actually without OS).
 

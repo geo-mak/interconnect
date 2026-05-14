@@ -202,3 +202,60 @@ Interconnect's design defines three categories of security:
   ```
 
   The above example achieves the goal efficiently without baking special metadata into each message, and without any clunky middleware like interceptors.
+
+## Reference implementation
+
+The reference implementation of Interconnect is in `Rust`.
+
+Rust as a choice was not a random choice or out of hype, this decision has been taken with carful considerations of key points:
+
+- Absolute control over memory layout and memory access.
+
+- Absolute control over the lifecycle (No GC).
+
+- Uniform typing (no value "semantics" and "reference" semantics weirdos).
+
+- Statically (AOT) compiled code with static typing and high level of optimization (No VM).
+
+While other languages like C/C++ satisfy these requirements, they carry a decades-long baggage and 
+they lack the syntactic constructs to constraint mutability and tracking of referencing/aliasing, so they fell out of the choice very quickly. Other languages in this league satisfy these requirements but they lack many of these features besides stability.
+
+Rust in many ways not a new language, but its unique position lies in baking all of these stuff in a coherent and an elegant language, with very successful execution uppon ideas.
+
+Programming languages are different obviously, but the differentiation standard has not yet been well established in the industry.
+
+Many programming language has advantages and disadvantages for certain things in particular, but the industry could do itself a great
+service and save a lot of time and money if it puts language in 4 categories like the following:
+
+- Experimental languages: PL-theories' playground.
+
+- Research languages: Used mainly in labs for rapid prototyping and testing.
+
+- Domain-specific languages: Used for specific tasks at small scale.
+
+- **Engineering** languages: Meant to implement **production** systems.
+
+Without going in to the details of specific languages, most common languages with GC and VM have their roots in the second category,
+in **research**, with **Lisp** and **SmallTalk** as direct inspiration. Because of this I would like to elaborate of the what went wrong
+here:
+
+- VM: In both Lisp and SmallTalk, the VM carried the "the future hardware emulated" ethos where the VM was either a **microcode** loaded into the processor or a **hardware** implementation or semi-implementation of the language itself later. None of these language promoted the idea of "write once run anywhere", where the VM is a software-based "third" platform on top of "abstracted" hardware and os platforms respectively. Both languages were betting on hardware implementation of their semantics with a programming model very foreign to what has came to be (today you live in RISC world).
+
+- Garbage collector: Both Lisp and SmallTalk employed GC, but again, both languages were "lab" languages. Lisp was born at an AI-lab and SmallTalk was born at PARC for experimenting with UI and dynamic environments (SmallTalk is a language-environment combination actually without OS).
+
+
+The point of mentioning this little piece of a very ancient history is that tinkering and research lean toward flexibility and ignore
+control and efficiency, there is even a very high tolerance for low coding standards and quality in general.
+
+I would say that most common languages with GC and VM didn't offer tradeoffs, they simply missed the point and were blinded by the "deceptive" simplicity of the paradigm and were pushed by aggressive marketing (think Sun and its Java), especially to places where they supposed to be very **critical** of this "deceptive" simplicity like universities and engineering institutes.
+
+Bringing languages of this category to the engineering space will hit hard in key areas like:
+- Control.
+- Efficiency and optimizations.
+- Proper maintainability of the codebase.
+
+Hitting hard in these key areas means scalability-limits of what future improvement to that codebase can be done besides hardware-related costs and above all **energy**. There is no better example than the current situation with ML where research relies on python, but taking python into the engineering space would turn the planet earth into "inferno" burning resources at all levels.
+
+Choosing a programming language is a **strategic** decision, because it will set the limits on what can be done next and what costs are ahead when the project evolves. I hope the industry could learn the lessons of the last decades and choose an **engineering** language for its **engineering** project **always**, not as a last resort because nothing else works.
+
+Rust without doubts is an **engineering** language and more, because it has got a gentle "safe" surface that helps with getting things done rapidly with little cost and overhead and with very high productivity, but more importantly, the fine-grained control remains an option at any point of the project, and that is why rust has been chosen.

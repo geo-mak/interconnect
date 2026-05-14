@@ -257,12 +257,7 @@ control and efficiency, there is even a very high tolerance for low coding stand
 
 I would say that most common languages with GC and VM didn't offer tradeoffs, they simply missed the point and were blinded by the "deceptive" simplicity of the paradigm and were pushed by aggressive marketing (think Sun and its Java), especially to places where they supposed to be very **critical** of this "deceptive" simplicity like universities and engineering institutes.
 
-Bringing languages of this category to the engineering space will hit hard in key areas like:
-- Control.
-- Efficiency and optimizations.
-- Proper maintainability of the codebase.
-
-Hitting hard in these key areas means scalability-limits of what future improvement to that codebase can be done besides hardware-related costs and above all **energy**. There is no better example than the current situation with ML where research relies on python, but taking python into the engineering space would turn the planet earth into "inferno" burning resources at all levels.
+Bringing languages of this category to the engineering space will hit hard in key areas like control, efficiency and optimizations and proper maintainability of the codebase. Hitting hard in these key areas means scalability-limits of what future improvement to that codebase can be done besides hardware-related costs and above all **energy**. There is no better example than the current situation with ML where research relies on python, but taking python into the engineering space would turn the planet earth into "inferno" burning resources at all levels.
 
 Choosing a programming language is a **strategic** decision, because it will set the limits on what can be done next and what costs are ahead when the project evolves. I hope the industry could learn the lessons of the last decades and choose an **engineering** language for its **engineering** project **always**, not as a last resort because nothing else works.
 

@@ -112,9 +112,12 @@ From design perspective (many implementations are still more or less "prototypes
 The panic-policy is to abort. The reasons for adopting abort instead of unwinding are: 
 - Unwinding has a very high overhead (if not carefully/manually optimized).
 - Maintaining the conceptual clarity of the control-flow.
-- Designing for "unexpected" failure is an oxymoron.
+- It is very difficult to reliably know the state of the memory after panic (E.g. Many "UnwindSafe" data structures will leak resource).
+- Unwinding complicates the design of components (e.g. Panic tracking fields/flags, think std::sync::poison, which will "poison" the entire codebase with checks).
 
-Theoretically, unwinding can be used for implementing a very efficient error handling strategy, by means of reducing error checks in each call-frame and carefully designed "catch-points" in the call chain, but this model is less flexible and very tricky to setup and maintain properly, especially across refactorings.
+Theoretically, unwinding can be used for implementing a very efficient error handling strategy, by means of reducing error checks in each call-frame and carefully designed "catch-points" in the call chain, but this model is less flexible and very tricky to setup and maintain properly, especially across refactorings. 
+
+On the other hand, forcing abort simplifies the implementation of components, yields a very lean machine code and enables a lot of optimization opportunities to the compiler, which would eliminate a lot of overhead, a strategy by far the more practical and reliable choice to consider.
 
 Interconnect's design differentiates between control-flow errors and error-reporting with two separate types:
 - Constrained error-type.

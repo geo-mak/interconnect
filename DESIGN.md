@@ -235,7 +235,7 @@ service and save a lot of time and money if it puts language in 4 categories lik
 
 - **Engineering** languages: Meant to implement **production** systems.
 
-Without going in to the details of specific languages, most common languages with GC and VM have their roots in the second category,
+Without going into the details of specific languages, most common languages with GC and VM have their roots in the second category,
 in **research**, with **Lisp** and **SmallTalk** as direct inspiration. Because of this I would like to elaborate of the what went wrong
 here:
 

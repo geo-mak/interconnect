@@ -245,8 +245,7 @@ here:
     
     - Lisp's and SmallTalk's approach: The hardware is the main **platform** where the VM is a **tactically** emulated hardware and the **virtualized** part shall become **materialized** in silicone.
 
-    - The RISC approach: The hardware is the **common** dominator that exposes its execution details to compilers which are supposed
-    to know how to better optimize it and feed it into its processing elements (e.g multiple loads of the same data will be reduced to single pre-load into the register and subsequent loads will be eliminated).
+    - The RISC approach: The hardware is the **common** dominator that exposes its execution details as a set of simple instructions to compilers, which are supposed to know how to better optimize the execution code that gets fed into its processing elements (e.g multiple loads of the same data will be reduced to single pre-load into the register and subsequent loads will be eliminated).
 
   Both approaches have interesting takes, but the VM approach was **never** about implementing dynamic interpreters in software, the interpreter is supposed to be the hardware itself and **virtual** machine is supposed to be **materialized** as an actual machine!
 

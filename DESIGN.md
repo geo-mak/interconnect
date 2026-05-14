@@ -239,7 +239,16 @@ Without going into the details of specific languages, most common languages with
 in **research**, with **Lisp** and **SmallTalk** as direct inspiration. Because of this I would like to elaborate on what went wrong
 here:
 
-- VM: In both Lisp and SmallTalk, the VM carried the "the future hardware emulated" ethos where the VM was either a **microcode** loaded into the processor or a **hardware** implementation or semi-implementation of the language itself later. None of these language promoted the idea of "write once run anywhere", where the VM is a software-based "third" platform on top of "abstracted" hardware and os platforms respectively. Both languages were betting on hardware implementation of their semantics with a programming model very foreign to what has come to be (today you live in RISC world).
+- VM: In both Lisp and SmallTalk, the VM carried the "the future hardware emulated" ethos where the VM was either a **microcode** loaded into the processor or a **hardware** implementation or semi-implementation of the language itself later. None of these language promoted the idea of "write once run anywhere", where the VM is a software-based "third" platform on top of "abstracted" hardware and OS platforms respectively.
+
+  Both languages were betting on hardware implementation of their semantics with a programming model very foreign to what has come to be (today you live in RISC world). To better understand this point, this distinction **could** be view as two design approaches:
+    
+    - Lisp's and SmallTalk's approach: The hardware is the main **platform** where the VM is a **tactically** emulated hardware and the **virtualized** part shall become **materialized** in silicone.
+
+    - The RISC approach: The hardware is the **common** dominator that exposes its execution details to compilers which are supposed
+    to know how to better optimize it and feed it into its processing elements (e.g multiple loads of the same data will be reduced to single pre-load into the register and subsequent loads will be eliminated).
+
+  Both approaches have interesting takes, but the VM approach was **never** about implementing dynamic interpreters in software, the interpreter is supposed to be the hardware itself and **virtual** machine is supposed to be **materialized** as an actual machine!
 
 - Garbage collector: Both Lisp and SmallTalk employed GC, but again, both languages were "lab" languages. Lisp was born at an AI-lab and SmallTalk was born at PARC for experimenting with UI and dynamic environments (SmallTalk is a language-environment combination actually without OS and it is the origin of the concept of **IDE**, because the **execution** environment **is** itself a **development** environment with global versioning and integrated versioning system).
 

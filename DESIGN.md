@@ -242,7 +242,7 @@ here:
 
   Both languages were betting on hardware implementation of their semantics with a programming model very foreign to what has come to be (today you live in RISC world). To better understand this point, this distinction **could** be viewed as two design approaches:
     
-    - Lisp's and Smalltalk's approach: The hardware is the main **platform** where the VM is a **tactically** emulated hardware and the **virtualized** part shall become **materialized** in silicone. This approach implies that the hardware incorporates a large part of the system-level API, leaving too little for the software to control and handle.
+    - Lisp's and Smalltalk's approach: The hardware is supposed to be the main **platform** where the VM is a **tactically** emulated hardware and the **virtualized** part shall become **materialized** in silicone. This approach implies that the hardware incorporates a large part of the system-level API, leaving too little for the software to control and handle.
 
     > "One way to think about progress in software is that a lot of it has been about finding ways to late-bind, then waging campaigns to convince manufacturers to build the ideas into hardware. Early hardware had wired programs and parameters; random access memory was a scheme to late-bind them. Looping and indexing used to be done by address modification in storage; index registers were a way to late-bind. Over the years software designers have found ways to late-bind the locations of computations—this led to base/bounds registers, segment relocation, page MMUs, migratory processes, and so forth."
     >
@@ -250,16 +250,16 @@ here:
 
     - The RISC approach: The hardware is the **common** dominator that exposes its execution details as a set of simple instructions to compilers, which are supposed to know how to better optimize the execution code that gets fed into its processing elements (e.g multiple loads of the same data will be reduced to single pre-load into the register and subsequent loads will be eliminated).
 
-  Both approaches have interesting takes, but the VM approach was **never** about implementing dynamic interpreters in software, the interpreter is supposed to be the hardware itself and **virtual** machine is supposed to be **materialized** as an actual machine!
+  Both approaches have interesting takes, but the VM approach was **never** about implementing interpreters in software, the interpreter is supposed to be the hardware itself and the **virtual** machine is supposed to be **materialized** as an actual machine!
 
-- Garbage collector: Both Lisp and Smalltalk employed GC, but again, both languages were "lab" languages. Lisp was born at an AI-lab and Smalltalk was born at PARC for experimenting with UI and dynamic environments (Smalltalk is a language-environment combination actually without OS and it is the origin of the concept of **IDE**, because the **execution** environment **is** itself a **development** environment with global versioning and integrated versioning system, that is to say that changes are reflected in the running system, live. [More details from the creators](https://www.youtube.com/watch?v=PaOMiNku1_M)).
+- Garbage collector: Both Lisp and Smalltalk employed GC, but again, both languages were "lab" languages. Lisp was born at an AI-lab and Smalltalk was born at PARC for experimenting with UI and dynamic environments (Smalltalk is a language-environment combination actually without OS and it is the origin of the concept of **IDE**, because the **execution** environment **is** itself a **development** environment with integrated versioning system, that is to say that changes are reflected in the running system, live. [More details from the creators](https://www.youtube.com/watch?v=PaOMiNku1_M)).
 
 The point of mentioning this little piece of a very ancient history is that tinkering and research lean toward flexibility and ignore
 control and efficiency, there is even a very high tolerance for low coding standards and quality in general.
 
 I would say that most common languages with GC and VM didn't offer tradeoffs, they simply missed the point and were blinded by the "deceptive" simplicity of the paradigm and were pushed by aggressive marketing (think Sun and its Java), especially to places where they supposed to be very **critical** of this "deceptive" simplicity like universities and engineering institutes.
 
-Bringing languages of this category to the engineering space will hit hard in key areas like control, efficiency and optimizations and proper maintainability of the codebase. Hitting hard in these key areas means scalability-limits of what future improvement to that codebase can be done besides hardware-related costs and above all **energy**. There is no better example than the current situation with ML where research relies on python, but taking python into the engineering space would turn the planet earth into "inferno" burning resources at all levels.
+Bringing languages of this category to the engineering space means scalability-limits of what future improvement to that codebase can be done besides hardware-related costs and above all **energy**. There is no better example than the current situation with ML where research relies on python, but taking python into the engineering space would turn the planet earth into "inferno" burning resources at all levels.
 
 Choosing a programming language is a **strategic** decision, because it will set the limits on what can be done next and what costs are ahead when the project evolves. I hope the industry could learn the lessons of the last decades and choose an **engineering** language for its **engineering** project **always**, not as a last resort because nothing else works.
 

@@ -244,6 +244,10 @@ here:
     
     - Lisp's and SmallTalk's approach: The hardware is the main **platform** where the VM is a **tactically** emulated hardware and the **virtualized** part shall become **materialized** in silicone. This approach implies that the hardware incorporates a large part of the system-level API, leaving too little for the software to control and handle.
 
+    > "One way to think about progress in software is that a lot of it has been about finding ways to late-bind, then waging campaigns to convince manufacturers to build the ideas into hardware. Early hardware had wired programs and parameters; random access memory was a scheme to late-bind them. Looping and indexing used to be done by address modification in storage; index registers were a way to late-bind. Over the years software designers have found ways to late-bind the locations of computations—this led to base/bounds registers, segment relocation, page MMUs, migratory processes, and so forth."
+    >
+    > — **Dr. Alan C. Kay**, *The Early History of Smalltalk*, March 1993
+    
     - The RISC approach: The hardware is the **common** dominator that exposes its execution details as a set of simple instructions to compilers, which are supposed to know how to better optimize the execution code that gets fed into its processing elements (e.g multiple loads of the same data will be reduced to single pre-load into the register and subsequent loads will be eliminated).
 
   Both approaches have interesting takes, but the VM approach was **never** about implementing dynamic interpreters in software, the interpreter is supposed to be the hardware itself and **virtual** machine is supposed to be **materialized** as an actual machine!

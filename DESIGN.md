@@ -224,7 +224,7 @@ Rust in many ways not a new language, but its unique position lies in baking all
 Programming languages are different obviously, but the differentiation standard has not yet been well established in the industry.
 
 Many programming language has advantages and disadvantages for certain things in particular, but the industry could do itself a great
-service and save a lot of time and money if it puts language in 4 categories like the following:
+service and save a lot of time and money if it puts languages in 4 categories like the following:
 
 - Experimental languages: PL-theories' playground.
 

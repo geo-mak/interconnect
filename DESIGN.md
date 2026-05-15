@@ -230,7 +230,7 @@ service and save a lot of time and money if it puts language in 4 categories lik
 
 - Research languages: Used mainly in labs for rapid prototyping and testing.
 
-- Domain-specific languages: Used for specific tasks at small scale.
+- Domain-specific languages: Used for specific tasks at small scale (think queries or scripting).
 
 - **Engineering** languages: Meant to implement **production** systems.
 
@@ -254,8 +254,7 @@ here:
 
 - Garbage collector: Both Lisp and Smalltalk employed GC, but again, both languages were "lab" languages. Lisp was born at an AI-lab and Smalltalk was born at PARC for experimenting with UI and dynamic environments (Smalltalk is a language-environment combination actually without OS and it is the origin of the concept of **IDE**, because the **execution** environment **is** itself a **development** environment with integrated versioning system, that is to say that changes are reflected in the running system, live. [More details from the creators](https://www.youtube.com/watch?v=PaOMiNku1_M)).
 
-The point of mentioning this little piece of a very ancient history is that tinkering and research lean toward flexibility and ignore
-control and efficiency, there is even a very high tolerance for low coding standards and quality in general.
+The point of mentioning this little piece of a very ancient history is that, on one hand tinkering and research lean toward flexibility and ignore control and efficiency, on the other hand the modern heterogenous hardware relies on very sophisticated compilation techniques with a lot of analysis and transformations on multiple levels to deliver performance.
 
 I would say that most common languages with GC and VM didn't offer tradeoffs, they simply missed the point and were blinded by the "deceptive" simplicity of the paradigm and were pushed by aggressive marketing (think Sun and its Java), especially to places where they supposed to be very **critical** of this "deceptive" simplicity like universities and engineering institutes.
 

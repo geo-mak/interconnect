@@ -256,7 +256,7 @@ here:
 
 The point of mentioning this little piece of a very ancient history is that, on one hand tinkering and research lean toward flexibility and ignore control and efficiency, on the other hand the modern heterogenous hardware relies on very sophisticated compilation techniques with a lot of analysis and transformations on multiple levels to deliver performance.
 
-I would say that most common languages with GC and VM didn't offer tradeoffs, they simply missed the point and were blinded by the "deceptive" simplicity of the paradigm and were pushed by aggressive marketing (think Sun and its Java), especially to places where they supposed to be very **critical** of this "deceptive" simplicity like universities and engineering institutes.
+I would say that most common languages with GC and VM didn't offer tradeoffs, they simply missed the point and were blinded by the "deceptive" simplicity of the paradigm ignoring its historical context and its design-assumptions and preconditions, and have been pushed by aggressive marketing (think Sun and its Java), especially to places where they supposed to be very **critical** of this "deceptive" simplicity like universities and engineering institutes.
 
 Bringing languages of this category to the engineering space means scalability-limits of what future improvement to that codebase can be done besides hardware-related costs and above all **energy**. There is no better example than the current situation with ML where research relies on python, but taking python into the engineering space would turn the planet earth into "inferno" burning resources at all levels.
 

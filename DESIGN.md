@@ -265,9 +265,9 @@ Without going into the details of specific languages, most common languages with
 
   Now, common languages known as object-oriented (e.g C++, Java, C#) have diverged from this definition and presented a static model that did not take the "messaging" part into account.
   
-  For the sake of making this short, one of the most common feature of the OOP model is **inheritance**, which establishes a hierarchy of nested "objects" that share data and behavior (methods) in the chain. 
+  For the sake of making this short, one of the most common feature of the OOP model is **inheritance**, which establishes a hierarchy of "objects" that share data and behavior (methods). 
   
-  **Inheritance** as a **killer** feature of the OOP as known is killer to me, it is a single worst idea ever introduced to the programming world, it complicate the implementation, adds ambiguity, shares states with a possibly very large chain with very strict regime of "initialization".
+  **Inheritance** as a **killer** feature of the OOP as known is killer to me, it is a single worst idea ever introduced to the programming world, it complicates the implementation, adds ambiguity, shares states with a possibly very large chain with very strict regime of "initialization".
 
   Since each language that "claims" to be object-oriented implements it differently, it is hard to speak about efficiency in general, but it the case of e.g. Java/C# it is inefficient and adds VTable-lookup overhead for no objective reason. Python, Ruby & Co they do hash-lookup at runtime with method resolution order (MRO) (classes basically hashmaps).
 

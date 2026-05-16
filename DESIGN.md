@@ -251,9 +251,9 @@ Without going into the details of specific languages, most common languages with
 
 - Garbage collector: Both Lisp and Smalltalk employed GC, but again, both languages were "lab" languages. Lisp was born at an AI-lab and Smalltalk was born at PARC for experimenting with UI and dynamic environments (Smalltalk is a language-environment combination actually without OS and it is the origin of the concept of **IDE**, because the **execution** environment **is** itself a **development** environment with integrated versioning system, that is to say that changes are reflected in the running system, live. [More details from the creators](https://www.youtube.com/watch?v=PaOMiNku1_M)). Even in that context, the attitude was similar to VM in sense that, if GC is needed, it shall be a implemented in hardware.
 
-- Object-Oriented Programming: Writing all of this, I presume I am already in the hornets' nest, so some elaboration here would not make it worse. This topic is a little bit complicated from historical perspective, but the term has been coined by **Dr. Alan Kay** inspired by Sketchpad, Simula and the biological cells on our bodies in the late 1960s to describe a new programming model based on "objects" as units of composition.
+- Object-Oriented Programming: Writing all of this, I presume I am already in middle of the hornets' nest, so some elaboration here would not make it worse. This topic is a little bit complicated from historical perspective, but the term has been coined by **Dr. Alan Kay** inspired by Sketchpad, Simula and the biological cells on our bodies in the late 1960s to describe a new programming model based on "objects" as units of composition.
 
-  These entities are supposed to:
+  These entities that are referred to as "objects" are supposed to:
     - hide their states (Encapsulation).
     - hide their implementation (Polymorphism).
     - adopt properties and "behavior" from other objects (Inheritance).
@@ -267,17 +267,17 @@ Without going into the details of specific languages, most common languages with
 
   Now, common languages known as object-oriented (e.g C++, Java, C#) have diverged from this definition and presented a static model that did not take the "messaging" part into account.
   
-  For the sake of making this short, one of the most common feature of the OOP model is **inheritance**, which establishes a hierarchy of "objects" that share data and behavior (methods). 
+  For the sake of making this short, one of the most common feature of the OOP model is **inheritance**, which establishes a hierarchy of "objects" that share data (state) and behavior (methods). 
   
-  **Inheritance** as a **killer** feature of the OOP as known is killer to me, it is a single worst idea ever introduced to the programming world, it complicates the implementation, adds ambiguity, shares states with a possibly very large chain with very strict regime of "initialization".
+  **Inheritance** as a **prominent** feature of the OOP as known in the wild is poisonous to me, it is a single worst idea ever introduced to the programming world, it complicates the implementation, adds ambiguity, shares states with a possibly very large chain with very strict regime of "initialization".
 
-  Since each language that "claims" to be object-oriented implements it differently, it is hard to speak about efficiency in general, but it the case of e.g. Java/C# it is inefficient and adds VTable-lookup overhead for no objective reason. Python, Ruby & Co they do hash-lookup at runtime with method resolution order (MRO) (classes basically hashmaps).
+  Since each language that "claims" to be object-oriented implements it differently, it is hard to speak about efficiency in general, but it the case of e.g. Java/C# it is inefficient and adds VTable-lookup overhead for no objective reason. Python, Ruby & Co do hash-lookup at runtime with method resolution order (MRO) (classes basically hashmaps).
 
-  Both **dynamism** and **late-binding** are relative, there is no reason to accept the overhead of applying them unconditionally and universally on all defined "objects" (types, if I may). From engineering perspective, there is no objective reason to **force** dynamism on types uniformly without requiring the user to specify that. "Polymorphism" is better served by parameterizing with static substitution for both safety and performance (energy). Rust's **trait-system** solves the problem with very clean and efficient way, leaving implementing the dynamic aspects to the user where needed.
+  Both **dynamism** and **late-binding** are relative, there is no reason to accept the overhead of applying them unconditionally and universally. From engineering perspective, there is no objective reason to **force** dynamism on types uniformly without requiring the user to specify that. "Polymorphism" is better served by parameterizing with static substitution for both safety and performance (energy). Rust's **trait-system** solves the problem with very clean and efficient way, leaving implementing the dynamic aspects to the user where needed.
 
-  I can say a lot about each point and each implementation, but I am not writing a research paper here so I would say briefly is that OOP is a heavily metaphorical model which carries the "aspirations" and "dreams" of the last century. It packs a lot of opaque language originated from the world of simulation environments.
+  I can say a lot about each property of the "paradigm", but I am not writing a research paper here so I would say briefly is that OOP is a heavily metaphorical model which carries the "aspirations" and "dreams" of the last century. It packs a lot of opaque language originated from the world of simulation environments.
 
-  If it has been meant to be a universal paradigm for implementing systems, then which system is being targeted exactly and under which constraints? If it has been meant to be a "meta-system", then the wording was extremely misfit. 
+  If it has been meant to be a universal paradigm for implementing systems, then which system is being targeted exactly and under which constraints? If it has been meant to be a "meta-system" to aid system's design, then the wording was extremely misfit. 
 
   **Programming** is **communication** with dual duty, communicating the intent to the machine and to other humans reading the code. A sane modern programming language shall not conform to **any** paradigm, it should incorporates ideas that help **fulfilling** its duty as an efficient communicator with the hardware, and as a clear and detailed descriptor of the intent.
   

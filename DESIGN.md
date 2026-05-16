@@ -262,6 +262,8 @@ Without going into the details of specific languages, most common languages with
 
   Later definition according to Dr. Kay came to be:
   > "OOP to me means only messaging, local retention and protection and hiding of state-process, and extreme late-binding of all things. It can be done in Smalltalk and in LISP. There are possibly other systems in which this is possible, but I'm not aware of them."
+  
+  More details about the original concept [here](https://www.youtube.com/watch?v=QjJaFG63Hlo&t=464s).
 
   Now, common languages known as object-oriented (e.g C++, Java, C#) have diverged from this definition and presented a static model that did not take the "messaging" part into account.
   
@@ -271,7 +273,7 @@ Without going into the details of specific languages, most common languages with
 
   Since each language that "claims" to be object-oriented implements it differently, it is hard to speak about efficiency in general, but it the case of e.g. Java/C# it is inefficient and adds VTable-lookup overhead for no objective reason. Python, Ruby & Co they do hash-lookup at runtime with method resolution order (MRO) (classes basically hashmaps).
 
-  Both **dynamism** and **late-binding** are relative, there is no reason to accept the overhead of applying them unconditionally and universally on all defined "objects" (types, if I may). From engineering perspective, there is no objective reason to **force** dynamism on types uniformly without requiring the user to specify that. "Polymorphism" is better served by parameterizing with static substitution for both safety and performance (energy). Rust's **trait-system** solves the problem with very clean and efficient way.
+  Both **dynamism** and **late-binding** are relative, there is no reason to accept the overhead of applying them unconditionally and universally on all defined "objects" (types, if I may). From engineering perspective, there is no objective reason to **force** dynamism on types uniformly without requiring the user to specify that. "Polymorphism" is better served by parameterizing with static substitution for both safety and performance (energy). Rust's **trait-system** solves the problem with very clean and efficient way, leaving implementing the dynamic aspects to the user where needed.
 
   I can say a lot about each point and each implementation, but I am not writing a research paper here so I would say briefly is that OOP is a heavily metaphorical model which carries the "aspirations" and "dreams" of the last century. It packs a lot of opaque language originated from the world of simulation environments.
 

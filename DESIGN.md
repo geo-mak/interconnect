@@ -209,9 +209,9 @@ The reference implementation of Interconnect is in `Rust`.
 
 Rust as a choice was not a random choice or out of hype, this decision has been taken with carful considerations of key points:
 
-- Absolute control over memory layout and memory access.
+- Control over memory layout and memory access.
 
-- Absolute control over the lifecycle (No GC).
+- Control over the lifecycle (No GC).
 
 - Uniform typing (no "value" semantics and "reference" semantics weirdos).
 
@@ -223,8 +223,7 @@ Rust in many ways not a new language, but its unique position lies in baking all
 
 Programming languages are different obviously, but the differentiation standard has not yet been well established in the industry.
 
-Many programming language has advantages and disadvantages for certain things in particular, but the industry could do itself a great
-service and save a lot of time and money if it puts languages in 4 categories like the following:
+Many programming language has advantages and disadvantages for certain things in particular, but the industry could do itself a great service and save a lot of time and money if it puts languages in 4 categories like the following:
 
 - Experimental languages: PL-theories' playground.
 
@@ -234,9 +233,7 @@ service and save a lot of time and money if it puts languages in 4 categories li
 
 - **Engineering** languages: Meant to implement **production** systems.
 
-Without going into the details of specific languages, most common languages with GC and VM have their roots in the second category,
-in **research**, with **Lisp** and **Smalltalk** as direct inspiration. Because of this I would like to elaborate on what went wrong
-here:
+Without going into the details of specific languages, most common languages with GC and VM have their roots in the second category, in **research**, with **Lisp** and **Smalltalk** as direct inspiration. Because of this I would like to elaborate on what went wrong here:
 
 - VM: In both Lisp and Smalltalk, the VM carried the "the future hardware emulated" ethos where the VM was either a **microcode** loaded into the processor or a **hardware** implementation or semi-implementation of the language itself later. None of these language promoted the idea of "write once run anywhere", where the VM is a software-based "third" platform on top of "abstracted" hardware and OS platforms respectively.
 

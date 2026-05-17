@@ -237,15 +237,17 @@ Without going into the details of specific languages, most common languages with
 
 - VM: In both Lisp and Smalltalk, the VM carried the "the future hardware emulated" ethos where the VM was either a **microcode** loaded into the processor or a **hardware** implementation or semi-implementation of the language itself later. None of these language promoted the idea of "write once run anywhere", where the VM is a software-based "third" platform on top of "abstracted" hardware and OS platforms respectively.
 
-  Both languages were betting on hardware implementation of their semantics with a programming model very foreign to what has come to be (today you live in RISC world). To better understand this point, this distinction **could** be viewed as two design approaches:
+  Both languages were betting on hardware implementation of their semantics with a programming model very foreign to what has come to be (today you live in RISC world, more or less). To better understand this point, this distinction **could** be viewed as two design approaches:
     
-    - Lisp's and Smalltalk's approach: The hardware is supposed to be the main **platform** where the VM is a **tactically** emulated hardware and the **virtualized** part shall become **materialized** in silicone. This approach implies that the hardware incorporates a large part of the system-level API, leaving too little for the software to control and handle.
+    - Lisp/Smalltalk: The hardware is supposed to be the main **platform** where the VM is a **tactically** emulated hardware and the **virtualized** part shall become **materialized** in silicone.
 
     > "One final comment. Hardware is really just software crystallized early. It is there to make program schemes run as efficiently as possible. But far too often the hardware has been presented as a given and it is up to software designers to make it appear reasonable. This has caused low-level techniques and excessive optimization to hold back progress in program design. As Bob Barton used to say: "Systems programmers are high priests of a low cult".<br><br>One way to think about progress in software is that a lot of it has been about finding ways to late-bind, then waging campaigns to convince manufacturers to build the ideas into hardware. Early hardware had wired programs and parameters; random access memory was a scheme to late-bind them. Looping and indexing used to be done by address modification in storage; index registers were a way to late-bind. Over the years software designers have found ways to late-bind the locations of computations—this led to base/bounds registers, segment relocation, page MMUs, migratory processes, and so forth."
     >
     > — Kay, A. C. (1993). *The early history of Smalltalk*. *ACM SIGPLAN Notices, 28*(3), 69–95. https://doi.org/10.1145/154766.155364
-
-    - The RISC approach: The hardware is the **common** dominator that exposes its execution details as a set of simple instructions to compilers, which are supposed to know how to better optimize the execution code that gets fed into its processing elements (e.g multiple loads of the same data will be reduced to single pre-load into the register and subsequent loads will be eliminated).
+    >
+    > More "human-readable" version: https://worrydream.com/EarlyHistoryOfSmalltalk/
+    
+    - RISC: The hardware is the **common** dominator that exposes its execution details as a set of simple instructions to compilers, which are supposed to know how to better optimize the execution code that gets fed into its processing elements (e.g multiple loads of the same data will be reduced to single pre-load into the register and subsequent loads will be eliminated).
 
   Both approaches have interesting takes, but the VM approach was **never** about implementing interpreters in software, the interpreter is supposed to be the hardware itself and the **virtual** machine is supposed to be **materialized** as an actual machine!
 

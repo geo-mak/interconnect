@@ -249,11 +249,11 @@ Without going into the details of specific languages, most common languages with
     
     - RISC: The hardware is the **common** dominator that exposes its execution details as a set of simple instructions to compilers, which are supposed to know how to better optimize the execution code that gets fed into its processing elements (e.g multiple loads of the same data will be reduced to single pre-load into the register and subsequent loads will be eliminated).
 
-  Both approaches have interesting takes, but the VM approach was **never** about implementing interpreters in software, the interpreter is supposed to be the hardware itself and the **virtual** machine is supposed to be **materialized** as an actual machine!
-
+  Both approaches have interesting takes, but the **virtual** machine of the VM approach is supposed to be **materialized** as an actual machine. Running applications and systems on top of such "VM" means adding an **emulation layer** to each instance without reasonable objective justification, at least to me, I don't see the point.
+  
 - Garbage collector: Both Lisp and Smalltalk employed GC, but again, both languages were "lab" languages. Lisp was born at an AI-lab and Smalltalk was born at PARC for experimenting with UI and dynamic environments (Smalltalk is a language-environment combination actually without OS and it is the origin of the concept of **IDE**, because the **execution** environment **is** itself a **development** environment with integrated versioning system, that is to say that changes are reflected in the running system, live. [More details from the creators](https://www.youtube.com/watch?v=PaOMiNku1_M)). Even in that context, the attitude was similar to VM in sense that, if GC is needed, it shall be a implemented in hardware.
 
-- Object-Oriented Programming: Writing all of this, I presume I am already in middle of the hornets' nest, so some elaboration here would not make it worse. This topic is a little bit complicated from historical perspective, but the term has been coined by **Dr. Alan Kay** inspired by Sketchpad, Simula and the biological cells on our bodies in the late 1960s to describe a new programming model based on "objects" as units of composition.
+- Object-Oriented Programming: Writing all of this, I presume I am already in middle of the hornets' nest, so some elaboration here would not make it worse! This topic is a little bit complicated from historical perspective, but the term has been coined by **Dr. Alan Kay** inspired by Sketchpad, Simula and the biological cells on our bodies in the late 1960s to describe a new programming model based on "objects" as units of composition.
 
   These entities that are referred to as "objects" are supposed to:
     - hide their states (Encapsulation).

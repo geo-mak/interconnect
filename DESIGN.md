@@ -293,4 +293,4 @@ Bringing languages of this category to the engineering space means scalability-l
 
 Choosing a programming language is a **strategic** decision, because it will set the limits on what can be done next and what costs are ahead when the project evolves. I hope the industry could learn the lessons of the last decades and choose an **engineering** language for its **engineering** project **always**, not as a last resort because nothing else works.
 
-Rust without doubts is an **engineering** language and more, because it has got a gentle "safe" surface that helps with getting things done rapidly with little cost and overhead and with very high productivity, but more importantly, the fine-grained control remains an option at any point of the project, and that is why rust has been chosen.
+Rust without doubts is an **engineering** language and more, because it has got a gentle "safe" surface with automatic memory management that helps with getting things done rapidly, but more importantly, the fine-grained control remains an option at any point of the project, and that is why rust has been chosen.

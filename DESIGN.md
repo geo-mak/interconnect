@@ -1,4 +1,4 @@
-Interconnect's design aims at providing a framework for bridging the interaction between applications, systems and devices, local and remote alike, by constructing services that act as protocols in their own right, without relying on other protocols as underlying carriers. Interconnect is some sense is a **meta-protocol**, a protocol that defines protocols.
+Interconnect's design aims at providing a framework for bridging the interaction between applications, systems and devices, local and remote alike, by constructing services that act as protocols in their own right, without relying on other protocols as underlying carriers. Interconnect is in some sense a **meta-protocol**, a protocol that defines protocols.
 
 > **Note**: The design details apply to the reference implementation in **Rust**. Implementations in other languages may diverge according to the capabilities and limitations of the implementation language.
 

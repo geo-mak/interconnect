@@ -45,19 +45,17 @@ pub trait Session<'a> {
         C: CallContext<E> + Send;
 }
 
-// TODO: Session's ID and the identity-component.
 // TODO: Solving the identity-problem will solve the last puzzle in the chain.
 /// A type that stores the components of the service implementation and creates service's sessions.
-pub trait SessionServer<I> {
+pub trait SessionServer {
+    type Parameters;
+
     type Session<'a>: Session<'a>
     where
         Self: 'a;
 
-    // Creates new session.
-    //
-    // The returned session will be associated with the provided ID,
-    // if the implementation support resumption.
-    fn create<'a>(&'a self, id: I) -> Self::Session<'a>;
+    // Creates new session with the provided parameters.
+    fn create<'a>(&'a self, parameters: Self::Parameters) -> Self::Session<'a>;
 
     /// Informs the service to terminate its state machines and waits for completion.
     fn terminate(&self) -> impl Future<Output = ICResult<()>> + Send;

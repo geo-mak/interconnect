@@ -331,8 +331,8 @@ where
     T::Initiator: Send,
     T::Transport: Send,
     T::Info: Debug + Send + Sync,
-    // Note: ID = () because identification is unsupported currently.
-    S: SessionServer<()> + Send + Sync + 'static,
+    // Note: Parameters = () because parameters are unsupported at the transport-level currently.
+    S: SessionServer<Parameters = ()> + Send + Sync + 'static,
     for<'a> S::Session<'a>: Send,
     M: MemoryProvider<SendSegment = <T::Transport as Transport>::SendSegment>
         + Send
@@ -596,10 +596,12 @@ mod tests {
 
     struct TestSessionServer;
 
-    impl<T> SessionServer<T> for TestSessionServer {
+    impl SessionServer for TestSessionServer {
         type Session<'a> = TestSession<'a, ()>;
 
-        fn create<'a>(&'a self, _id: T) -> Self::Session<'a> {
+        type Parameters = ();
+
+        fn create<'a>(&'a self, _params: Self::Parameters) -> Self::Session<'a> {
             TestSession::new(())
         }
 

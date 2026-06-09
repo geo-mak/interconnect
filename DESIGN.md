@@ -269,8 +269,8 @@ Without going into the details of specific languages, most common languages with
   
   More details about the original concept [here](https://www.youtube.com/watch?v=QjJaFG63Hlo&t=464s).
 
-  Now, common languages known as object-oriented (e.g C++, Java, C#) have diverged from this definition and presented a static model that did not take the "messaging" part into account.
-  
+  Now, common languages known as object-oriented (e.g C++, Java, C#) have diverged from this definition and presented a static model that did not take the "messaging" part into account. This "messaging" part remains an opaque description though, because in all implementations it is a **plain procedure call**, regardless of how the right procedure to invoke is determined. Moreover, this "messaging" part is required to be **non-commanding** in some sense, which is also an opaque requirement without specific meaning. So I am not sure how the "messaging" part has been ignored, and in what sense.
+
   For the sake of making this short, one of the most common feature of the OOP model is **inheritance**, which establishes a hierarchy of "objects" that share data (state) and behavior (methods). 
   
   **Inheritance** as a **prominent** feature of the OOP as known in the wild is poisonous to me, it is a single worst idea ever introduced to the programming world, it complicates the implementation, adds ambiguity, shares states with a possibly very large chain with very strict regime of "initialization".

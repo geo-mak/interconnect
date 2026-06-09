@@ -297,6 +297,8 @@ Now, making software-systems (an App is a system also!) is not about modeling "d
 
 In short, the "mess" we are in is by and large because we have't figured out a proper organization for making use of computing and constructing computing systems which **require** the involvement and the collaboration of different expertise with different perspectives. Computing is still an ad-hoc, afterthought, patchwork-driven part of modern organizations who are very fragile and vulnerable to "rosy" claims.
 
+Computers are everywhere, but not computing! Organizations have not yet organized themselves properly around "computing". Computers are still being wired as add-hoc convenient "paper-simulators" instead of being an agent with proper modeling of processes as computational processes, with established healthy culture of collaboration and integrating expertise, instead of the wild-west of ad-hoc tools and standards where everybody does his own thing alienated and alienating others.
+
 Choosing a programming language is a **strategic** decision, because it will set the limits on what can be done next and what costs are ahead when the project evolves. I hope the industry could learn the lessons of the last decades and choose an **engineering** language for its **engineering** project **always**, not as a last resort because nothing else works.
 
 Rust without doubts is an **engineering** language and more, because it has got a gentle "safe" surface with automatic memory management that helps with getting things done rapidly, but more importantly, the fine-grained control remains an option at any point of the project, and that is why rust has been chosen.

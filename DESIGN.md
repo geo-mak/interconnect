@@ -249,6 +249,8 @@ Without going into the details of specific languages, most common languages with
 
   Another flawed narrative is machine-dependent optimization, which is to say that the "VM" is capable or doing optimizations specific to the machine it runs on. The first problem is that the "VM" does this at the **wrong time**, when the code is being executed. The second problem is that it can't do much because it can't afford complex analysis of the entire codebase (naïve cute patchy optimizations of hot paths ..etc). The third problem is that this mechanism is profile-guided not a special advantage, pretty much the same what ahead-of-time compilers do, but compilers have **major** advantages like operating at the **right time**, the **compile-time**, and doing sophisticated analysis and **verification** before the deployment package ever reaches the user. 
   
+  There is an interesting view on the topic from Simon Jones [here](https://youtu.be/xcB_LF3cdqw?t=1003).
+
 - Garbage collector: Both Lisp and Smalltalk employed GC, but again, both languages were "lab" languages. Lisp was born at an AI-lab and Smalltalk was born at PARC for experimenting with UI and dynamic environments (Smalltalk is a language-environment combination actually without OS and it is the origin of the concept of **IDE**, because the **execution** environment **is** itself a **development** environment with integrated versioning system, that is to say that changes are reflected in the running system, live. [More details from the creators](https://www.youtube.com/watch?v=PaOMiNku1_M)). 
 
   Even in that context, the attitude was similar to VM in sense that, if GC is needed, it shall be a implemented in hardware.

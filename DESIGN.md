@@ -55,7 +55,7 @@ added.
 
 ## Composition
 
-Interconnect defines the concept of "component" as the basic unit of composition.
+Interconnect defines the concept of "component" as the basic unit of composition at the implementation level.
 
 Interconnect doesn't recognize the concept of "data structures" as independent entities in programming, and declares the definition of programs as "algorithms + data structures" as **false**.
 
@@ -64,6 +64,8 @@ Data structures are **algorithmic** entities **by necessity**. Understanding dat
 Data structures are viewed as **storage schemes** related to particular algorithms, and those algorithms could be a set of other smaller algorithms.
 
 We usually refer to common schemes like hashmaps or linked lists as "data structures", but they are **algorithms** which require a **storage scheme**, and **can** be used in "larger" algorithms for the sake of reuse, with whatever **tradeoffs** might be behind that.
+
+Components are encapsulation of algorithms at the implementation level.
 
 ## Data exchange
 Interconnect's unit of exchange is "message".

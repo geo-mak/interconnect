@@ -53,6 +53,18 @@ Each transport model offers optimizations and tradeoffs for particular use-case.
 Designing and implementing transport models is an **essential** part of the project, where new transport components may get
 added.
 
+## Composition
+
+Interconnect defines the concept of "component" as the basic unit of composition.
+
+Interconnect doesn't recognize the concept of "data structures" as independent entities in programming, and declares the definition of programs as "algorithms + data structures" as **false**.
+
+Data structures are **algorithmic** entities **by necessity**. Understanding data structures as algorithm-agnostic is **major fallacy**, and implies misunderstanding of the concept of algorithm itself, because organizing storage is **part** of implementing a solution (algorithm) to a problem.
+
+Data structures are viewed as **storage schemes** related to particular algorithms, and those algorithms could be a set of other smaller algorithms.
+
+We usually refer to common schemes like hashmaps or linked lists as "data structures", but they are **algorithms** which require a **storage scheme**, and **can** be used in "larger" algorithms for the sake of reuse, with whatever **tradeoffs** might be behind that.
+
 ## Data exchange
 Interconnect's unit of exchange is "message".
 

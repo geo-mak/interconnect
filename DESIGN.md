@@ -6,9 +6,22 @@ Interconnect's design aims at providing a framework for bridging the interaction
 
 Interconnect has a dataflow-oriented architecture where data availability drives computation.
 
+Interconnect defines the concept of "component" as the basic unit of composition at the implementation level.
+
 Interconnect's design utilizes a **meta-system** that uses `server` as a universal abstraction to describe its model of composition. According to this **meta-system**, the software is a network and the hardware is a network, and all components on all levels are `servers`.
 
 From design perspective, components are **viewed** as **micro-servers** offering **services** that can be static, dynamic, local and remote.
+
+Interconnect doesn't recognize the concept of "data structures" as independent entities in programming, and rejects the definition of programs as "algorithms + data structures".
+
+Data structures are **algorithmic** entities **by necessity**. Understanding data structures as algorithm-agnostic is **major fallacy**, and implies misunderstanding of the concept of algorithm itself, because organizing storage is **part** of implementing a solution (algorithm) to a problem.
+
+Data structures are viewed as **storage schemes** related to particular algorithms, and those algorithms could be a set of other smaller algorithms.
+Within the context of this project, the concept of "data structure" – if used – refers strictly to the **representation of data** in memory, or in other words, how the **data is structured** in memory.
+
+We usually refer to common schemes like hashmaps or linked lists as "data structures", but they are **algorithms** that require a **storage scheme**, and **can** be used in "larger" algorithms for the sake of the **reuse**, with whatever accompanied **tradeoffs** regarding strict fitness and efficient integration.
+ 
+Components are encapsulation of algorithms at the implementation level.
 
 Interconnect's design favours variety of optimized components over common ones with complex configurations in general.
 Diversity with optimized internals and simple setup is considered a better strategy than uniformity with wide set of configuration options.
@@ -52,20 +65,6 @@ Each transport model offers optimizations and tradeoffs for particular use-case.
 
 Designing and implementing transport models is an **essential** part of the project, where new transport components may get
 added.
-
-## Composition
-
-Interconnect defines the concept of "component" as the basic unit of composition at the implementation level.
-
-Interconnect doesn't recognize the concept of "data structures" as independent entities in programming, and declares the definition of programs as "algorithms + data structures" as **false**.
-
-Data structures are **algorithmic** entities **by necessity**. Understanding data structures as algorithm-agnostic is **major fallacy**, and implies misunderstanding of the concept of algorithm itself, because organizing storage is **part** of implementing a solution (algorithm) to a problem.
-
-Data structures are viewed as **storage schemes** related to particular algorithms, and those algorithms could be a set of other smaller algorithms.
-
-We usually refer to common schemes like hashmaps or linked lists as "data structures", but they are **algorithms** which require a **storage scheme**, and **can** be used in "larger" algorithms for the sake of reuse, with whatever **tradeoffs** might be behind that.
-
-Components are encapsulation of algorithms at the implementation level.
 
 ## Data exchange
 Interconnect's unit of exchange is "message".
@@ -305,7 +304,7 @@ Bringing languages of this category to the engineering space means scalability-l
 
 Maybe a better way to look at this with probably the right perspective is that a lot of this language - and tools business has to do with an emerged conflict between two groups, the domain experts and the "computer" people.
 
-IT and "computer" people are viewed usually by many traditional organizations (almost the majority) as "necessary evil", with "computer" people being viewed as operating in their own world, on the other hand computer people usually view domain experts as complicated archaic bureaucrats with weird rules. Depending on the organization, these views could be milder or even more extreme.
+IT and "computer people" are viewed usually by many traditional organizations (almost the majority) as "necessary evil", with "computer people" being viewed as operating in their own world, on the other hand computer people usually view domain experts as complicated archaic bureaucrats with weird rules. Depending on the organization, these views could be milder or even more extreme.
 
 Over the years, this gave birth to three main patterns that **repeat** in waves every once in a while. The first pattern is to dump down programming by providing very "high level" languages as an attempt to make the "end-user" developer (e.g. OOP, "Low-Code", visual programming with blocks, scripting DSLs, the current lousy attempt with "programming in plain english" fad), then marketing people jump in to preach the new "era" of making software. The other pattern is to expect developers to have deep domain expertise. The third pattern is to have intermediaries like having people translating between both groups in some way (UML, BPMN, ..etc).
 
@@ -315,7 +314,7 @@ There are arguments floating around for a while for very "high-level" programmin
 
 **Theoretically** a general purpose declarative programming model based on semantic "schemas" of **requirements** and **constraints** is possible, but I am not aware of any practical example, neither as research nor as industrial application (e.g. "intentional programming" never went public), so such thing doesn't exist, and it **could** easily fail the way I see it, because regardless how expressive and extensible it could be, it will struggle to adapt to all systems and application, besides struggling to adopt different control (machine imperatives) strategies, as it would be limited and very complex at the same time.
 
-The beauty of the "imperative" code as we know it is that it is a sort of the "middle ground" between declarative semantic schemas and the actual machine code, and this gives it an immense power in expressing higher level logic of different domains with very high level of flexibility regarding the control aspect (we let compilers generate the machine code after all). I don't mind the logic and the **constraints** business, on the contrary, I like it a lot, but the way I see is mixing logic and control, semantics and pragmatics in a single scheme with a sort of "micro-modeling" scheme regarding constraints. So in practical terms, higher "levelness" is better served with components provided by libraries for encapsulating the "control" details in a unified "hierarchal" programming model based on fine-grained control as its core **accessible** model, which can be encapsulated in "higher" level components that represent the higher level semantics (macros can be helpful..sometimes!).
+The beauty of the "imperative" code as we know it is that it is a sort of the "middle ground" between declarative semantic schemas and the actual machine code, and this gives it an immense power in expressing higher level logic of different domains with very high level of flexibility regarding the control aspect (we let compilers generate the machine code after all). I don't mind the logic and the **constraints** business, actually, I like it a lot, but the way I see is it is by mixing logic and control, semantics and pragmatics in a single scheme, with a sort of "micro-modeling" scheme regarding constraints. So in practical terms, higher "levelness" is better served with components provided by libraries for encapsulating the "control" details in a unified "hierarchal" programming model based on fine-grained control as its core **accessible** model, which can be encapsulated in "higher" level components that represent the higher level semantics (macros can be helpful..sometimes!).
 
 CAD-Sim-Fab workflow works in other domains of engineering because it is **application-specific** with very **limited** set of options. Software systems **don't** have constraints, not in that sense at all, on the contrary, they **define** constraints as an **implementation** of the modeled process. Making/having set of tools for aiding the design and testing/verifying of a particular application could be very helpful, but this is again **application-specific** and **can't** be at the language's level, not without ending up with DSL. Such tools already in use for compiling the software of "control" systems, and with full HIL (hardware-in-the-loop) simulation. In any case, if the modeling is wrong, the final software would be perfectly **correct** doing the **wrong** things!
 

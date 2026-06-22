@@ -195,6 +195,17 @@ struct StructB {
 }
 ```
 
+### Channel
+
+**Description**: Typed communication primitive that enables transferring data of type T, where T is an Interconnect type, **except** messages.
+The **directionality** and **lifetime** rules are still in the design phase.
+
+**Representation**: N/A.
+
+**Storage**: Inlined.
+
+**Syntax**: N/A.
+
 ### Message
 
 **Description**: User-defined transactional unit of data exchanged between the two sides of the interface-boundary.

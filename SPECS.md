@@ -198,7 +198,7 @@ struct StructB {
 ### Channel
 
 **Description**: Typed communication primitive that enables transferring data of type T, where T is an Interconnect type, **except** messages.
-The **directionality** and **lifetime** rules are still in the design phase.
+Channels have **identity** that acts as a connection's identifier. The **directionality** and **lifetime** rules are still in the design phase.
 
 **Representation**: N/A.
 
@@ -226,6 +226,7 @@ message MessageIdent {
 **Constraints**:
   - Messages can't be empty.
   - Messages can't be fields of anything, including other messages.
+  - Messages can't be set as type of channels.
   - Messages are the only types that can cross the API-boundary, all other types are fragments of their data.
 
 **Modification**: Modifying fields is a breaking change.

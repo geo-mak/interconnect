@@ -185,7 +185,7 @@ struct StructA {
 }
 ```
 
-Struct's fields allow assignment of default values, but like optionality-rules their rules are still not well-defined.
+Struct's fields allow assignment of default values like:
 
 ```rust
 struct StructB {
@@ -194,6 +194,8 @@ struct StructB {
   third: string = "hi there",
 }
 ```
+
+Like optionality-rules the rules of default values are still not well-defined.
 
 ### Channel
 
@@ -204,7 +206,15 @@ Channels have **identity** that acts as a connection's identifier. The **directi
 
 **Storage**: Inlined.
 
-**Syntax**: N/A.
+**Syntax**:
+
+```rust
+channel ChannelIdent: type
+```
+
+**Constraints**: N/A.
+
+**Modification**: Changing the type or modifying its data is a breaking change.
 
 ### Message
 

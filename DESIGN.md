@@ -224,7 +224,7 @@ Rust as a choice was not a random choice or out of hype, this decision has been 
 
 - Control over the lifecycle (No GC).
 
-- Uniform typing (no "value" semantics and "reference" semantics weirdos).
+- Control over referencing and moving (No language-dictated value-types and reference-types).
 
 - Statically (AOT) compiled code with static typing and high level of optimization (No VM).
 

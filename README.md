@@ -9,7 +9,7 @@ High performance inter-process communication framework.
 ## Features
 - Compositional design with high efficiency components and clear semantics.
 - Lightweight message format.
-- Out-of-the-box support for IP and Unix domain sockets.
+- Out-of-the-box support for internet protocol and unix domain sockets as transport-layers.
 
 For details about the design's aspects, please refer to [DESIGN](DESIGN.md), where in-depth design's details are documented and updated regularly.
 

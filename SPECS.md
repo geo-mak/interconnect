@@ -236,7 +236,7 @@ Both regions are aligned to **8-bytes**, this implies that the allocated encodin
 
 **Description**: Typed communication primitives that enable transferring data of type T, where T is an Interconnect type, **except** messages.
 
-Channels enable highly optimized pathways for transferring user-defined data types via **semantically** dedicated transport pipelines away from the main service pipelines. This makes defining pathways for e.g. media streaming or publishing events a structured and easy solution.
+Channels enable highly optimized pathways for transferring user-defined data types via **semantically** dedicated transport pipelines away from the main service pipelines. This makes defining pathways for e.g. media streaming or publishing events a structured and an easy solution.
 
 Channels have **identity** that acts as a connection's identifier.
 

@@ -71,7 +71,13 @@ Interconnect's unit of exchange is "message".
 
 Messages are exchanged in binary format with **untagged** data representation.
 
-Interconnect defines its own data model that describes the byte-patterns of exchange-types and the layout of messages.
+The reason for not using tags is that these add unnecessary overhead to storage and transmission, and they complicate the layout of the message, which is designed for zero-copy direct access.
+
+Many people usually refer to **tagged representations** as **"self-describing"**, but there is no such thing as "self-describing" in computing. Nothing is **describable** or **meaningful** in itself without using a proper decoder.
+
+So instead of wasting processing power on decoding tags and constructing intermediate types which **hopefully** can be converted successfully to native types, Interconnect decodes and validates the content of the message, and makes the content usable directly without conversion.
+
+Interconnect defines its own data model that describes the Interconnect's core types and their representation and the layout of messages.
 
 Interoperability is achieved by adhering to the ABI (Application Binary Interface).
 
@@ -85,7 +91,7 @@ The runtime-library provides components to construct a compliant implementation 
 
 The specifications and the details of the data model are described in-depth in [SPECS](SPECS.md) file and updated regularly.
 
-Moreover, Interconnect defines a declarative language referred to as "Service Definition Language (SDL)", and provides toolchain like compiler and code-generation backends for generating integrated endpoints that conform to the user-defined interface.
+Moreover, Interconnect defines a declarative language which is referred to as "Service Definition Language (SDL)", and provides toolchain like compiler and code-generation backends for generating integrated endpoints that conform to the user-defined interface.
 
 The SDL and its toolchain are an **usability and safety** option for making use of Interconnect in a highly automated manner.
 

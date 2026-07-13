@@ -270,11 +270,14 @@ Without going into the details of specific languages, most common languages with
   
   There is an interesting view on the topic from Simon Jones [here](https://youtu.be/xcB_LF3cdqw?t=1003).
 
+  The last point worth mentioning here is that hardware is not **free** or **cheap**, it still cost **time**, **space** and **energy**.
+  Bloating the hardware with features that the compilers should take care of in the first place is a waste of space, energy and **precious time**, **run time**. What can be done at compile time **MUST** be done at compile time, leaving the physics for better things to accommodate and handle.
+
 - Garbage collector: Both Lisp and Smalltalk employed GC, but again, both languages were "lab" languages. Lisp was born at an AI-lab and Smalltalk was born at PARC for experimenting with UI and dynamic environments (Smalltalk is a language-environment combination actually without OS and it is the origin of the concept of **IDE**, because the **execution** environment **is** itself a **development** environment with integrated versioning system, that is to say that changes are reflected in the running system, live. [More details from the creators](https://www.youtube.com/watch?v=PaOMiNku1_M)). 
 
   Even in that context, the attitude was similar to VM in sense that, if GC is needed, it shall be a implemented in hardware.
 
-  Objectively speaking, GC is **bug** not a feature, it is a crude and primitive approach to automatic cleanup, and I don't know why it has been **romanticized** instead of being **criticized** all these years in the industrial and academic circles and without active effort to make better mechanisms given that, even before Rust, Ada had automatic cleanup without GC **decades** ago.
+  Objectively speaking, GC is **bug** not a feature, it is a crude and primitive approach to automatic cleanup, and I don't know why it has been **romanticized** instead of being **criticized** all these years in the industrial and academic circles and without active effort to make better mechanisms given that, even before Rust, **Ada** (A serious **engineering language**, from serious designers!) had automatic cleanup **without** GC **decades** ago.
 
 - Object-Oriented Programming: Writing all of this, I presume I am already in middle of the hornets' nest, so some elaboration here would not make it worse! This topic is a little bit complicated from historical perspective, but the term has been coined by **Dr. Alan Kay** inspired by Sketchpad, Simula and the biological cells on our bodies in the late 1960s to describe a new programming model based on "objects" as units of composition.
 

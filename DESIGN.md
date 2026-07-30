@@ -145,7 +145,7 @@ with enough information to serve as **branching flags**.
 
 Error-reporting is performed via a reporting subsystem exposed via a reporting-component, that produces reports with certain structure and format. Depending on the reporting-component used, reporting can add a non-trivial overhead to the system if utilized without careful consideration, therefore reporting is considered a privileged capability that shall be given transparently.
 
-## Memory allocation
+## Memory management
 
 Memory management is a **major** performance and stability factor.
 
@@ -158,6 +158,16 @@ Components ask for memory from an explicitly passed memory server that may provi
 The core idea is to enable sharing and reusability of the same acquired memory across components and layers as much as possible.
 
 Interconnect's design is **centered** around memory subsystems and their implementation for various cases is an **essential** part of the project.
+
+## Resource management
+
+Interconnect treats resource-management as separated concept from memory-management. Memory management is usually concerned with the dynamics of acquiring and releasing storage-blocks, and the related safety concepts like the **temporal, spatial, type/representation safety**.
+
+Resource management is concerned with the creation, destruction and **lifetime's association** between components.
+
+While usually mentioned in the context of **temporal memory-safety**, Interconnect extends the concept of **lifetime** beyond this context, which means that certain components can't be created before a full destruction of some other components, and certain components can be used only as associated components during the lifetime of other components. 
+
+This might sound like a bias, but nothing could be more **silly** than defining safety in terms of **temporal and spatial memory-safety**, without taking into account the **lifetime association** among other things like **effects** and their **annotations** and **tracking** via proper **effect-systems**, just to name some **basic properties** of **safety**.
 
 ## Security
 

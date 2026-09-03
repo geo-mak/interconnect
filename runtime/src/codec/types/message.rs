@@ -4,9 +4,9 @@ use zerocopy::IntoBytes;
 
 use crate::codec::decoder::Decoder;
 use crate::codec::encoder::Encoder;
-use crate::codec::reference::TypeRef;
 use crate::codec::types::core::{ProtocolType, TypeU64};
 use crate::codec::types::limits::TypeLimits;
+use crate::codec::types::reference::TypeRef;
 use crate::codec::{decode::Decode, encode::Encode};
 use crate::error::ICResult;
 

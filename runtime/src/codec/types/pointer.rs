@@ -3,8 +3,8 @@ use core::mem::MaybeUninit;
 
 use munge::munge;
 
-use crate::codec::reference::TypeRef;
 use crate::codec::types::core::TypeU64;
+use crate::codec::types::reference::TypeRef;
 use crate::error::{ErrKind, ICError};
 use crate::mem::BasicBlock;
 

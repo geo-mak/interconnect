@@ -3,8 +3,8 @@ use core::mem::MaybeUninit;
 use core::slice::from_raw_parts;
 
 use crate::codec::encode::Encode;
-use crate::codec::reference::TypeRef;
 use crate::codec::types::core::ProtocolType;
+use crate::codec::types::reference::TypeRef;
 use crate::error::{ErrKind, ICError, ICResult};
 
 pub struct Skip<'a, E: ?Sized, T> {

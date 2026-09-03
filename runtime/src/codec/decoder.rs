@@ -8,8 +8,8 @@ use core::slice::{from_raw_parts, from_raw_parts_mut};
 use crate::codec::convert::from::FromProtocolType;
 use crate::codec::convert::into::IntoNative;
 use crate::codec::decode::Decode;
-use crate::codec::reference::TypeRef;
 use crate::codec::types::core::ProtocolType;
+use crate::codec::types::reference::TypeRef;
 use crate::error::{ErrKind, ICError, ICResult};
 use crate::mem::{BASIC_BLOCK_SIZE, BasicBlock};
 

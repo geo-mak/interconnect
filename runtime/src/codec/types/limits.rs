@@ -1,7 +1,7 @@
-use crate::codec::reference::TypeRef;
 use crate::codec::types::core::{
     TypeF32, TypeF64, TypeI16, TypeI32, TypeI64, TypeU16, TypeU32, TypeU64,
 };
+use crate::codec::types::reference::TypeRef;
 use crate::error::ICResult;
 
 /// Types implementing this trait can be checked against satisfying their limits.

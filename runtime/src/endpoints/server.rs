@@ -504,7 +504,7 @@ where
 
         self.state.tasks.observer.wait().await;
 
-        self.state.session_server.terminate().await
+        self.state.session_server.stop().await
     }
 }
 
@@ -605,7 +605,7 @@ mod tests {
             TestSession::new(())
         }
 
-        async fn terminate(&self) -> ICResult<()> {
+        async fn stop(&self) -> ICResult<()> {
             Ok(())
         }
     }

@@ -58,5 +58,5 @@ pub trait SessionServer {
     fn create<'a>(&'a self, parameters: Self::Parameters) -> Self::Session<'a>;
 
     /// Informs the service to terminate its state machines and waits for completion.
-    fn terminate(&self) -> impl Future<Output = ICResult<()>> + Send;
+    fn stop(&self) -> impl Future<Output = ICResult<()>> + Send;
 }

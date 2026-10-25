@@ -494,7 +494,7 @@ where
     ///
     /// This call doesn't have immediate effect and may take longer time,
     /// because it allows active sessions to complete processing the current received message.
-    pub async fn terminate(&mut self) -> ICResult<()> {
+    pub async fn stop(&mut self) -> ICResult<()> {
         self.state.tasks.observer.open();
         self.server_task.cancel();
 
@@ -653,7 +653,7 @@ mod tests {
         let response = segment.decode::<TypeU64>(()).unwrap();
         assert_eq!(response.0, 101);
 
-        server.terminate().await.unwrap();
+        server.stop().await.unwrap();
         let _ = std::fs::remove_file(path);
     }
 }

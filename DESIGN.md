@@ -4,13 +4,15 @@ Interconnect's design aims at providing a framework for bridging the interaction
 
 ## Architecture and general design approach
 
-Interconnect has a dataflow-oriented architecture where data availability drives computation.
-
 Interconnect defines the concept of "component" as the basic unit of composition at the implementation level.
 
 Interconnect's design utilizes a **meta-system** that uses `server` as a universal abstraction to describe its model of composition. According to this **meta-system**, the software is a network and the hardware is a network, and all components on all levels are `servers`.
 
 From design perspective, components are **viewed** as **micro-servers** offering **services** that can be static, dynamic, local and remote.
+
+Interconnect's defines its own conceptual **computing architecture** with a **control and coordination** core component that routes instructions to **specialized** processing elements and coordinates the interaction between them.
+
+Interconnect doesn't view programming as direct interaction with processing elements like the current **CPU-centric** architectures. Interconnect views programming as passing instructions and data to a **control and coordination** component to send instructions and data to **specialized** processing elements a with **unified memory-pool** scheme that enables data-sharing by sharing the memory that holds that data directly without copying.
 
 Interconnect doesn't recognize the concept of "data structures" as independent entities in programming, and rejects the definition of programs as "algorithms + data structures".
 
